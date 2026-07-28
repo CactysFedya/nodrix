@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.0 — Compact configuration and resource telemetry
+
+- Added compact manifests with `use`, direct node parameters, `flow`, and `publish`.
+- Added `realtime-low-latency`, `realtime-balanced`, `lossless-recording`, `maximum-throughput`, and `debug` profiles.
+- Added `--profile`, repeatable `--set`, `inspect --resolved`, and `config show/explain/profiles`.
+- Added `encoder: auto`, runtime FFmpeg encoder probes, and `media select-encoder`.
+- Added per-node CPU/RSS/shared-buffer/queue telemetry and the live `nodrix top` command.
+- Added publisher bitrate, drops, subscriber count, node CPU and temperature to the Viewer overlay.
+- Preserved Plugin ABI 1.0, wire protocol, `.ndrx`, `.ndpkg`, lock-file and public Node API compatibility.
+
 ## 1.0.1 — Packaging and installation stabilization
 
 - Fixed the PyPI release matrix by publishing supported Linux x86-64, Linux ARM64 and macOS Apple Silicon wheels without the failing macOS Intel job.

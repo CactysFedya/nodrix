@@ -1,25 +1,29 @@
-# Nodrix 1.0.1: полный путь от проекта до production-запуска
+# Nodrix 1.1.0: полный путь от проекта до запуска
 
 ## 1. Установка
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install nodrix-1.0.1.tar.gz
+pip install "nodrix[media,viewer]==1.1.0"
 nodrix --version
 ```
 
-Для Raspberry Pi и Linux ARM64 устанавливайте исходный `tar.gz`, чтобы нативные расширения собрали оптимальный код под текущую архитектуру.
+На Raspberry Pi без интернета исходный пакет устанавливается так, если зависимости уже перенесены:
+
+```bash
+pip install nodrix-1.1.0.tar.gz --no-build-isolation --no-deps
+```
 
 ## 2. Создание проекта
 
-Пустой проект:
+Пустой каркас:
 
 ```bash
 nodrix init my_project
 ```
 
-Он содержит структуру, но не демонстрационную реализацию. Рабочий пример создаётся явно:
+Рабочий пример создаётся только по явному шаблону:
 
 ```bash
 nodrix init vision_app --template vision
@@ -27,125 +31,102 @@ nodrix init media_app --template media
 nodrix init device_app --template device
 ```
 
-## 3. Реализация узла
-
-```python
-from nodrix import Message, Node
-
-class Detector(Node):
-    input_types = {"frame": "vision.frame"}
-    output_types = {"detections": "vision.detections"}
-
-    def configure(self, context):
-        super().configure(context)
-        self.model = load_model()
-
-    def process(self, inputs):
-        frame_message = inputs["frame"]
-        detections = run_model(frame_message.payload)
-        return {
-            "detections": frame_message.with_updates(
-                type="vision.detections",
-                payload=detections,
-            )
-        }
-```
-
-Старые методы `open`, `flush`, `close` также поддерживаются.
-
-## 4. Произвольный pipeline
-
-Трекер не обязателен:
+## 3. Компактный pipeline
 
 ```yaml
+name: raspberry-rtsp-preview
+profile: realtime-low-latency
+
 nodes:
   camera:
-    uses: media.ffmpeg_source
-    parameters:
-      uri: rtsp://192.168.1.20/live
+    use: media.ffmpeg_source
+    uri: ${RTSP_URL}
 
-  detector:
-    uses: ./nodes/detector.py:Detector
+  encoder:
+    use: media.ffmpeg_encoder
+    codec: h264
+    encoder: auto
 
-  preview:
-    uses: media.ffmpeg_encoder
-    parameters:
-      codec: h264
-      encoder: libx264
+flow:
+  - camera.frame -> encoder.frame
 
-edges:
-  - from: camera.frame
-    to: detector.frame
-    queue: {capacity: 1, policy: latest}
-
-  - from: camera.frame
-    to: preview.frame
-    queue: {capacity: 1, policy: latest}
+publish:
+  /camera/front/h264:
+    from: encoder.encoded
+    access: token
 ```
 
-Один output может иметь несколько независимых веток.
+Компактный manifest разворачивается до canonical-конфигурации до построения графа и не добавляет runtime-overhead.
 
-## 5. Защищённый поток на ноутбук
+## 4. Просмотр реально применённых настроек
+
+```bash
+nodrix inspect pipeline.yaml --resolved
+nodrix config show pipeline.yaml
+nodrix config explain nodes.encoder.encoder --pipeline pipeline.yaml
+```
+
+Порядок разрешения:
+
+```text
+schema defaults
+→ runtime profile
+→ pipeline.yaml
+→ --profile / --set
+```
+
+## 5. Разовые переопределения
+
+```bash
+nodrix run pipeline.yaml \
+  --set nodes.encoder.crf=18 \
+  --set nodes.encoder.keyint=30
+```
+
+Переопределения сохраняются в resolved manifest текущего запуска. `--locked` намеренно нельзя совмещать с `--profile` или `--set`: lock должен соответствовать точному запускаемому manifest.
+
+## 6. Профили
+
+```bash
+nodrix config profiles
+```
+
+Доступны:
+
+- `realtime-low-latency` — `latest:1`, минимальная задержка;
+- `realtime-balanced` — небольшой буфер и контролируемый drop;
+- `lossless-recording` — `block`, запись без потерь;
+- `maximum-throughput` — большие очереди для offline;
+- `debug` — строгая типизация и частая телеметрия.
+
+Любой edge может переопределить профиль:
 
 ```yaml
-streams:
-  bind_host: 0.0.0.0
-  exports:
-    - name: /camera/front/h264
-      from: preview.encoded
-      queue: {capacity: 1, policy: latest}
-      access:
-        mode: token
-        token_env: NODRIX_STREAM_TOKEN
-        allow_ips: ["192.168.1.0/24"]
+flow:
+  - from: encoder.encoded
+    to: writer.frame
+    queue:
+      capacity: 16
+      policy: block
 ```
 
-На устройстве:
+## 7. Проверка и запуск
 
 ```bash
-export NODRIX_STREAM_TOKEN='случайный-длинный-токен'
-nodrix run
+nodrix validate pipeline.yaml --strict
+nodrix inspect pipeline.yaml --memory
+nodrix run pipeline.yaml --metrics-listen 0.0.0.0:9464
 ```
 
-На ноутбуке:
-
-```bash
-export NODRIX_STREAM_TOKEN='случайный-длинный-токен'
-nodrix stream list
-nodrix-viewer /camera/front/h264
-```
-
-Viewer хранит только последний кадр и не создаёт очередь старого видео.
-
-## 6. Проверка перед запуском
-
-```bash
-nodrix validate --strict
-nodrix inspect --memory
-```
-
-Исправьте ошибки типов, памяти, циклов, открытых streams и небезопасных watchdog-настроек.
-
-## 7. Фиксация окружения
-
-```bash
-nodrix lock
-nodrix lock --check
-```
-
-После изменения модели, кода, `.so`, конфигурации или типа проверка покажет расхождение.
-
-## 8. Production-запуск
-
-```bash
-nodrix run --locked --metrics-listen 127.0.0.1:9464
-```
-
-Метрики доступны по адресу `/metrics`, JSON — `/metrics.json`.
-
-## 9. Health и диагностика
+## 8. CPU, память и очереди по узлам
 
 В другом терминале:
+
+```bash
+nodrix top --interval 1
+```
+
+Также доступны:
 
 ```bash
 nodrix status
@@ -153,23 +134,34 @@ nodrix health --watch
 nodrix metrics --format prometheus
 ```
 
-Для потенциально нестабильной модели:
+Для `execution.isolation: process` Nodrix показывает собственные PID, CPU и RSS узла. Для in-process узлов показываются CPU time узла, owned/shared/queue buffers и общий RSS executor — без выдуманного разделения общей памяти.
 
-```yaml
-execution:
-  isolation: process
-failure:
-  policy: restart
-  max_restarts: 3
-health:
-  timeout_ms: 2000
-  on_timeout: restart
-resources:
-  memory_limit_mb: 2048
-  max_message_bytes: 67108864
+## 9. Автоматический encoder
+
+```bash
+nodrix media select-encoder h264
 ```
 
-## 10. Артефакты
+`encoder: auto` выполняет реальный FFmpeg probe и выбирает работающий hardware backend, затем программный fallback.
+
+## 10. Viewer со статистикой publisher
+
+```bash
+export NODRIX_STREAM_TOKEN='секрет'
+nodrix-viewer /camera/front/h264 --publisher-stats
+```
+
+Viewer показывает RX/display FPS, latency, bitrate, subscribers, stream drops, CPU узлов и температуру устройства, если publisher запущен с endpoint метрик на порту 9464.
+
+## 11. Воспроизводимый запуск
+
+```bash
+nodrix lock
+nodrix lock --check
+nodrix run --locked
+```
+
+## 12. Артефакты
 
 ```bash
 nodrix runs list
@@ -178,57 +170,4 @@ nodrix runs logs <run-id>
 nodrix runs compare <run-a> <run-b>
 ```
 
-В каталоге запуска сохраняются manifest, lock, окружение, метрики, ошибки, outputs и итоговый summary.
-
-## 11. Создание пакета узлов
-
-```bash
-nodrix init cobra-perception --template package
-cd cobra-perception
-```
-
-Опишите узлы в `nodrix.package.yaml`, затем:
-
-```bash
-nodrix package build .
-nodrix package install dist/cobra-perception-1.0.0.ndpkg
-```
-
-В pipeline:
-
-```yaml
-nodes:
-  detector:
-    uses: cobra-perception/detector
-```
-
-## 12. C++ plugin
-
-```bash
-nodrix node create tracker --language cpp
-cmake -S nodes/tracker -B nodes/tracker/build -DCMAKE_BUILD_TYPE=Release
-cmake --build nodes/tracker/build --parallel
-nodrix native inspect nodes/tracker/build/libtracker.so
-```
-
-Plugin должен показывать ABI 1.0 и совместимость `yes`.
-
-## 13. Запись и воспроизведение
-
-```bash
-nodrix record /camera/front/h264 /detector/detections --output experiment.ndrx --duration 60
-nodrix recording info experiment.ndrx
-nodrix play experiment.ndrx --as-fast-as-possible
-```
-
-## 14. Рекомендуемая архитектура для робота
-
-```text
-Camera/LiDAR source
-├── локальный zero-copy → inference
-├── shared memory → изолированный тяжёлый узел
-├── encoder → защищённый LAN stream → laptop viewer
-└── recorder → .ndrx
-```
-
-Сетевой Viewer, recorder и detector должны иметь независимые очереди. Для realtime-preview используйте `latest`, для критичной записи — `block` с рассчитанной ёмкостью.
+Каждый запуск содержит source manifest, resolved manifest, lock, status, метрики и итоговый отчёт.

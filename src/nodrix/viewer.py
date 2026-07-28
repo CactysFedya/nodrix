@@ -10,6 +10,8 @@ import subprocess
 import threading
 import time
 from typing import Any, Protocol
+from urllib.parse import urlparse
+from urllib.request import urlopen
 
 import typer
 
@@ -55,6 +57,72 @@ class ViewerStats:
             "last_sequence": self.last_sequence,
             "last_latency_ms": self.last_latency_ms,
         }
+
+
+class PublisherMetrics:
+    def __init__(self, url: str, interval: float = 1.0) -> None:
+        self.url = url
+        self.interval = max(0.25, interval)
+        self.snapshot: dict[str, Any] = {}
+        self.error: str | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._last_bytes: tuple[int, float] | None = None
+        self.bitrate_mbps = 0.0
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, name="nodrix-viewer-metrics", daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                with urlopen(self.url, timeout=1.0) as response:
+                    data = json.load(response)
+                total_bytes = sum(int(dict(item).get("sent_bytes", 0)) for item in dict(data.get("streams", {})).values())
+                now = time.monotonic()
+                if self._last_bytes is not None:
+                    previous, previous_time = self._last_bytes
+                    self.bitrate_mbps = max(0.0, (total_bytes - previous) * 8 / max(now - previous_time, 1e-9) / 1_000_000)
+                self._last_bytes = (total_bytes, now)
+                self.snapshot = data
+                self.error = None
+            except Exception as exc:
+                self.error = str(exc)
+            self._stop.wait(self.interval)
+
+    def close(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1.5)
+            self._thread = None
+
+    def summary(self, stream_name: str | None = None) -> dict[str, Any]:
+        streams = dict(self.snapshot.get("streams", {}))
+        stream = dict(streams.get(stream_name, {})) if stream_name else {}
+        if not stream and len(streams) == 1:
+            stream = dict(next(iter(streams.values())))
+        nodes = dict(self.snapshot.get("nodes", {}))
+        node_cpu = {name: float(dict(dict(raw).get("resources", {})).get("cpu_percent", 0.0)) for name, raw in nodes.items()}
+        system = dict(self.snapshot.get("system", {}))
+        return {
+            "bitrate_mbps": self.bitrate_mbps,
+            "subscribers": int(stream.get("subscribers", 0)),
+            "stream_drops": int(dict(stream.get("queue", {})).get("dropped", 0)),
+            "node_cpu": node_cpu,
+            "temperature_c": system.get("temperature_c"),
+            "memory_available_bytes": system.get("memory_available_bytes"),
+            "error": self.error,
+        }
+
+
+def _default_metrics_url(source_label: str) -> str | None:
+    if not source_label.startswith("nodrix://"):
+        return None
+    parsed = urlparse(source_label)
+    if not parsed.hostname:
+        return None
+    return f"http://{parsed.hostname}:9464/metrics.json"
 
 
 class LatestSlot:
@@ -534,6 +602,7 @@ def _draw_overlay(
     display_fps: float,
     latency_ms: float | None,
     overwritten: int,
+    publisher: dict[str, Any] | None = None,
 ) -> None:
     if cv2 is None:
         return
@@ -542,8 +611,21 @@ def _draw_overlay(
         f"RX {receive_fps:5.1f} FPS   VIEW {display_fps:5.1f} FPS",
         f"{width}x{height}   seq {message.sequence}   drop {overwritten}",
         f"latency {latency_ms:.1f} ms" if latency_ms is not None else "latency n/a (clock sync required)",
-        source,
     ]
+    if publisher:
+        lines.append(
+            f"PUB {float(publisher.get('bitrate_mbps', 0.0)):.2f} Mbit/s  "
+            f"subs {int(publisher.get('subscribers', 0))}  drops {int(publisher.get('stream_drops', 0))}"
+        )
+        node_cpu = dict(publisher.get("node_cpu", {}))
+        if node_cpu:
+            busiest = sorted(node_cpu.items(), key=lambda item: item[1], reverse=True)[:2]
+            text = "  ".join(f"{name} {value:.0f}%" for name, value in busiest)
+            temperature = publisher.get("temperature_c")
+            if temperature is not None:
+                text += f"  {float(temperature):.1f}C"
+            lines.append(text)
+    lines.append(source)
     font = cv2.FONT_HERSHEY_SIMPLEX
     scale = 0.55
     thickness = 1
@@ -603,6 +685,8 @@ def run_viewer(
     max_frames: int = 0,
     screenshot_dir: Path = Path("screenshots"),
     json_stats: bool = False,
+    publisher_stats: bool = True,
+    metrics_url: str | None = None,
 ) -> dict[str, Any]:
     if cv2 is None or np is None:
         raise ViewerError('Install viewer dependencies with: pip install "nodrix[viewer]"')
@@ -626,9 +710,14 @@ def run_viewer(
     version = 0
     last_display_at = 0.0
     screenshot_dir = Path(screenshot_dir)
+    remote_metrics: PublisherMetrics | None = None
 
     try:
         reader.start()
+        selected_metrics_url = metrics_url or (_default_metrics_url(reader.source_label) if publisher_stats else None)
+        if selected_metrics_url:
+            remote_metrics = PublisherMetrics(selected_metrics_url)
+            remote_metrics.start()
         stats.started_ns = time.perf_counter_ns()
         if not headless:
             cv2.namedWindow(title, cv2.WINDOW_NORMAL)
@@ -678,6 +767,7 @@ def run_viewer(
                     display_fps=display_fps,
                     latency_ms=latency_ms,
                     overwritten=stats.overwritten,
+                    publisher=(remote_metrics.summary(urlparse(reader.source_label).path) if remote_metrics else None),
                 )
             stats.displayed += 1
 
@@ -693,6 +783,8 @@ def run_viewer(
             if max_frames > 0 and stats.displayed >= max_frames:
                 break
     finally:
+        if remote_metrics is not None:
+            remote_metrics.close()
         reader.close()
         if not headless and cv2 is not None:
             cv2.destroyWindow(title)
@@ -700,6 +792,7 @@ def run_viewer(
     report = {
         "source": reader.source_label,
         **stats.as_dict(),
+        "publisher": remote_metrics.summary(urlparse(reader.source_label).path) if remote_metrics else None,
     }
     if json_stats:
         print(json.dumps(report, ensure_ascii=False))
@@ -723,6 +816,8 @@ def view_command(
     max_frames: int = typer.Option(0, "--max-frames", min=0),
     screenshot_dir: Path = typer.Option(Path("screenshots"), "--screenshot-dir"),
     json_stats: bool = typer.Option(False, "--json-stats"),
+    publisher_stats: bool = typer.Option(True, "--publisher-stats/--no-publisher-stats", help="Read Nodrix publisher metrics from port 9464"),
+    metrics_url: str | None = typer.Option(None, "--metrics-url", help="Explicit Nodrix /metrics.json endpoint"),
 ) -> None:
     """View a frame stream with a latest-frame low-latency policy."""
     try:
@@ -743,6 +838,8 @@ def view_command(
             max_frames=max_frames,
             screenshot_dir=screenshot_dir,
             json_stats=json_stats,
+            publisher_stats=publisher_stats,
+            metrics_url=metrics_url,
         )
     except (ViewerError, OSError, LookupError, ValueError) as exc:
         typer.echo(f"Viewer failed: {exc}", err=True)

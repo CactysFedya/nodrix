@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
 import re
 from typing import Any, Literal
@@ -9,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 import yaml
 
 from .errors import ManifestError
+from .profiles import get_profile, profile_names
 
 
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
@@ -66,6 +69,7 @@ class MetricsConfig(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
+    profile: str | None = None
     mode: Literal["offline", "realtime"] = "offline"
     engine: Literal["auto", "unified", "native"] = "auto"
     type_validation: Literal["off", "first", "always"] = "first"
@@ -212,17 +216,236 @@ class PipelineManifest(BaseModel):
         return self
 
 
-def load_manifest(path: str | Path) -> PipelineManifest:
+_NODE_RESERVED = {
+    "use", "uses", "parameters", "inputs", "outputs", "synchronization",
+    "execution", "failure", "health", "resources", "memory",
+}
+
+
+def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
+    result = deepcopy(base)
+    for key, value in overlay.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = deepcopy(value)
+    return result
+
+
+def canonical_config_path(dotted: str) -> str:
+    parts = [part for part in dotted.split(".") if part]
+    if len(parts) >= 3 and parts[0] == "nodes" and parts[2] not in {
+        "uses", "parameters", "inputs", "outputs", "synchronization", "execution",
+        "failure", "health", "resources", "memory",
+    }:
+        parts.insert(2, "parameters")
+    return ".".join(parts)
+
+
+def _set_path(target: dict[str, Any], dotted: str, value: Any) -> None:
+    dotted = canonical_config_path(dotted)
+    parts = [part for part in dotted.split(".") if part]
+    if not parts:
+        raise ManifestError("Override path cannot be empty")
+    cursor = target
+    for part in parts[:-1]:
+        next_value = cursor.get(part)
+        if not isinstance(next_value, dict):
+            next_value = {}
+            cursor[part] = next_value
+        cursor = next_value
+    cursor[parts[-1]] = value
+
+
+def _flatten_paths(value: Any, prefix: str = "") -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            result.update(_flatten_paths(item, path))
+    elif isinstance(value, list):
+        result[prefix] = value
+    else:
+        result[prefix] = value
+    return result
+
+
+def _parse_flow_item(item: Any) -> dict[str, Any]:
+    if isinstance(item, str):
+        if "->" not in item:
+            raise ManifestError(f"Compact flow item must contain '->': {item!r}")
+        source, target = (part.strip() for part in item.split("->", 1))
+        return {"from": source, "to": target}
+    if isinstance(item, dict):
+        return deepcopy(item)
+    raise ManifestError(f"Unsupported compact flow item: {item!r}")
+
+
+def _normalize_compact(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+    compact = "name" in raw or "flow" in raw or "publish" in raw or any(
+        isinstance(item, dict) and "use" in item for item in dict(raw.get("nodes") or {}).values()
+    )
+    sources: dict[str, str] = {}
+    if not compact:
+        canonical = deepcopy(raw)
+        for path in _flatten_paths(canonical):
+            sources[path] = "pipeline.yaml"
+        return canonical, sources
+
+    name = raw.get("name") or dict(raw.get("metadata") or {}).get("name")
+    if not name:
+        raise ManifestError("Compact manifest requires 'name'")
+    canonical: dict[str, Any] = {
+        "apiVersion": raw.get("apiVersion", "nodrix.dev/v1"),
+        "kind": raw.get("kind", "Pipeline"),
+        "metadata": {"name": name},
+        "runtime": deepcopy(raw.get("runtime") or {}),
+        "nodes": {},
+        "edges": [],
+        "streams": deepcopy(raw.get("streams") or {}),
+    }
+    description = raw.get("description") or dict(raw.get("metadata") or {}).get("description")
+    if description:
+        canonical["metadata"]["description"] = description
+    profile = raw.get("profile")
+    if profile:
+        canonical["runtime"]["profile"] = profile
+
+    for node_name, raw_node in dict(raw.get("nodes") or {}).items():
+        if not isinstance(raw_node, dict):
+            raise ManifestError(f"Node {node_name!r} must be a mapping")
+        uses = raw_node.get("use", raw_node.get("uses"))
+        if not uses:
+            raise ManifestError(f"Node {node_name!r} requires 'use'")
+        node: dict[str, Any] = {"uses": uses}
+        direct_parameters = {key: deepcopy(value) for key, value in raw_node.items() if key not in _NODE_RESERVED}
+        explicit_parameters = deepcopy(raw_node.get("parameters") or {})
+        node["parameters"] = _deep_merge(direct_parameters, explicit_parameters)
+        for key in _NODE_RESERVED - {"use", "uses", "parameters"}:
+            if key in raw_node:
+                node[key] = deepcopy(raw_node[key])
+        canonical["nodes"][node_name] = node
+
+    flow = raw.get("flow", raw.get("edges", []))
+    canonical["edges"] = [_parse_flow_item(item) for item in flow]
+
+    publish = raw.get("publish")
+    if publish is not None:
+        exports = list(canonical["streams"].get("exports") or [])
+        if not isinstance(publish, dict):
+            raise ManifestError("Compact 'publish' must be a mapping")
+        for stream_name, value in publish.items():
+            if isinstance(value, str):
+                export = {"name": stream_name, "from": value}
+            elif isinstance(value, dict):
+                export = {"name": stream_name, **deepcopy(value)}
+                if "source" in export and "from" not in export:
+                    export["from"] = export.pop("source")
+                access = export.get("access")
+                if isinstance(access, str):
+                    export["access"] = {"mode": access}
+                    if access == "token":
+                        export["access"]["token_env"] = "NODRIX_STREAM_TOKEN"
+            else:
+                raise ManifestError(f"Publish entry {stream_name!r} must be a string or mapping")
+            exports.append(export)
+        canonical["streams"]["exports"] = exports
+
+    for path in _flatten_paths(canonical):
+        sources[path] = "compact pipeline.yaml"
+    return canonical, sources
+
+
+def _apply_profile(
+    canonical: dict[str, Any], sources: dict[str, str], profile_override: str | None
+) -> tuple[dict[str, Any], dict[str, str]]:
+    runtime = dict(canonical.get("runtime") or {})
+    profile_name = profile_override or runtime.get("profile")
+    if not profile_name:
+        return canonical, sources
+    try:
+        profile = get_profile(str(profile_name))
+    except ValueError as exc:
+        raise ManifestError(str(exc)) from exc
+
+    result = deepcopy(canonical)
+    profile_runtime = deepcopy(profile.get("runtime") or {})
+    profile_runtime["profile"] = profile_name
+    result["runtime"] = _deep_merge(profile_runtime, runtime)
+
+    node_defaults = dict(profile.get("node_defaults") or {})
+    for node_name, node in dict(result.get("nodes") or {}).items():
+        defaults = deepcopy(node_defaults.get(str(node.get("uses"))) or {})
+        if defaults:
+            result["nodes"][node_name] = _deep_merge(defaults, node)
+
+    edge_defaults = deepcopy(profile.get("edge_defaults") or {})
+    result["edges"] = [_deep_merge(edge_defaults, edge) for edge in list(result.get("edges") or [])]
+
+    stream_defaults = deepcopy(profile.get("stream_defaults") or {})
+    export_queue = stream_defaults.pop("queue", None)
+    result["streams"] = _deep_merge(stream_defaults, dict(result.get("streams") or {}))
+    if export_queue is not None:
+        result["streams"]["exports"] = [
+            _deep_merge({"queue": export_queue}, export)
+            for export in list(result["streams"].get("exports") or [])
+        ]
+
+    for path in _flatten_paths(result):
+        if path not in sources:
+            sources[path] = f"profile:{profile_name}"
+    return result, sources
+
+
+@dataclass(slots=True)
+class ManifestLoadResult:
+    manifest: PipelineManifest
+    canonical: dict[str, Any]
+    sources: dict[str, str]
+    path: Path
+
+
+def load_manifest_details(
+    path: str | Path,
+    *,
+    profile: str | None = None,
+    overrides: list[str] | None = None,
+    expand_env: bool = True,
+) -> ManifestLoadResult:
     manifest_path = Path(path).expanduser().resolve()
     if not manifest_path.exists():
         raise ManifestError(f"Pipeline file does not exist: {manifest_path}")
     try:
-        raw = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-        raw = _expand_env(raw)
-        manifest = PipelineManifest.model_validate(raw)
-    except (OSError, yaml.YAMLError, ValidationError, TypeError) as exc:
+        loaded = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        if not isinstance(loaded, dict):
+            raise ManifestError("Pipeline document must be a mapping")
+        canonical, sources = _normalize_compact(loaded)
+        canonical, sources = _apply_profile(canonical, sources, profile)
+        for expression in overrides or []:
+            if "=" not in expression:
+                raise ManifestError(f"Override must use path=value syntax: {expression!r}")
+            dotted, raw_value = expression.split("=", 1)
+            parsed_value = yaml.safe_load(raw_value)
+            canonical_path = canonical_config_path(dotted.strip())
+            _set_path(canonical, canonical_path, parsed_value)
+            sources[canonical_path] = "CLI --set"
+        expanded = _expand_env(canonical) if expand_env else canonical
+        manifest = PipelineManifest.model_validate(expanded)
+        resolved = manifest.model_dump(by_alias=True, exclude_none=True)
+    except (OSError, yaml.YAMLError, ValidationError, TypeError, ValueError) as exc:
+        if isinstance(exc, ManifestError):
+            raise
         raise ManifestError(f"Cannot load {manifest_path}: {exc}") from exc
-    return manifest
+    return ManifestLoadResult(manifest, resolved, sources, manifest_path)
+
+
+def load_manifest(
+    path: str | Path,
+    *,
+    profile: str | None = None,
+    overrides: list[str] | None = None,
+) -> PipelineManifest:
+    return load_manifest_details(path, profile=profile, overrides=overrides).manifest
 
 
 def dump_manifest(manifest: PipelineManifest, path: str | Path) -> None:

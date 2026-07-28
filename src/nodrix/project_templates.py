@@ -20,7 +20,7 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "nodrix==1.0.1\n",
+    "requirements.txt": "nodrix==1.1.0\n",
     ".gitignore": ".nodrix/\noutputs/*\n!outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
@@ -204,27 +204,26 @@ def _core_files(project_name: str) -> dict[str, str]:
 
 def _vision_files(project_name: str) -> dict[str, str]:
     pipeline = {
-        "apiVersion": "nodrix.dev/v1",
-        "kind": "Pipeline",
-        "metadata": {"name": project_name},
-        "runtime": {"mode": "realtime", "engine": "unified", "type_validation": "first"},
+        "name": project_name,
+        "profile": "realtime-low-latency",
         "nodes": {
-            "camera": {"uses": "vision.video_source", "parameters": {"uri": 0, "realtime": True, "buffer_size": 1}},
-            "detector": {"uses": "./nodes/detector.py:Detector"},
-            "preview_encoder": {"uses": "vision.jpeg_encoder", "parameters": {"quality": 80}},
+            "camera": {"use": "vision.video_source", "uri": 0, "realtime": True, "buffer_size": 1},
+            "detector": {"use": "./nodes/detector.py:Detector"},
+            "preview_encoder": {"use": "vision.jpeg_encoder", "quality": 80},
         },
-        "edges": [
-            {"from": "camera.frame", "to": "detector.frame", "queue": {"capacity": 1, "policy": "latest"}},
-            {"from": "camera.frame", "to": "preview_encoder.frame", "queue": {"capacity": 1, "policy": "latest"}},
+        "flow": [
+            "camera.frame -> detector.frame",
+            "camera.frame -> preview_encoder.frame",
         ],
-        "streams": {"bind_host": "127.0.0.1", "exports": [
-            {"name": f"/{project_name}/preview", "from": "preview_encoder.frame", "queue": {"capacity": 1, "policy": "latest"}},
-            {"name": f"/{project_name}/detections", "from": "detector.detections", "queue": {"capacity": 2, "policy": "latest"}},
-        ]},
+        "streams": {"bind_host": "127.0.0.1"},
+        "publish": {
+            f"/{project_name}/preview": "preview_encoder.frame",
+            f"/{project_name}/detections": {"from": "detector.detections", "queue": {"capacity": 2, "policy": "latest"}},
+        },
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[viewer]==1.0.1\n",
+        "requirements.txt": "nodrix[viewer]==1.1.0\n",
         "nodes/detector.py": dedent(
             '''
             import numpy as np
@@ -247,56 +246,47 @@ def _vision_files(project_name: str) -> dict[str, str]:
                     return {"detections": source.with_updates(type="vision.detections", payload=detections)}
             '''
         ).lstrip(),
-        "README.md": f"# {project_name}\n\n```bash\nnodrix run\n# On a laptop:\nnodrix-viewer /{project_name}/preview\n```\n",
+        "README.md": f"# {project_name}\n\n```bash\nnodrix config show\nnodrix run\n# On a laptop:\nnodrix-viewer /{project_name}/preview\n```\n",
     })
-
 
 def _media_files(project_name: str) -> dict[str, str]:
     pipeline = {
-        "apiVersion": "nodrix.dev/v1",
-        "kind": "Pipeline",
-        "metadata": {"name": project_name},
-        "runtime": {"mode": "realtime", "engine": "unified", "type_validation": "first"},
+        "name": project_name,
+        "profile": "realtime-low-latency",
         "nodes": {
-            "source": {"uses": "media.ffmpeg_source", "parameters": {
-                "uri": "lavfi:testsrc=size=640x360:rate=30", "width": 640, "height": 360, "fps": 30,
-                "max_frames": 90, "low_latency": True, "realtime": True,
-            }},
-            "encoder": {"uses": "media.ffmpeg_encoder", "parameters": {
-                "codec": "h264", "encoder": "libx264", "preset": "ultrafast", "tune": "zerolatency",
-                "fps": 30, "keyint": 30,
-            }},
-            "writer": {"uses": "media.encoded_writer", "parameters": {
-                "path": "media/output.h264", "codec": "h264",
-            }},
+            "source": {
+                "use": "media.ffmpeg_source", "uri": "lavfi:testsrc=size=640x360:rate=30",
+                "width": 640, "height": 360, "fps": 30, "max_frames": 90, "realtime": True,
+            },
+            "encoder": {"use": "media.ffmpeg_encoder", "codec": "h264", "encoder": "auto", "fps": 30, "keyint": 30},
+            "writer": {"use": "media.encoded_writer", "path": "media/output.h264", "codec": "h264"},
         },
-        "edges": [
-            {"from": "source.frame", "to": "encoder.frame", "queue": {"capacity": 4, "policy": "block"}},
+        "flow": [
+            {"from": "source.frame", "to": "encoder.frame", "queue": {"capacity": 8, "policy": "block"}},
             {"from": "encoder.encoded", "to": "writer.frame", "queue": {"capacity": 8, "policy": "block"}},
         ],
-        "streams": {"bind_host": "127.0.0.1", "exports": [
-            {"name": f"/{project_name}/h264", "from": "encoder.encoded", "queue": {"capacity": 2, "policy": "latest"}},
-        ]},
+        "streams": {"bind_host": "127.0.0.1"},
+        "publish": {f"/{project_name}/h264": "encoder.encoded"},
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[media,viewer]==1.0.1\n",
+        "requirements.txt": "nodrix[media,viewer]==1.1.0\n",
         "README.md": dedent(
             f"""
             # {project_name}
 
-            Efficient Media/Data Plane example: one persistent H.264 encoder
-            feeds both the raw recording and the Nodrix LAN stream. The encoded file is stored under the latest `.nodrix/runs/.../media/output.h264` artifact directory.
+            Compact Media Pack example. The selected profile supplies low-latency
+            defaults, while the full recording path explicitly remains lossless.
 
             ```bash
-            nodrix media doctor
+            nodrix media select-encoder h264
+            nodrix inspect --resolved
             nodrix run
             nodrix-viewer /{project_name}/h264
             ```
             """
         ).lstrip(),
     })
-
 
 def _network_files(project_name: str) -> dict[str, str]:
     publisher = {

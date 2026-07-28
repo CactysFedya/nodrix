@@ -5,6 +5,9 @@
 - [Full Workflow](Full-Workflow)
 - [CLI Reference](CLI-Reference)
 - [Pipeline Manifest](Pipeline-Manifest)
+- [Compact Manifest](Compact-Manifest)
+- [Runtime Profiles](Runtime-Profiles)
+- [Resource Telemetry](Resource-Telemetry)
 - [Python SDK](Python-SDK)
 - [Production Runtime](Production-Runtime)
 - [Packages](Packages)
@@ -23,6 +26,7 @@
 
 ## Releases
 
+- [1.1.0](Version-1.1.0)
 - [1.0.1](Version-1.0.1)
 - [1.0.0](Version-1.0.0)
 - [0.9.0](Version-0.9.0)

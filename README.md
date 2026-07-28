@@ -1,4 +1,4 @@
-# Nodrix 1.0.1
+# Nodrix 1.1.0
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -6,6 +6,40 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
+
+
+## Nodrix 1.1 highlights
+
+A low-latency RTSP graph can now be described compactly:
+
+```yaml
+name: raspberry-rtsp-preview
+profile: realtime-low-latency
+
+nodes:
+  camera:
+    use: media.ffmpeg_source
+    uri: ${RTSP_URL}
+  encoder:
+    use: media.ffmpeg_encoder
+    encoder: auto
+
+flow:
+  - camera.frame -> encoder.frame
+
+publish:
+  /camera/front/h264:
+    from: encoder.encoded
+    access: token
+```
+
+```bash
+nodrix inspect --resolved
+nodrix run --set nodes.encoder.crf=18
+nodrix top
+```
+
+Compact manifests are resolved before graph construction, so they do not add runtime overhead or change memory/copy behavior.
 
 ## Core model
 
@@ -44,7 +78,7 @@ pip install "nodrix[media]"
 
 ### Raspberry Pi and offline source installation
 
-Nodrix 1.0.1 can be built without PyPI build isolation when the runtime dependencies are already present:
+Nodrix 1.1.0 can be built without PyPI build isolation when the runtime dependencies are already present:
 
 ```bash
 python3 -m pip install . --no-build-isolation --no-deps
@@ -206,10 +240,11 @@ nodrix inspect --memory
 
 The validator checks graph cycles, port/type compatibility, memory transfers, unsupported copies, open LAN streams, stream backpressure, watchdog/isolation conflicts, resource configuration, and native plugin loading.
 
-## Metrics and runs
+## Metrics, resources and runs
 
 ```bash
 nodrix run --metrics-listen 127.0.0.1:9464
+nodrix top
 nodrix metrics --format prometheus
 nodrix runs list
 nodrix runs show <run-id>
@@ -241,4 +276,4 @@ Nodrix Plugin ABI 1.0 uses numeric ABI `65536` and feature flags for typed ports
 
 Nodrix 1.0 stabilizes the contracts and production control plane. Hardware-specific CUDA IPC mapping, full V4L2 DMA-BUF capture/requeue, native libav nodes, QUIC/UDP data plane, TLS certificates, ROS 2 bridge, and ready-made detector/tracker packs remain later backends or releases.
 
-See [docs/FULL_WORKFLOW_RU.md](docs/FULL_WORKFLOW_RU.md), [docs/RELEASE_1.0.1.md](docs/RELEASE_1.0.1.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).
+See [docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md), [docs/PROFILES.md](docs/PROFILES.md), [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md), [docs/RELEASE_1.1.0.md](docs/RELEASE_1.1.0.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).

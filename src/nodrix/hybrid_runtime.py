@@ -32,6 +32,7 @@ from .metrics import MetricsRecorder
 from .lockfile import build_lock
 from .lifecycle import HealthStatus, LifecycleState
 from .packages import resolve_package_node
+from .resources import ResourceSampler, system_snapshot
 
 try:
     from ._native_queue import BoundedQueue as _NativeBoundedQueue
@@ -321,6 +322,8 @@ class HybridPipelineRuntime:
         self._stream_exports: list[dict[str, Any]] = []
         self._stream_publisher: StreamPublisher | None = None
         self._memory_plans: dict[tuple[str, str], MemoryPlan] = {}
+        self._resource_sampler = ResourceSampler()
+        self._last_node_resources: dict[str, dict[str, Any]] = {}
 
     @property
     def native_queue_enabled(self) -> bool:
@@ -490,6 +493,7 @@ class HybridPipelineRuntime:
         return {
             "name": self.manifest.metadata.name,
             "mode": self.manifest.runtime.mode,
+            "profile": self.manifest.runtime.profile,
             "engine": "unified",
             "native_queue": self.native_queue_enabled,
             "type_validation": self.manifest.runtime.type_validation,
@@ -540,15 +544,41 @@ class HybridPipelineRuntime:
 
     def _node_report(self, loaded: LoadedNode, duration: float | None = None) -> dict[str, Any]:
         pressures = []
+        estimated_queue_bytes = 0
+        dropped = 0
         for edge in loaded.inputs.values():
             stats = edge.report()
             pressures.append(float(stats.get("depth", 0)) / max(int(stats.get("capacity", 1)), 1))
+            enqueued = max(int(stats.get("enqueued", 0)), 1)
+            average = int(stats.get("bytes", 0)) / enqueued
+            estimated_queue_bytes += int(average * int(stats.get("depth", 0)))
+            dropped += int(stats.get("dropped", 0))
         loaded.node._lifecycle.set_queue_pressure(max(pressures, default=0.0))
         report = loaded.stats.report(duration)  # type: ignore[union-attr]
         if isinstance(loaded.node, ProcessNodeProxy):
-            report["transport"] = loaded.node.transport_report()
+            transport = loaded.node.transport_report()
+            pid = loaded.node.pid
+            resources = self._resource_sampler.process(pid) if pid is not None else {"available": False}
+            if resources.get("available"):
+                self._last_node_resources[loaded.name] = dict(resources)
+            elif loaded.name in self._last_node_resources:
+                resources = {**self._last_node_resources[loaded.name], "stale": True}
+            resources["scope"] = "isolated_process"
+            input_pool = dict(transport.get("shared_input_pool", {}))
+            output_pool = dict(transport.get("shared_output_pool", {}))
+            resources["shared_buffer_bytes"] = (
+                int(input_pool.get("in_use", 0)) * int(input_pool.get("block_size", 0))
+                + int(output_pool.get("in_use", 0)) * int(output_pool.get("block_size", 0))
+            )
+            report["transport"] = transport
         else:
             report["transport"] = {"isolation": "in_process", "payload_copies": 0}
+            total_ns = int(loaded.stats.process.total_ns)  # type: ignore[union-attr]
+            resources = self._resource_sampler.in_process_node(loaded.name, total_ns)
+            resources["shared_buffer_bytes"] = 0
+        resources["estimated_queue_bytes"] = estimated_queue_bytes
+        resources["input_drops"] = dropped
+        report["resources"] = resources
         report["health"] = loaded.node.health()
         return report
 
@@ -556,9 +586,11 @@ class HybridPipelineRuntime:
         """Return a lock-free best-effort live telemetry snapshot."""
         return {
             "pipeline": self.manifest.metadata.name,
+            "profile": self.manifest.runtime.profile,
             "nodes": {name: self._node_report(loaded, duration_seconds) for name, loaded in self.nodes.items()},
             "edges": [edge.report() for edge in self.edges],
             "streams": self._stream_publisher.report() if self._stream_publisher is not None else {},
+            "system": system_snapshot(),
         }
 
     def request_stop(self) -> None:
@@ -661,6 +693,8 @@ class HybridPipelineRuntime:
                 self._record_error("runtime", TimeoutError("graceful shutdown timeout exceeded"))
         self._stop.set()
         watchdog.join(timeout=1.0)
+        # Capture process RSS/CPU before isolated children and shared pools close.
+        self.snapshot(max((time.perf_counter_ns() - started_ns) / 1e9, 1e-9))
         self._close_nodes()
         if metrics_recorder is not None:
             metrics_recorder.close()
@@ -675,6 +709,7 @@ class HybridPipelineRuntime:
             "pipeline": self.manifest.metadata.name,
             "status": "failed" if error else "stopped" if interrupted else "completed",
             "mode": self.manifest.runtime.mode,
+            "profile": self.manifest.runtime.profile,
             "engine": "unified",
             "native_queue": self.native_queue_enabled,
             "zero_copy_python_objects": True,
@@ -689,6 +724,7 @@ class HybridPipelineRuntime:
             },
             "edges": [edge.report() for edge in self.edges],
             "streams": stream_report,
+            "system": system_snapshot(),
         }
         encoded_report = json.dumps(report, indent=2, ensure_ascii=False, default=str)
         (run_dir / "run.json").write_text(encoded_report, encoding="utf-8")

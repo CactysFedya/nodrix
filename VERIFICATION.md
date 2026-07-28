@@ -1,57 +1,78 @@
-# Nodrix 1.0.1 verification
+# Nodrix 1.1.0 verification
 
-## Scope
-
-Nodrix 1.0.1 is a packaging and installation patch release. Runtime APIs, Plugin ABI 1.0, pipeline manifests, wire protocol, `.ndrx`, `.ndpkg` and lock-file formats are unchanged.
+Nodrix 1.1.0 adds compact authoring, runtime profiles, auto encoder selection and per-node resource telemetry while preserving the Nodrix 1.x Python API, Plugin ABI 1.0, wire protocol, `.ndrx`, `.ndpkg` and lock-file formats.
 
 ## Automated tests
 
 ```text
-Python/unit/integration: 62 passed
+Python/unit/integration: 73 passed
 C++ Release CTest:       1/1 passed
+Release metadata:        consistent for 1.1.0
 ```
 
-The Python suite includes the 59 Nodrix 1.0.0 regression tests plus three release-packaging checks for:
+The new suite covers:
 
-- version/build metadata;
-- supported release matrix and Node.js 24 GitHub Actions;
-- offline-installation assets.
+- compact manifests and canonical resolution;
+- all runtime profile merge rules;
+- repeatable `--set` and profile overrides;
+- lock/override conflict protection;
+- `config show`, `config explain` and `inspect --resolved`;
+- exact process telemetry and shared executor telemetry;
+- zombie-process RSS preservation;
+- `nodrix top` JSON snapshots;
+- Publisher metrics used by Nodrix Viewer;
+- auto FFmpeg encoder probing and fallback.
 
-## Package builds
+## Media integration
 
-Built locally:
+The compact `media` template was created, strictly validated and executed with FFmpeg:
 
 ```text
-nodrix-1.0.1-cp313-cp313-linux_x86_64.whl
-nodrix-1.0.1.tar.gz
+Source frames:    90
+Encoder messages: 90
+Writer messages:  90
+Edge drops:       0
+Output codec:     H.264
+Resolution:       640x360
 ```
 
-Validated:
+The full recording path explicitly uses blocking queues, while the exported Viewer stream keeps the low-latency profile queue.
 
-- wheel imports Nodrix 1.0.1;
-- all four native modules load;
-- source distribution builds a wheel with `--no-build-isolation --no-deps`;
-- the source-built package loads all four native modules;
-- release metadata is consistent across `pyproject.toml`, Python, CMake, project templates and `CITATION.cff`.
+## Installed wheel
 
-## Release workflow
-
-The 1.0.1 workflow publishes:
-
-- Linux x86-64 wheels;
-- Linux ARM64 wheels;
-- macOS Apple Silicon wheels;
-- source distribution.
-
-The failing macOS Intel job is excluded from this patch release. Official checkout, setup-python, upload-artifact and download-artifact actions use Node.js 24 based major versions. `cibuildwheel` is pinned to 3.4.1.
-
-## Offline/source build fix
-
-The build backend requirement is now:
+Built artifact:
 
 ```text
-setuptools>=68
-wheel
+nodrix-1.1.0-cp313-cp313-linux_x86_64.whl
 ```
 
-The project no longer requires SPDX license-expression parsing during metadata generation. This removes the Raspberry Pi failure caused by `setuptools>=77` calling unavailable `packaging.licenses` in an offline environment.
+Verified outside the source tree:
+
+- `nodrix --version` reports 1.1.0;
+- all four native extensions import;
+- a generated `core` template validates and completes;
+- run reports contain profile/system/node resource telemetry.
+
+## Offline source installation
+
+Built artifact:
+
+```text
+nodrix-1.1.0.tar.gz
+```
+
+Installed with:
+
+```bash
+pip install nodrix-1.1.0.tar.gz --no-build-isolation --no-deps
+```
+
+The source package compiled and loaded all four native extensions without a network build-isolation environment.
+
+## Encoder probe
+
+The current test host probed available H.264 encoders. NVENC and VAAPI were rejected by real encode probes and `libx264` was selected as the working fallback. The selection result includes every attempted backend and its failure reason.
+
+## Platform scope
+
+The local wheel is a CPython 3.13 Linux x86-64 verification artifact. The GitHub release workflow remains responsible for manylinux x86-64, manylinux ARM64/Raspberry Pi and macOS Apple Silicon wheels for Python 3.11-3.14.

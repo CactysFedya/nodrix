@@ -463,6 +463,10 @@ class ProcessNodeProxy(Node):
             self._process.join(timeout=2.0)
             self._process = None
 
+    @property
+    def pid(self) -> int | None:
+        return None if self._process is None else self._process.pid
+
     def interrupt(self) -> None:
         """Terminate a hung child; the worker call owns the serialized restart."""
         with self._restart_lock:

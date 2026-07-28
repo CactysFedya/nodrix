@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 import json
 import os
 import select
+from functools import lru_cache
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import threading
@@ -341,9 +343,7 @@ class FFmpegSource(SourceNode):
         self.reader.close()
 
 
-def _codec_encoder(codec: str, explicit: str | None = None) -> str:
-    if explicit:
-        return explicit
+def _software_encoder(codec: str) -> str:
     normalized = codec.lower().replace("hevc", "h265")
     if normalized in {"h264", "avc"}:
         return "libx264"
@@ -352,6 +352,74 @@ def _codec_encoder(codec: str, explicit: str | None = None) -> str:
     if normalized in {"mjpeg", "jpeg"}:
         return "mjpeg"
     return codec
+
+
+def _encoder_candidates(codec: str) -> list[str]:
+    normalized = codec.lower().replace("hevc", "h265")
+    h264 = normalized in {"h264", "avc"}
+    prefix = "h264" if h264 else "hevc"
+    candidates: list[str] = []
+    machine = platform.machine().lower()
+    system = platform.system().lower()
+    if system == "darwin":
+        candidates.append(f"{prefix}_videotoolbox")
+    if system == "linux":
+        if machine in {"aarch64", "arm64", "armv7l"}:
+            candidates.append(f"{prefix}_v4l2m2m")
+        candidates.extend([f"{prefix}_nvenc", f"{prefix}_vaapi"])
+    candidates.append(_software_encoder(codec))
+    return candidates
+
+
+def probe_encoder(encoder: str, codec: str, timeout: float = 6.0) -> tuple[bool, str]:
+    if encoder not in available_encoders():
+        return False, "encoder is not listed by FFmpeg"
+    command = [
+        _binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
+        "-f", "lavfi", "-i", "color=size=64x64:rate=5:color=black",
+        "-frames:v", "2", "-an", "-c:v", encoder,
+    ]
+    if encoder in {"libx264", "libx265"}:
+        command += ["-preset", "ultrafast", "-tune", "zerolatency"]
+    command += ["-f", "null", "-"]
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+    detail = (result.stderr or "").strip().splitlines()
+    return result.returncode == 0, (detail[-1] if detail else "probe passed")
+
+
+@lru_cache(maxsize=16)
+def select_encoder(codec: str, requested: str | None = None) -> dict[str, Any]:
+    if requested is None:
+        selected = _software_encoder(codec)
+        return {"selected": selected, "requested": "default", "reason": "built-in software default", "fallback": None}
+    if requested != "auto":
+        return {"selected": requested, "requested": requested, "reason": "explicit pipeline setting", "fallback": None}
+    candidates = _encoder_candidates(codec)
+    attempts: list[dict[str, Any]] = []
+    for candidate in candidates:
+        ok, reason = probe_encoder(candidate, codec)
+        attempts.append({"encoder": candidate, "ok": ok, "reason": reason})
+        if ok:
+            return {
+                "selected": candidate,
+                "requested": requested or "default",
+                "reason": f"runtime probe passed for {candidate}",
+                "fallback": _software_encoder(codec) if candidate != _software_encoder(codec) else None,
+                "attempts": attempts,
+            }
+    fallback = _software_encoder(codec)
+    return {
+        "selected": fallback, "requested": requested or "default",
+        "reason": "all hardware probes failed; using software fallback",
+        "fallback": fallback, "attempts": attempts,
+    }
+
+
+def _codec_encoder(codec: str, explicit: str | None = None) -> str:
+    return str(select_encoder(codec, explicit).get("selected"))
 
 
 @register_builtin("media.ffmpeg_writer")

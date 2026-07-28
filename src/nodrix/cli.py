@@ -19,7 +19,7 @@ import yaml
 
 from .errors import NodrixError
 from .cv_types import TYPE_REGISTRY
-from .manifest import load_manifest
+from .manifest import canonical_config_path, load_manifest, load_manifest_details
 from .hybrid_runtime import HybridPipelineRuntime
 from .native_runtime import NATIVE_BUILTINS, NativePipelineRuntime, NativeToolchain
 from .registry import BUILTINS, load_node_class
@@ -28,13 +28,14 @@ from .discovery import discover_streams, resolve_stream
 from .project_templates import TEMPLATES, create_project
 from .streams import StreamClient
 from .type_codegen import generate_type
-from .media import MediaError, media_doctor, probe_media, run_ffmpeg_relay
+from .media import MediaError, media_doctor, probe_media, run_ffmpeg_relay, select_encoder
 from .recording import NdrxReader, play_recording, record_streams
 from .lockfile import write_lock, verify_lock
 from .packages import build_package, install_package, list_packages, package_info, remove_package
 from .runs import list_runs, load_run, compare_runs, resolve_run
 from .validation import validate_production
 from .metrics import MetricsServer, prometheus_text
+from .profiles import profile_names
 
 app = typer.Typer(
     name="nodrix",
@@ -52,6 +53,7 @@ data_app = typer.Typer(help="Inspect shared-memory and process data-plane capabi
 device_app = typer.Typer(help="Inspect DLPack, DMA-BUF, V4L2, CUDA and native device-I/O capabilities.")
 package_app = typer.Typer(help="Build and manage local Nodrix packages.")
 runs_app = typer.Typer(help="Inspect reproducible run artifacts.")
+config_app = typer.Typer(help="Inspect resolved profiles and configuration values.")
 app.add_typer(node_app, name="node")
 app.add_typer(stream_app, name="stream")
 app.add_typer(native_app, name="native")
@@ -62,7 +64,35 @@ app.add_typer(data_app, name="data-plane")
 app.add_typer(device_app, name="device")
 app.add_typer(package_app, name="package")
 app.add_typer(runs_app, name="runs")
+app.add_typer(config_app, name="config")
 console = Console()
+
+
+def _format_bytes(value: object) -> str:
+    try:
+        number = float(value or 0)
+    except (TypeError, ValueError):
+        return "-"
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    index = 0
+    while abs(number) >= 1024 and index < len(units) - 1:
+        number /= 1024.0
+        index += 1
+    return f"{number:.1f} {units[index]}"
+
+
+def _config_value(data: object, dotted: str) -> object:
+    current = data
+    for part in dotted.split("."):
+        if isinstance(current, dict):
+            if part not in current:
+                raise KeyError(dotted)
+            current = current[part]
+        elif isinstance(current, list) and part.isdigit():
+            current = current[int(part)]
+        else:
+            raise KeyError(dotted)
+    return current
 
 
 @app.callback()
@@ -77,8 +107,10 @@ def root(
         console.print(ctx.get_help())
 
 
-def _runtime(path: Path, run_root: Path | None = None):
-    manifest = load_manifest(path)
+def _runtime(
+    path: Path, run_root: Path | None = None, *, profile: str | None = None, overrides: list[str] | None = None
+):
+    manifest = load_manifest(path, profile=profile, overrides=overrides)
     native_only = all(
         config.uses.startswith("native.") or config.uses.startswith("native:")
         for config in manifest.nodes.values()
@@ -89,7 +121,7 @@ def _runtime(path: Path, run_root: Path | None = None):
     if use_native:
         if manifest.streams.exports:
             raise NodrixError(
-                "Named LAN stream exports require engine: unified in Nodrix 0.6.0; "
+                "Named LAN stream exports require engine: unified; "
                 "the fully native executor does not yet expose network streams."
             )
         runtime = NativePipelineRuntime(manifest, path, run_root=run_root)
@@ -129,10 +161,12 @@ def validate(
     pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
     strict: Annotated[bool, typer.Option("--strict", help="Treat production safety warnings as errors where applicable")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
 ) -> None:
     """Validate manifest, plugins, memory paths, security, and graph safety."""
     try:
-        runtime = _runtime(pipeline)
+        runtime = _runtime(pipeline, profile=profile, overrides=set_values)
         desc = runtime.describe()
         issues = validate_production(runtime.manifest, desc, strict=strict)
     except Exception as exc:
@@ -166,7 +200,7 @@ def validate(
 
 def _live_table(snapshot: dict[str, object]) -> Table:
     table = Table(
-        "Node", "Isolation", "Messages", "Rate Hz", "P95 ms", "E2E P95",
+        "Node", "Isolation", "CPU", "Memory", "Messages", "Rate Hz", "P95 ms", "E2E P95",
         "Input copies", "Output copies", "Restarts",
     )
     for name, raw in dict(snapshot.get("nodes", {})).items():
@@ -174,9 +208,13 @@ def _live_table(snapshot: dict[str, object]) -> Table:
         transport = dict(stats.get("transport", {}))
         input_copies = int(transport.get("input_payload_copies", 0))
         output_copies = int(transport.get("output_payload_copies", 0))
+        resources = dict(stats.get("resources", {}))
+        memory_value = resources.get("rss_bytes") or resources.get("shared_buffer_bytes") or resources.get("executor_rss_bytes")
         table.add_row(
-            str(name), str(transport.get("isolation", "in_process")), str(stats.get("messages", 0)),
-            f"{float(stats.get('rate_hz', 0.0)):.1f}", f"{float(stats.get('p95_ms', 0.0)):.3f}",
+            str(name), str(transport.get("isolation", "in_process")),
+            f"{float(resources.get('cpu_percent', 0.0)):.1f}%", _format_bytes(memory_value),
+            str(stats.get("messages", 0)), f"{float(stats.get('rate_hz', 0.0)):.1f}",
+            f"{float(stats.get('p95_ms', 0.0)):.3f}",
             f"{float(dict(stats.get('end_to_end', {})).get('p95_ms', 0.0)):.3f}",
             str(input_copies), str(output_copies), str(transport.get("restarts", 0)),
         )
@@ -201,11 +239,24 @@ def inspect(
     pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
     live: Annotated[bool, typer.Option("--live", help="Run the graph and display live node/data-plane telemetry")] = False,
     memory: Annotated[bool, typer.Option("--memory", help="Show the static memory-domain and copy plan")] = False,
+    resolved: Annotated[bool, typer.Option("--resolved", help="Print the canonical manifest after profiles and overrides")] = False,
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Write resolved YAML to a file")] = None,
+    profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
     interval: Annotated[float, typer.Option("--interval", min=0.1, max=10.0)] = 0.5,
 ) -> None:
     """Show a static graph, or execute it with live telemetry."""
     try:
-        runtime = _runtime(pipeline)
+        details = load_manifest_details(pipeline, profile=profile, overrides=set_values)
+        if resolved:
+            rendered = yaml.safe_dump(details.manifest.model_dump(by_alias=True, exclude_none=True), sort_keys=False)
+            if output is not None:
+                output.write_text(rendered, encoding="utf-8")
+                console.print(f"[green]Written[/green] {output.resolve()}")
+            else:
+                console.print(rendered, markup=False, end="")
+            return
+        runtime = _runtime(pipeline, profile=profile, overrides=set_values)
         if live:
             report = asyncio.run(_inspect_live(runtime, interval))
             console.print(f"[green]Completed[/green] {report['pipeline']} in {report['duration_seconds']:.3f}s")
@@ -214,7 +265,8 @@ def inspect(
     except Exception as exc:
         console.print(f"[red]Cannot inspect:[/red] {exc}")
         raise typer.Exit(1)
-    console.print(f"[bold]{desc['name']}[/bold]  mode={desc['mode']} engine={desc.get('engine', 'unified')}")
+    profile_text = f" profile={desc.get('profile')}" if desc.get("profile") else ""
+    console.print(f"[bold]{desc['name']}[/bold]  mode={desc['mode']} engine={desc.get('engine', 'unified')}{profile_text}")
     if memory:
         table = Table("From", "To", "Type", "Memory", "Copies", "Transfers", "Adapter", "Ready")
         for edge in desc["edges"]:
@@ -243,8 +295,13 @@ def run(
     json_output: Annotated[bool, typer.Option("--json", help="Print the complete run report as JSON")] = False,
     locked: Annotated[bool, typer.Option("--locked", help="Require exact nodrix.lock checksums and runtime version")] = False,
     metrics_listen: Annotated[str | None, typer.Option("--metrics-listen", help="Prometheus endpoint, for example 127.0.0.1:9464")] = None,
+    profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
 ) -> None:
     """Execute a pipeline with reproducibility and optional Prometheus metrics."""
+    if locked and (profile is not None or set_values):
+        console.print("[red]--locked cannot be combined with --profile or --set.[/red] Create or verify the lock for the exact manifest you intend to run.")
+        raise typer.Exit(2)
     if locked:
         try:
             result = verify_lock(pipeline)
@@ -257,7 +314,7 @@ def run(
             raise typer.Exit(1)
     metrics_server = None
     try:
-        runtime = _runtime(pipeline, run_root=run_root)
+        runtime = _runtime(pipeline, run_root=run_root, profile=profile, overrides=set_values)
         if metrics_listen:
             if not hasattr(runtime, "snapshot"):
                 raise NodrixError("--metrics-listen currently requires engine: unified")
@@ -283,13 +340,15 @@ def run(
             f"[green]Completed[/green] {report['pipeline']} in {report['duration_seconds']:.3f}s\n"
             f"Artifacts: {report['run_dir']}"
         )
-        table = Table("Node", "State", "Health", "Messages", "Rate Hz", "P95 ms", "E2E P95 ms", "Errors")
+        table = Table("Node", "State", "Health", "CPU", "Memory", "Messages", "Rate Hz", "P95 ms", "E2E P95 ms", "Errors")
         for name, stats in report["nodes"].items():
             health = dict(stats.get("health", {}))
             table.add_row(
                 name,
                 str(health.get("state", "-")),
                 str(health.get("status", "-")),
+                f"{float(dict(stats.get('resources', {})).get('cpu_percent', 0.0)):.1f}%",
+                _format_bytes(dict(stats.get('resources', {})).get('rss_bytes') or dict(stats.get('resources', {})).get('shared_buffer_bytes') or dict(stats.get('resources', {})).get('executor_rss_bytes')),
                 str(stats["messages"]),
                 f"{stats.get('rate_hz', 0.0):.1f}",
                 f"{stats.get('p95_ms', stats['max_ms']):.3f}",
@@ -545,6 +604,33 @@ def media_doctor_command(
     for name, available in report["encoders"].items():
         table.add_row(name, "yes" if available else "no")
     console.print(table)
+
+
+@media_app.command("select-encoder")
+def media_select_encoder_command(
+    codec: Annotated[str, typer.Argument(help="h264 or h265")] = "h264",
+    requested: Annotated[str, typer.Option("--encoder", help="auto or an explicit FFmpeg encoder")] = "auto",
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Probe FFmpeg encoders and select the fastest working backend."""
+    try:
+        result = select_encoder(codec, requested)
+    except Exception as exc:
+        console.print(f"[red]Encoder selection failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+    console.print(f"Selected: [bold]{result.get('selected')}[/bold]")
+    console.print(f"Reason: {result.get('reason')}")
+    if result.get("fallback"):
+        console.print(f"Fallback: {result['fallback']}")
+    attempts = list(result.get("attempts") or [])
+    if attempts:
+        table = Table("Encoder", "Probe", "Detail")
+        for item in attempts:
+            table.add_row(str(item.get("encoder")), "pass" if item.get("ok") else "fail", str(item.get("reason")))
+        console.print(table)
 
 
 @media_app.command("probe")
@@ -981,6 +1067,68 @@ def native_nodes() -> None:
     console.print(table)
 
 
+@config_app.command("profiles")
+def config_profiles_command() -> None:
+    """List built-in performance profiles."""
+    table = Table("Profile", "Purpose")
+    descriptions = {
+        "realtime-low-latency": "Latest-frame queues and zero-latency media defaults",
+        "realtime-balanced": "Realtime operation with small bounded queues",
+        "lossless-recording": "Blocking queues and graceful lossless draining",
+        "maximum-throughput": "Large queues for offline throughput",
+        "debug": "Always validate types and collect dense telemetry",
+    }
+    for name in profile_names():
+        table.add_row(name, descriptions.get(name, ""))
+    console.print(table)
+
+
+@config_app.command("show")
+def config_show_command(
+    pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Show the fully resolved canonical manifest."""
+    try:
+        details = load_manifest_details(pipeline, profile=profile, overrides=set_values)
+    except Exception as exc:
+        console.print(f"[red]Cannot resolve configuration:[/red] {exc}")
+        raise typer.Exit(1)
+    rendered = yaml.safe_dump(details.manifest.model_dump(by_alias=True, exclude_none=True), sort_keys=False)
+    if output is not None:
+        output.write_text(rendered, encoding="utf-8")
+        console.print(f"[green]Written[/green] {output.resolve()}")
+    else:
+        console.print(rendered, markup=False, end="")
+
+
+@config_app.command("explain")
+def config_explain_command(
+    path: Annotated[str, typer.Argument(help="Resolved dotted path")],
+    pipeline: Annotated[Path, typer.Option("--pipeline", "-p", exists=True, readable=True)] = Path("pipeline.yaml"),
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
+) -> None:
+    """Explain the final value and where it came from."""
+    try:
+        details = load_manifest_details(pipeline, profile=profile, overrides=set_values)
+        canonical_path = canonical_config_path(path)
+        value = _config_value(details.canonical, canonical_path)
+    except Exception as exc:
+        console.print(f"[red]Cannot explain {path!r}:[/red] {exc}")
+        raise typer.Exit(1)
+    source = details.sources.get(canonical_path, "built-in schema default")
+    console.print(f"Path: [bold]{canonical_path}[/bold]")
+    if isinstance(value, (dict, list)):
+        rendered_value = yaml.safe_dump(value, sort_keys=False).strip()
+    else:
+        rendered_value = json.dumps(value, ensure_ascii=False)
+    console.print(f"Value: {rendered_value}")
+    console.print(f"Source: {source}")
+
+
 @app.command("lock")
 def lock_command(
     pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
@@ -1030,12 +1178,15 @@ def status_command(
         console.print_json(json.dumps(data))
         return
     console.print(f"[bold]{data.get('pipeline', selected)}[/bold]")
-    table = Table("Node", "State", "Health", "Ready", "Messages", "Rate Hz", "Last error")
+    table = Table("Node", "State", "Health", "CPU", "Memory", "Ready", "Messages", "Rate Hz", "Last error")
     for name, raw in dict(data.get("nodes", {})).items():
         stats = dict(raw)
         health = dict(stats.get("health", {}))
+        resources = dict(stats.get("resources", {}))
+        memory_value = resources.get("rss_bytes") or resources.get("shared_buffer_bytes") or resources.get("executor_rss_bytes")
         table.add_row(
             name, str(health.get("state", "-")), str(health.get("status", "-")),
+            f"{float(resources.get('cpu_percent', 0.0)):.1f}%", _format_bytes(memory_value),
             "yes" if health.get("ready") else "no", str(stats.get("messages", 0)),
             f"{float(stats.get('rate_hz', 0.0)):.1f}", str(health.get("last_error") or "-"),
         )
@@ -1087,6 +1238,64 @@ def metrics_command(
         console.print(prometheus_text(data), markup=False, end="")
     else:
         raise typer.BadParameter("--format must be json or prometheus")
+
+
+def _top_table(data: dict[str, object]) -> Table:
+    table = Table("Node", "Scope", "CPU", "Memory", "Rate", "P95", "Queue", "Drops", "Health")
+    for name, raw in dict(data.get("nodes", {})).items():
+        node = dict(raw)
+        resources = dict(node.get("resources", {}))
+        health = dict(node.get("health", {}))
+        memory_value = resources.get("rss_bytes")
+        if not memory_value:
+            memory_value = resources.get("shared_buffer_bytes") or resources.get("executor_rss_bytes")
+        table.add_row(
+            str(name),
+            str(resources.get("scope", "-")),
+            f"{float(resources.get('cpu_percent', 0.0)):.1f}%",
+            _format_bytes(memory_value),
+            f"{float(node.get('rate_hz', 0.0)):.1f} Hz",
+            f"{float(node.get('p95_ms', 0.0)):.2f} ms",
+            _format_bytes(resources.get("estimated_queue_bytes", 0)),
+            str(resources.get("input_drops", 0)),
+            str(health.get("status", "unknown")),
+        )
+    system = dict(data.get("system", {}))
+    if system:
+        footer = []
+        if system.get("memory_available_bytes") is not None:
+            footer.append(f"free {_format_bytes(system.get('memory_available_bytes'))}")
+        if system.get("temperature_c") is not None:
+            footer.append(f"temp {float(system['temperature_c']):.1f}°C")
+        if system.get("load_average"):
+            footer.append("load " + "/".join(f"{float(item):.2f}" for item in list(system["load_average"])[:3]))
+        table.caption = " | ".join(footer)
+    return table
+
+
+@app.command("top")
+def top_command(
+    run_id: Annotated[str | None, typer.Option("--run")] = None,
+    project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd(),
+    watch: Annotated[bool, typer.Option("--watch/--once")] = True,
+    interval: Annotated[float, typer.Option("--interval", min=0.1)] = 1.0,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Show CPU, memory, queues, rates and latency for every node."""
+    selected = run_id or _latest_run_id(project)
+    while True:
+        directory = resolve_run(selected, project)
+        status_path = directory / "status.json"
+        data = json.loads(status_path.read_text(encoding="utf-8")) if status_path.is_file() else load_run(selected, project)
+        if json_output:
+            console.print_json(json.dumps(data))
+            return
+        if watch:
+            console.clear()
+        console.print(_top_table(data))
+        if not watch:
+            return
+        time.sleep(interval)
 
 
 @package_app.command("build")

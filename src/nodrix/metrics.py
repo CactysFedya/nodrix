@@ -25,6 +25,14 @@ def prometheus_text(snapshot: dict[str, Any]) -> str:
             "nodrix_node_end_to_end_p95_ms": dict(node.get("end_to_end", {})).get("p95_ms", 0.0),
             "nodrix_node_restarts_total": dict(node.get("transport", {})).get("restarts", 0),
         }
+        resources = dict(node.get("resources", {}))
+        metrics.update({
+            "nodrix_node_cpu_percent": resources.get("cpu_percent", 0.0),
+            "nodrix_node_rss_bytes": resources.get("rss_bytes", 0),
+            "nodrix_node_executor_rss_bytes": resources.get("executor_rss_bytes", 0),
+            "nodrix_node_shared_buffer_bytes": resources.get("shared_buffer_bytes", 0),
+            "nodrix_node_estimated_queue_bytes": resources.get("estimated_queue_bytes", 0),
+        })
         health = dict(node.get("health", {}))
         metrics["nodrix_node_ready"] = 1 if health.get("ready") else 0
         metrics["nodrix_node_alive"] = 1 if health.get("alive") else 0
@@ -38,6 +46,14 @@ def prometheus_text(snapshot: dict[str, Any]) -> str:
         lines.append(f'nodrix_edge_dropped_total{{{labels}}} {int(edge.get("dropped", 0))}')
         lines.append(f'nodrix_edge_queue_depth{{{labels}}} {int(edge.get("depth", 0))}')
         lines.append(f'nodrix_edge_bytes_total{{{labels}}} {int(edge.get("bytes", 0))}')
+    system = dict(snapshot.get("system", {}))
+    for metric, key in (
+        ("nodrix_system_memory_total_bytes", "memory_total_bytes"),
+        ("nodrix_system_memory_available_bytes", "memory_available_bytes"),
+        ("nodrix_system_temperature_c", "temperature_c"),
+    ):
+        if key in system:
+            lines.append(f"{metric} {float(system[key])}")
     for name, raw in dict(snapshot.get("streams", {})).items():
         stream = dict(raw)
         label = json.dumps(str(name))
