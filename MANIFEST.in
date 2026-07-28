@@ -8,3 +8,4 @@ recursive-include src/nodrix/native *.hpp *.cpp CMakeLists.txt
 recursive-include wiki *.md
 recursive-include scripts *.py *.sh
 prune examples/unified_native/.nodrix
+include offline-requirements.txt

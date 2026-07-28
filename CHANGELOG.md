@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1 — Packaging and installation stabilization
+
+- Fixed the PyPI release matrix by publishing supported Linux x86-64, Linux ARM64 and macOS Apple Silicon wheels without the failing macOS Intel job.
+- Updated official GitHub Actions to Node.js 24 based versions.
+- Pinned cibuildwheel 3.4.1 for reproducible releases.
+- Reduced the source-build requirement to `setuptools>=68` and moved license-file discovery to stable setuptools metadata.
+- Added offline-installation tooling and Raspberry Pi documentation.
+- Kept the public API, Plugin ABI 1.0, pipeline schema and runtime behavior unchanged.
+
 ## 1.0.0 — Production Runtime
 
 - Fixed the public Python API for the Nodrix 1.x line.

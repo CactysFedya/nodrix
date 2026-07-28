@@ -20,7 +20,7 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "nodrix==1.0.0\n",
+    "requirements.txt": "nodrix==1.0.1\n",
     ".gitignore": ".nodrix/\noutputs/*\n!outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
@@ -224,7 +224,7 @@ def _vision_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[viewer]==1.0.0\n",
+        "requirements.txt": "nodrix[viewer]==1.0.1\n",
         "nodes/detector.py": dedent(
             '''
             import numpy as np
@@ -280,7 +280,7 @@ def _media_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[media,viewer]==1.0.0\n",
+        "requirements.txt": "nodrix[media,viewer]==1.0.1\n",
         "README.md": dedent(
             f"""
             # {project_name}

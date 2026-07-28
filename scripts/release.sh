@@ -12,7 +12,7 @@ if ! grep -Eq "^## (\[$VERSION\]|$VERSION)( |$)" CHANGELOG.md; then
   exit 1
 fi
 
-git add pyproject.toml src/nodrix/__init__.py src/nodrix/native/CMakeLists.txt src/nodrix/project_templates.py CHANGELOG.md
+git add pyproject.toml CITATION.cff src/nodrix/__init__.py src/nodrix/native/CMakeLists.txt src/nodrix/project_templates.py CHANGELOG.md
 git commit -m "Release Nodrix $VERSION"
 git tag -s "$TAG" -m "Nodrix $VERSION" || git tag -a "$TAG" -m "Nodrix $VERSION"
 git push origin main "$TAG"

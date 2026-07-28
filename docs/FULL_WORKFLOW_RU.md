@@ -1,11 +1,11 @@
-# Nodrix 1.0.0: полный путь от проекта до production-запуска
+# Nodrix 1.0.1: полный путь от проекта до production-запуска
 
 ## 1. Установка
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install nodrix_runtime-1.0.0.tar.gz
+pip install nodrix-1.0.1.tar.gz
 nodrix --version
 ```
 

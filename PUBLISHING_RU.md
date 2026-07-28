@@ -66,24 +66,24 @@ Repository → Settings → Environments → New environment → pypi
 
 Рекомендуется включить Required reviewers. Секрет `PYPI_TOKEN` добавлять не нужно.
 
-## 4. Первый релиз 1.0.0
+## 4. Релиз 1.0.1
 
 После push основного репозитория:
 
 ```bash
-git tag -s v1.0.0 -m "Nodrix 1.0.0"
+git tag -s v1.0.1 -m "Nodrix 1.0.1"
 ```
 
 Если GPG-подпись не настроена:
 
 ```bash
-git tag -a v1.0.0 -m "Nodrix 1.0.0"
+git tag -a v1.0.1 -m "Nodrix 1.0.1"
 ```
 
 Затем:
 
 ```bash
-git push origin v1.0.0
+git push origin v1.0.1
 ```
 
 GitHub Actions автоматически:
@@ -131,3 +131,7 @@ python -m twine upload dist/*
 ```
 
 Используй project-scoped PyPI API token и не сохраняй его в репозитории или `.pypirc` внутри проекта.
+
+## Матрица 1.0.1
+
+Релиз собирает wheels для Linux x86-64, Linux ARM64 и macOS Apple Silicon. macOS Intel временно исключён и не блокирует публикацию.

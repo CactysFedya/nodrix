@@ -1,4 +1,4 @@
-# Nodrix 1.0.0
+# Nodrix 1.0.1
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -41,13 +41,24 @@ pip install "nodrix[viewer]"
 pip install "nodrix[media]"
 ```
 
+
+### Raspberry Pi and offline source installation
+
+Nodrix 1.0.1 can be built without PyPI build isolation when the runtime dependencies are already present:
+
+```bash
+python3 -m pip install . --no-build-isolation --no-deps
+```
+
+Use `scripts/install_offline.sh` for a dependency preflight. See [docs/OFFLINE_INSTALL_RU.md](docs/OFFLINE_INSTALL_RU.md).
+
 For an isolated CLI installation:
 
 ```bash
 pipx install nodrix
 ```
 
-GitHub Releases provide prebuilt Linux x86-64, Linux ARM64 and macOS wheels. When a compatible wheel is unavailable, `pip` builds the included C++20 extensions from the source distribution, which requires a C++ compiler and Python development headers.
+GitHub Releases provide prebuilt Linux x86-64, Linux ARM64 and macOS Apple Silicon wheels. When a compatible wheel is unavailable, `pip` builds the included C++20 extensions from the source distribution, which requires a C++ compiler and Python development headers.
 
 ## Empty project and templates
 
@@ -230,4 +241,4 @@ Nodrix Plugin ABI 1.0 uses numeric ABI `65536` and feature flags for typed ports
 
 Nodrix 1.0 stabilizes the contracts and production control plane. Hardware-specific CUDA IPC mapping, full V4L2 DMA-BUF capture/requeue, native libav nodes, QUIC/UDP data plane, TLS certificates, ROS 2 bridge, and ready-made detector/tracker packs remain later backends or releases.
 
-See [docs/FULL_WORKFLOW_RU.md](docs/FULL_WORKFLOW_RU.md), [docs/RELEASE_1.0.0.md](docs/RELEASE_1.0.0.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).
+See [docs/FULL_WORKFLOW_RU.md](docs/FULL_WORKFLOW_RU.md), [docs/RELEASE_1.0.1.md](docs/RELEASE_1.0.1.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).

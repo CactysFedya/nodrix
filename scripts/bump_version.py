@@ -29,6 +29,7 @@ def main() -> int:
 
     replace(ROOT / "pyproject.toml", r'^version = "[^"]+"', f'version = "{version}"')
     replace(ROOT / "src/nodrix/__init__.py", r'^__version__ = "[^"]+"', f'__version__ = "{version}"')
+    replace(ROOT / "CITATION.cff", r"^version: [^\n]+", f"version: {version}")
     replace(
         ROOT / "src/nodrix/native/CMakeLists.txt",
         r"project\(nodrix_native VERSION [^ ]+",
