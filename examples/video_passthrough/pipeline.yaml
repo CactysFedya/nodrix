@@ -1,0 +1,31 @@
+apiVersion: nodrix.dev/v1
+kind: Pipeline
+metadata:
+  name: video-resize
+runtime:
+  engine: unified
+  mode: offline
+nodes:
+  source:
+    uses: vision.video_source
+    parameters:
+      uri: ./input.mp4
+      max_frames: 300
+  resize:
+    uses: vision.resize
+    parameters:
+      width: 640
+      height: 360
+  writer:
+    uses: sink.video_writer
+    parameters:
+      path: resized.mp4
+      fps: 30
+edges:
+  - from: source.frame
+    to: resize.frame
+    queue:
+      capacity: 2
+      policy: block
+  - from: resize.frame
+    to: writer.frame

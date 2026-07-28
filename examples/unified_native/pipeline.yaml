@@ -1,0 +1,28 @@
+apiVersion: nodrix.dev/v1
+kind: Pipeline
+metadata:
+  name: unified-python-cpp-video
+runtime:
+  engine: unified
+  mode: offline
+  type_validation: always
+nodes:
+  source:
+    uses: vision.video_source
+    parameters:
+      uri: ../video_passthrough/input.mp4
+      max_frames: 60
+  native_stage:
+    uses: native:../../.nodrix/native-build/libnodrix_demo_filter.so#demo.frame_passthrough
+  writer:
+    uses: sink.video_writer
+    parameters:
+      path: unified-output.mp4
+      fps: 30
+edges:
+  - from: source.frame
+    to: native_stage.frame
+    queue: {capacity: 2, policy: block}
+  - from: native_stage.frame
+    to: writer.frame
+    queue: {capacity: 2, policy: block}

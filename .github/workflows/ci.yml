@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-tests:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ffmpeg g++
+
+      - name: Install Nodrix and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,all]"
+
+      - name: Build native extensions in place
+        run: python setup.py build_ext --inplace
+
+      - name: Run tests
+        run: pytest -q
+
+      - name: CLI smoke test
+        run: |
+          nodrix --version
+          nodrix --help >/dev/null
+          nodrix-viewer --help >/dev/null
+
+  native-tests:
+    name: C++ Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S src/nodrix/native -B build/native -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build/native --parallel 2
+
+      - name: Test
+        run: ctest --test-dir build/native --output-on-failure
+
+  package-check:
+    name: Build sdist and wheel
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build tools
+        run: python -m pip install --upgrade build twine
+
+      - name: Check version consistency
+        run: python scripts/check_release.py --version-only
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Validate distributions
+        run: python -m twine check dist/*
+
+      - name: Install built wheel
+        run: |
+          python -m venv /tmp/nodrix-wheel-test
+          /tmp/nodrix-wheel-test/bin/python -m pip install --upgrade pip
+          /tmp/nodrix-wheel-test/bin/python -m pip install dist/*.whl
+          /tmp/nodrix-wheel-test/bin/nodrix --version

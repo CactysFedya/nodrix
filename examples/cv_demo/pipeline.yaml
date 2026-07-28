@@ -1,0 +1,47 @@
+apiVersion: nodrix.dev/v1
+kind: Pipeline
+metadata:
+  name: cv-detector-tracker-reid
+  description: Demonstrates user-defined detector, tracker, filter and Re-ID nodes.
+runtime:
+  engine: unified
+  mode: realtime
+nodes:
+  camera:
+    uses: ./nodes.py:SyntheticFrameSource
+    parameters:
+      count: 30
+      width: 640
+      height: 360
+  detector:
+    uses: ./nodes.py:DemoDetector
+  tracker:
+    uses: ./nodes.py:DemoTracker
+  filter:
+    uses: ./nodes.py:TrackFilter
+    parameters:
+      confidence: 0.6
+  reid:
+    uses: ./nodes.py:DemoReID
+  console:
+    uses: sink.console
+  record:
+    uses: sink.jsonl
+    parameters:
+      path: identified_tracks.jsonl
+edges:
+  - from: camera.frame
+    to: detector.frame
+    queue:
+      capacity: 1
+      policy: latest
+  - from: detector.detections
+    to: tracker.detections
+  - from: tracker.tracks
+    to: filter.tracks
+  - from: filter.tracks
+    to: reid.tracks
+  - from: reid.identified_tracks
+    to: console.input
+  - from: reid.identified_tracks
+    to: record.input
