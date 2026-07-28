@@ -5,7 +5,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 import re
-from typing import Any, Literal
+from typing import Any, Iterable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 import yaml
@@ -232,8 +232,11 @@ def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]
     return result
 
 
-def canonical_config_path(dotted: str) -> str:
+def canonical_config_path(dotted: str, node_names: Iterable[str] | None = None) -> str:
     parts = [part for part in dotted.split(".") if part]
+    known_nodes = set(node_names or ())
+    if len(parts) >= 2 and parts[0] in known_nodes:
+        parts.insert(0, "nodes")
     if len(parts) >= 3 and parts[0] == "nodes" and parts[2] not in {
         "uses", "parameters", "inputs", "outputs", "synchronization", "execution",
         "failure", "health", "resources", "memory",
@@ -243,7 +246,7 @@ def canonical_config_path(dotted: str) -> str:
 
 
 def _set_path(target: dict[str, Any], dotted: str, value: Any) -> None:
-    dotted = canonical_config_path(dotted)
+    dotted = canonical_config_path(dotted, dict(target.get("nodes") or {}).keys())
     parts = [part for part in dotted.split(".") if part]
     if not parts:
         raise ManifestError("Override path cannot be empty")
@@ -281,16 +284,63 @@ def _parse_flow_item(item: Any) -> dict[str, Any]:
     raise ManifestError(f"Unsupported compact flow item: {item!r}")
 
 
-def _normalize_compact(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
-    compact = "name" in raw or "flow" in raw or "publish" in raw or any(
+def _normalize_node(node_name: str, raw_node: Any, *, source: str) -> tuple[dict[str, Any], dict[str, str]]:
+    if not isinstance(raw_node, dict):
+        raise ManifestError(f"Node {node_name!r} from {source} must be a mapping")
+    uses = raw_node.get("use", raw_node.get("uses"))
+    if not uses:
+        raise ManifestError(f"Node {node_name!r} from {source} requires 'use'")
+    node: dict[str, Any] = {"uses": uses}
+    direct_parameters = {key: deepcopy(value) for key, value in raw_node.items() if key not in _NODE_RESERVED}
+    explicit_parameters = deepcopy(raw_node.get("parameters") or {})
+    node["parameters"] = _deep_merge(direct_parameters, explicit_parameters)
+    for key in _NODE_RESERVED - {"use", "uses", "parameters"}:
+        if key in raw_node:
+            node[key] = deepcopy(raw_node[key])
+    sources = {
+        f"nodes.{node_name}.{path}": source
+        for path in _flatten_paths(node)
+    }
+    return node, sources
+
+
+def _block_path(value: Any, *, name: str, base_dir: Path) -> Path:
+    if not isinstance(value, (str, Path)):
+        raise ManifestError(f"Block {name!r} must be a YAML file path")
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = base_dir / path
+    path = path.resolve()
+    if not path.is_file():
+        raise ManifestError(f"Block {name!r} does not exist: {path}")
+    return path
+
+
+def load_block(path: str | Path, *, name: str | None = None) -> NodeConfig:
+    block_path = Path(path).expanduser().resolve()
+    try:
+        raw = yaml.safe_load(block_path.read_text(encoding="utf-8"))
+        node, _ = _normalize_node(name or block_path.stem, raw, source=f"block:{block_path}")
+        return NodeConfig.model_validate(_expand_env(node))
+    except (OSError, yaml.YAMLError, ValidationError, TypeError, ValueError) as exc:
+        if isinstance(exc, ManifestError):
+            raise
+        raise ManifestError(f"Cannot load block {block_path}: {exc}") from exc
+
+
+def _normalize_compact(
+    raw: dict[str, Any], *, base_dir: Path
+) -> tuple[dict[str, Any], dict[str, str], dict[str, Path]]:
+    compact = "name" in raw or "flow" in raw or "publish" in raw or "blocks" in raw or any(
         isinstance(item, dict) and "use" in item for item in dict(raw.get("nodes") or {}).values()
     )
     sources: dict[str, str] = {}
+    block_files: dict[str, Path] = {}
     if not compact:
         canonical = deepcopy(raw)
         for path in _flatten_paths(canonical):
             sources[path] = "pipeline.yaml"
-        return canonical, sources
+        return canonical, sources, block_files
 
     name = raw.get("name") or dict(raw.get("metadata") or {}).get("name")
     if not name:
@@ -311,20 +361,31 @@ def _normalize_compact(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, s
     if profile:
         canonical["runtime"]["profile"] = profile
 
+    raw_blocks = raw.get("blocks") or {}
+    if not isinstance(raw_blocks, dict):
+        raise ManifestError("Compact 'blocks' must be a mapping of name: YAML path")
+    for block_name, block_ref in raw_blocks.items():
+        block_name = str(block_name)
+        block_file = _block_path(block_ref, name=block_name, base_dir=base_dir)
+        try:
+            raw_block = yaml.safe_load(block_file.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            raise ManifestError(f"Cannot read block {block_name!r} from {block_file}: {exc}") from exc
+        node, node_sources = _normalize_node(
+            block_name,
+            raw_block,
+            source=f"block:{block_file.relative_to(base_dir) if block_file.is_relative_to(base_dir) else block_file}",
+        )
+        canonical["nodes"][block_name] = node
+        sources.update(node_sources)
+        block_files[block_name] = block_file
+
     for node_name, raw_node in dict(raw.get("nodes") or {}).items():
-        if not isinstance(raw_node, dict):
-            raise ManifestError(f"Node {node_name!r} must be a mapping")
-        uses = raw_node.get("use", raw_node.get("uses"))
-        if not uses:
-            raise ManifestError(f"Node {node_name!r} requires 'use'")
-        node: dict[str, Any] = {"uses": uses}
-        direct_parameters = {key: deepcopy(value) for key, value in raw_node.items() if key not in _NODE_RESERVED}
-        explicit_parameters = deepcopy(raw_node.get("parameters") or {})
-        node["parameters"] = _deep_merge(direct_parameters, explicit_parameters)
-        for key in _NODE_RESERVED - {"use", "uses", "parameters"}:
-            if key in raw_node:
-                node[key] = deepcopy(raw_node[key])
+        if node_name in canonical["nodes"]:
+            raise ManifestError(f"Node/block name is duplicated: {node_name!r}")
+        node, node_sources = _normalize_node(str(node_name), raw_node, source="compact pipeline.yaml")
         canonical["nodes"][node_name] = node
+        sources.update(node_sources)
 
     flow = raw.get("flow", raw.get("edges", []))
     canonical["edges"] = [_parse_flow_item(item) for item in flow]
@@ -352,8 +413,28 @@ def _normalize_compact(raw: dict[str, Any]) -> tuple[dict[str, Any], dict[str, s
         canonical["streams"]["exports"] = exports
 
     for path in _flatten_paths(canonical):
-        sources[path] = "compact pipeline.yaml"
-    return canonical, sources
+        sources.setdefault(path, "compact pipeline.yaml")
+    return canonical, sources, block_files
+
+
+def _apply_block_overrides(raw: dict[str, Any], overrides: list[str] | None) -> dict[str, Any]:
+    if not overrides:
+        return raw
+    result = deepcopy(raw)
+    blocks = result.get("blocks")
+    if not isinstance(blocks, dict):
+        raise ManifestError("--block requires a compact manifest with a 'blocks' mapping")
+    for expression in overrides:
+        if "=" not in expression:
+            raise ManifestError(f"Block override must use name=path syntax: {expression!r}")
+        name, path = (part.strip() for part in expression.split("=", 1))
+        if not name or not path:
+            raise ManifestError(f"Block override must use name=path syntax: {expression!r}")
+        if name not in blocks:
+            available = ", ".join(sorted(str(item) for item in blocks)) or "none"
+            raise ManifestError(f"Unknown block {name!r}; available blocks: {available}")
+        blocks[name] = path
+    return result
 
 
 def _apply_profile(
@@ -403,6 +484,7 @@ class ManifestLoadResult:
     canonical: dict[str, Any]
     sources: dict[str, str]
     path: Path
+    block_files: dict[str, Path]
 
 
 def load_manifest_details(
@@ -410,6 +492,7 @@ def load_manifest_details(
     *,
     profile: str | None = None,
     overrides: list[str] | None = None,
+    block_overrides: list[str] | None = None,
     expand_env: bool = True,
 ) -> ManifestLoadResult:
     manifest_path = Path(path).expanduser().resolve()
@@ -419,14 +502,15 @@ def load_manifest_details(
         loaded = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         if not isinstance(loaded, dict):
             raise ManifestError("Pipeline document must be a mapping")
-        canonical, sources = _normalize_compact(loaded)
+        loaded = _apply_block_overrides(loaded, block_overrides)
+        canonical, sources, block_files = _normalize_compact(loaded, base_dir=manifest_path.parent)
         canonical, sources = _apply_profile(canonical, sources, profile)
         for expression in overrides or []:
             if "=" not in expression:
                 raise ManifestError(f"Override must use path=value syntax: {expression!r}")
             dotted, raw_value = expression.split("=", 1)
             parsed_value = yaml.safe_load(raw_value)
-            canonical_path = canonical_config_path(dotted.strip())
+            canonical_path = canonical_config_path(dotted.strip(), dict(canonical.get("nodes") or {}).keys())
             _set_path(canonical, canonical_path, parsed_value)
             sources[canonical_path] = "CLI --set"
         expanded = _expand_env(canonical) if expand_env else canonical
@@ -436,7 +520,7 @@ def load_manifest_details(
         if isinstance(exc, ManifestError):
             raise
         raise ManifestError(f"Cannot load {manifest_path}: {exc}") from exc
-    return ManifestLoadResult(manifest, resolved, sources, manifest_path)
+    return ManifestLoadResult(manifest, resolved, sources, manifest_path, block_files)
 
 
 def load_manifest(
@@ -444,8 +528,14 @@ def load_manifest(
     *,
     profile: str | None = None,
     overrides: list[str] | None = None,
+    block_overrides: list[str] | None = None,
 ) -> PipelineManifest:
-    return load_manifest_details(path, profile=profile, overrides=overrides).manifest
+    return load_manifest_details(
+        path,
+        profile=profile,
+        overrides=overrides,
+        block_overrides=block_overrides,
+    ).manifest
 
 
 def dump_manifest(manifest: PipelineManifest, path: str | Path) -> None:

@@ -1,21 +1,38 @@
-# Nodrix roadmap after 1.0
+# Nodrix roadmap after 1.2
 
-## 1.1 — ROS 2 Bridge
+## Completed in 1.1
 
-Typed topics, message conversion, services/actions foundation, parameters, rosbag/`.ndrx` conversion, and zero-copy-aware intra-host bridge paths.
+Compact manifests, performance profiles, auto encoder selection, resolved
+configuration and per-node resource telemetry.
 
-## 1.2 — Vision Pack
+## Completed in 1.2
 
-Official inference adapters, preprocess/postprocess, tracking, Re-ID, overlays and benchmark-ready examples. No algorithm is mandatory; all remain replaceable nodes.
+Reusable single-node YAML Blocks, temporary `--block` replacement, short
+block parameter overrides, block discovery/inspection and lock-file checksums.
 
-## 1.3 — Hardware backends
+## 1.3 — Vision Pack
 
-Production CUDA IPC, V4L2 DMA-BUF capture/requeue, hardware frame import, native libav nodes, and tested Raspberry Pi/NVIDIA paths behind the stable 1.x memory API.
+Official inference adapters, preprocess/postprocess, tracking, Re-ID, overlays
+and benchmark-ready examples. No algorithm is mandatory; each major stage
+remains replaceable through a block.
 
-## 1.4 — Distributed orchestration
+## 1.4 — ROS 2 Bridge
 
-QUIC/UDP transports, stronger identity/TLS, multi-host launch and remote lifecycle management. The data plane remains peer-to-peer.
+Typed topics, message conversion, services/actions foundation, parameters,
+rosbag/`.ndrx` conversion, and zero-copy-aware intra-host bridge paths.
+
+## 1.5 — Hardware backends
+
+Production CUDA IPC, V4L2 DMA-BUF capture/requeue, hardware frame import,
+native libav nodes, and tested Raspberry Pi/NVIDIA paths behind the stable 1.x
+memory API.
+
+## 1.6 — Distributed orchestration
+
+QUIC/UDP transports, stronger identity/TLS, multi-host launch and remote
+lifecycle management. The data plane remains peer-to-peer.
 
 ## 2.0
 
-Reserved for unavoidable breaking changes to the public Python SDK, manifest format, wire format or Plugin ABI.
+Reserved for unavoidable breaking changes to the public Python SDK, manifest
+format, wire format or Plugin ABI.

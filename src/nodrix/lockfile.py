@@ -10,7 +10,7 @@ import sys
 from typing import Any, Iterable
 
 from . import __version__
-from .manifest import load_manifest
+from .manifest import load_manifest_details
 from .packages import resolve_package_node
 
 LOCK_FORMAT = "nodrix-lock/1"
@@ -25,8 +25,10 @@ def sha256_file(path: Path) -> str:
 
 
 def _candidate_files(project_dir: Path, manifest_path: Path) -> Iterable[Path]:
-    manifest = load_manifest(manifest_path)
+    details = load_manifest_details(manifest_path)
+    manifest = details.manifest
     yield manifest_path
+    yield from details.block_files.values()
     package_roots: set[Path] = set()
     for config in manifest.nodes.values():
         uses = resolve_package_node(config.uses)

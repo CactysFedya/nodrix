@@ -19,7 +19,7 @@ import yaml
 
 from .errors import NodrixError
 from .cv_types import TYPE_REGISTRY
-from .manifest import canonical_config_path, load_manifest, load_manifest_details
+from .manifest import canonical_config_path, load_block, load_manifest, load_manifest_details
 from .hybrid_runtime import HybridPipelineRuntime
 from .native_runtime import NATIVE_BUILTINS, NativePipelineRuntime, NativeToolchain
 from .registry import BUILTINS, load_node_class
@@ -54,6 +54,7 @@ device_app = typer.Typer(help="Inspect DLPack, DMA-BUF, V4L2, CUDA and native de
 package_app = typer.Typer(help="Build and manage local Nodrix packages.")
 runs_app = typer.Typer(help="Inspect reproducible run artifacts.")
 config_app = typer.Typer(help="Inspect resolved profiles and configuration values.")
+block_app = typer.Typer(help="List and inspect reusable YAML node blocks.")
 app.add_typer(node_app, name="node")
 app.add_typer(stream_app, name="stream")
 app.add_typer(native_app, name="native")
@@ -65,6 +66,7 @@ app.add_typer(device_app, name="device")
 app.add_typer(package_app, name="package")
 app.add_typer(runs_app, name="runs")
 app.add_typer(config_app, name="config")
+app.add_typer(block_app, name="block")
 console = Console()
 
 
@@ -108,9 +110,19 @@ def root(
 
 
 def _runtime(
-    path: Path, run_root: Path | None = None, *, profile: str | None = None, overrides: list[str] | None = None
+    path: Path,
+    run_root: Path | None = None,
+    *,
+    profile: str | None = None,
+    overrides: list[str] | None = None,
+    block_overrides: list[str] | None = None,
 ):
-    manifest = load_manifest(path, profile=profile, overrides=overrides)
+    manifest = load_manifest(
+        path,
+        profile=profile,
+        overrides=overrides,
+        block_overrides=block_overrides,
+    )
     native_only = all(
         config.uses.startswith("native.") or config.uses.startswith("native:")
         for config in manifest.nodes.values()
@@ -163,10 +175,16 @@ def validate(
     json_output: Annotated[bool, typer.Option("--json")] = False,
     profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block", help="Replace a reusable block: name=path.yaml")] = None,
 ) -> None:
     """Validate manifest, plugins, memory paths, security, and graph safety."""
     try:
-        runtime = _runtime(pipeline, profile=profile, overrides=set_values)
+        runtime = _runtime(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
         desc = runtime.describe()
         issues = validate_production(runtime.manifest, desc, strict=strict)
     except Exception as exc:
@@ -243,11 +261,17 @@ def inspect(
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Write resolved YAML to a file")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block", help="Replace a reusable block: name=path.yaml")] = None,
     interval: Annotated[float, typer.Option("--interval", min=0.1, max=10.0)] = 0.5,
 ) -> None:
     """Show a static graph, or execute it with live telemetry."""
     try:
-        details = load_manifest_details(pipeline, profile=profile, overrides=set_values)
+        details = load_manifest_details(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
         if resolved:
             rendered = yaml.safe_dump(details.manifest.model_dump(by_alias=True, exclude_none=True), sort_keys=False)
             if output is not None:
@@ -256,7 +280,12 @@ def inspect(
             else:
                 console.print(rendered, markup=False, end="")
             return
-        runtime = _runtime(pipeline, profile=profile, overrides=set_values)
+        runtime = _runtime(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
         if live:
             report = asyncio.run(_inspect_live(runtime, interval))
             console.print(f"[green]Completed[/green] {report['pipeline']} in {report['duration_seconds']:.3f}s")
@@ -297,10 +326,11 @@ def run(
     metrics_listen: Annotated[str | None, typer.Option("--metrics-listen", help="Prometheus endpoint, for example 127.0.0.1:9464")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block", help="Replace a reusable block: name=path.yaml")] = None,
 ) -> None:
     """Execute a pipeline with reproducibility and optional Prometheus metrics."""
-    if locked and (profile is not None or set_values):
-        console.print("[red]--locked cannot be combined with --profile or --set.[/red] Create or verify the lock for the exact manifest you intend to run.")
+    if locked and (profile is not None or set_values or block_values):
+        console.print("[red]--locked cannot be combined with --profile, --set, or --block.[/red] Create or verify the lock for the exact manifest you intend to run.")
         raise typer.Exit(2)
     if locked:
         try:
@@ -314,7 +344,13 @@ def run(
             raise typer.Exit(1)
     metrics_server = None
     try:
-        runtime = _runtime(pipeline, run_root=run_root, profile=profile, overrides=set_values)
+        runtime = _runtime(
+            pipeline,
+            run_root=run_root,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
         if metrics_listen:
             if not hasattr(runtime, "snapshot"):
                 raise NodrixError("--metrics-listen currently requires engine: unified")
@@ -497,11 +533,24 @@ def benchmark(
     repeat: Annotated[int, typer.Option("--repeat", min=1)] = 3,
     warmup: Annotated[int, typer.Option("--warmup", min=0)] = 1,
     output: Annotated[Path | None, typer.Option("--output", help="Write benchmark summary JSON")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block")] = None,
 ) -> None:
     """Run the same pipeline repeatedly and aggregate runtime/node latency."""
     for _ in range(warmup):
-        asyncio.run(_runtime(pipeline).run())
-    reports = [asyncio.run(_runtime(pipeline).run()) for _ in range(repeat)]
+        asyncio.run(_runtime(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        ).run())
+    reports = [asyncio.run(_runtime(
+        pipeline,
+        profile=profile,
+        overrides=set_values,
+        block_overrides=block_values,
+    ).run()) for _ in range(repeat)]
     durations = [r["duration_seconds"] for r in reports]
     node_names = reports[0]["nodes"].keys()
     nodes = {}
@@ -851,6 +900,99 @@ def node_info(reference: str, base_dir: Path = Path.cwd()) -> None:
     console.print("Outputs:", cls.output_types)
 
 
+@block_app.command("list")
+def block_list_command(
+    project: Annotated[Path, typer.Option("--project", "-p", help="Project directory containing blocks/")] = Path.cwd(),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List reusable block YAML files under blocks/."""
+    project = project.expanduser().resolve()
+    root = project / "blocks"
+    if not root.is_dir():
+        if json_output:
+            console.print_json("[]")
+        else:
+            console.print(f"[yellow]No blocks directory:[/yellow] {root}")
+        return
+    rows: list[dict[str, object]] = []
+    for path in sorted((*root.rglob("*.yaml"), *root.rglob("*.yml"))):
+        try:
+            config = load_block(path)
+            rows.append({
+                "name": path.stem,
+                "category": str(path.parent.relative_to(root)) if path.parent != root else "-",
+                "path": str(path.relative_to(project)),
+                "uses": config.uses,
+                "parameters": config.parameters,
+            })
+        except Exception as exc:
+            rows.append({
+                "name": path.stem,
+                "category": str(path.parent.relative_to(root)) if path.parent != root else "-",
+                "path": str(path.relative_to(project)),
+                "uses": f"ERROR: {exc}",
+                "parameters": {},
+            })
+    if json_output:
+        console.print_json(json.dumps(rows, default=str))
+        return
+    table = Table("Category", "Block", "Implementation", "Path")
+    for row in rows:
+        table.add_row(str(row["category"]), str(row["name"]), str(row["uses"]), str(row["path"]))
+    console.print(table)
+    if not rows:
+        console.print("[yellow]No YAML blocks found.[/yellow]")
+
+
+@block_app.command("inspect")
+def block_inspect_command(
+    block: Annotated[Path, typer.Argument(exists=True, readable=True, help="Block YAML file")],
+    project: Annotated[Path, typer.Option("--project", "-p", help="Base directory for custom node paths")] = Path.cwd(),
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Show one block implementation, ports, and configured parameters."""
+    try:
+        config = load_block(block)
+        inputs = dict(config.inputs)
+        outputs = dict(config.outputs)
+        class_name = None
+        if not inputs or not outputs:
+            cls = load_node_class(config.uses, base_dir=project.expanduser().resolve())
+            class_name = f"{cls.__module__}.{cls.__name__}"
+            inputs = inputs or dict(cls.input_types)
+            outputs = outputs or dict(cls.output_types)
+    except Exception as exc:
+        console.print(f"[red]Cannot inspect block:[/red] {exc}")
+        raise typer.Exit(1)
+    payload = {
+        "path": str(block.expanduser().resolve()),
+        "uses": config.uses,
+        "class": class_name,
+        "inputs": inputs,
+        "outputs": outputs,
+        "parameters": config.parameters,
+        "execution": config.execution.model_dump(exclude_none=True),
+        "health": config.health.model_dump(exclude_none=True),
+    }
+    if json_output:
+        console.print_json(json.dumps(payload, default=str))
+        return
+    console.print(f"[bold]{block.stem}[/bold]")
+    console.print(f"Implementation: {config.uses}")
+    if class_name:
+        console.print(f"Class: {class_name}")
+    ports = Table("Direction", "Port", "Type")
+    for name, message_type in inputs.items():
+        ports.add_row("input", str(name), str(message_type))
+    for name, message_type in outputs.items():
+        ports.add_row("output", str(name), str(message_type))
+    console.print(ports)
+    params = Table("Parameter", "Value")
+    for name, value in sorted(config.parameters.items()):
+        params.add_row(str(name), yaml.safe_dump(value, sort_keys=False).strip())
+    console.print(params)
+
+
 @stream_app.command("list")
 def stream_list(
     pipeline: Annotated[Path | None, typer.Option("--pipeline", "-p", help="Show exports declared by a local manifest")] = None,
@@ -1088,11 +1230,17 @@ def config_show_command(
     pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
     profile: Annotated[str | None, typer.Option("--profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block")] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
 ) -> None:
     """Show the fully resolved canonical manifest."""
     try:
-        details = load_manifest_details(pipeline, profile=profile, overrides=set_values)
+        details = load_manifest_details(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
     except Exception as exc:
         console.print(f"[red]Cannot resolve configuration:[/red] {exc}")
         raise typer.Exit(1)
@@ -1110,11 +1258,17 @@ def config_explain_command(
     pipeline: Annotated[Path, typer.Option("--pipeline", "-p", exists=True, readable=True)] = Path("pipeline.yaml"),
     profile: Annotated[str | None, typer.Option("--profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block")] = None,
 ) -> None:
     """Explain the final value and where it came from."""
     try:
-        details = load_manifest_details(pipeline, profile=profile, overrides=set_values)
-        canonical_path = canonical_config_path(path)
+        details = load_manifest_details(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
+        canonical_path = canonical_config_path(path, details.manifest.nodes.keys())
         value = _config_value(details.canonical, canonical_path)
     except Exception as exc:
         console.print(f"[red]Cannot explain {path!r}:[/red] {exc}")

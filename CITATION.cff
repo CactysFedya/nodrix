@@ -4,7 +4,7 @@ message: "If you use Nodrix in research, please cite the software repository and
 type: software
 authors:
   - name: CactysFedya
-version: 1.1.0
+version: 1.2.0
 date-released: 2026-07-28
 repository-code: "https://github.com/CactysFedya/nodrix"
 url: "https://pypi.org/project/nodrix/"

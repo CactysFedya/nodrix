@@ -6,6 +6,7 @@
 - [CLI Reference](CLI-Reference)
 - [Pipeline Manifest](Pipeline-Manifest)
 - [Compact Manifest](Compact-Manifest)
+- [Reusable Blocks](Reusable-Blocks)
 - [Runtime Profiles](Runtime-Profiles)
 - [Resource Telemetry](Resource-Telemetry)
 - [Python SDK](Python-SDK)
@@ -26,6 +27,7 @@
 
 ## Releases
 
+- [1.2.0](Version-1.2.0)
 - [1.1.0](Version-1.1.0)
 - [1.0.1](Version-1.0.1)
 - [1.0.0](Version-1.0.0)

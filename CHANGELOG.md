@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0 — Reusable Blocks
+
+- Added top-level `blocks:` for reusable single-node YAML configurations.
+- Added repeatable `--block name=path.yaml` replacement to run, validate, inspect, benchmark, and config commands.
+- Added short block parameter overrides such as `--set detector.conf=0.12`.
+- Added `nodrix block list` and `nodrix block inspect` with JSON output.
+- Added exact imported-block checksums to `nodrix.lock`; unused alternatives are not locked.
+- Updated the vision template to demonstrate organized camera, detector, and output blocks.
+- Preserved the canonical manifest, public Node API, Plugin ABI 1.0, wire protocol, and runtime performance.
+
 ## 1.1.0 — Compact configuration and resource telemetry
 
 - Added compact manifests with `use`, direct node parameters, `flow`, and `publish`.

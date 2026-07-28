@@ -14,4 +14,4 @@ Start with [Full Workflow](Full-Workflow) or [Production Runtime](Production-Run
 
 ## 1.1
 
-Compact manifests, performance profiles and per-node CPU/RAM telemetry are available in Nodrix 1.1.
+Nodrix 1.2 adds reusable YAML Blocks on top of compact manifests, performance profiles and per-node CPU/RAM telemetry.

@@ -1,4 +1,4 @@
-# Nodrix 1.1.0
+# Nodrix 1.2.0
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -8,38 +8,44 @@
 Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
 
 
-## Nodrix 1.1 highlights
+## Nodrix 1.2 highlights
 
-A low-latency RTSP graph can now be described compactly:
+Keep the graph readable and move replaceable node settings into `blocks/`:
 
 ```yaml
-name: raspberry-rtsp-preview
+name: raspberry-vision
 profile: realtime-low-latency
 
-nodes:
-  camera:
-    use: media.ffmpeg_source
-    uri: ${RTSP_URL}
-  encoder:
-    use: media.ffmpeg_encoder
-    encoder: auto
+blocks:
+  camera: blocks/camera.yaml
+  detector: blocks/detectors/yolo26n-320.yaml
+  output: blocks/outputs/lan-preview.yaml
 
 flow:
-  - camera.frame -> encoder.frame
+  - camera.frame -> detector.frame
+  - camera.frame -> output.frame
+  - detector.detections -> output.detections
+```
 
-publish:
-  /camera/front/h264:
-    from: encoder.encoded
-    access: token
+```yaml
+# blocks/detectors/yolo26n-320.yaml
+use: vision.ncnn_detector
+model: models/yolo26n-320.ncnn
+imgsz: 320
+conf: 0.18
 ```
 
 ```bash
+nodrix block list
+nodrix block inspect blocks/detectors/yolo26n-320.yaml
+nodrix validate --block detector=blocks/detectors/rtdetr-640.yaml
+nodrix run --block detector=blocks/detectors/rtdetr-640.yaml \
+  --set detector.conf=0.12
 nodrix inspect --resolved
-nodrix run --set nodes.encoder.crf=18
-nodrix top
 ```
 
-Compact manifests are resolved before graph construction, so they do not add runtime overhead or change memory/copy behavior.
+Blocks are expanded before validation and graph construction. They do not add
+processes, queues, copies, or serialization boundaries.
 
 ## Core model
 
@@ -78,7 +84,7 @@ pip install "nodrix[media]"
 
 ### Raspberry Pi and offline source installation
 
-Nodrix 1.1.0 can be built without PyPI build isolation when the runtime dependencies are already present:
+Nodrix 1.2.0 can be built without PyPI build isolation when the runtime dependencies are already present:
 
 ```bash
 python3 -m pip install . --no-build-isolation --no-deps
@@ -276,4 +282,4 @@ Nodrix Plugin ABI 1.0 uses numeric ABI `65536` and feature flags for typed ports
 
 Nodrix 1.0 stabilizes the contracts and production control plane. Hardware-specific CUDA IPC mapping, full V4L2 DMA-BUF capture/requeue, native libav nodes, QUIC/UDP data plane, TLS certificates, ROS 2 bridge, and ready-made detector/tracker packs remain later backends or releases.
 
-See [docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md), [docs/PROFILES.md](docs/PROFILES.md), [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md), [docs/RELEASE_1.1.0.md](docs/RELEASE_1.1.0.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).
+See [docs/BLOCKS.md](docs/BLOCKS.md), [docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md), [docs/PROFILES.md](docs/PROFILES.md), [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md), [docs/RELEASE_1.2.0.md](docs/RELEASE_1.2.0.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).

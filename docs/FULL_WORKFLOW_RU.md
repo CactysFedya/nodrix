@@ -1,18 +1,18 @@
-# Nodrix 1.1.0: полный путь от проекта до запуска
+# Nodrix 1.2.0: полный путь от проекта до запуска
 
 ## 1. Установка
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install "nodrix[media,viewer]==1.1.0"
+pip install "nodrix[media,viewer]==1.2.0"
 nodrix --version
 ```
 
 На Raspberry Pi без интернета исходный пакет устанавливается так, если зависимости уже перенесены:
 
 ```bash
-pip install nodrix-1.1.0.tar.gz --no-build-isolation --no-deps
+pip install nodrix-1.2.0.tar.gz --no-build-isolation --no-deps
 ```
 
 ## 2. Создание проекта
@@ -171,3 +171,39 @@ nodrix runs compare <run-a> <run-b>
 ```
 
 Каждый запуск содержит source manifest, resolved manifest, lock, status, метрики и итоговый отчёт.
+
+## Заменяемые YAML-блоки
+
+Храни связи в `pipeline.yaml`, а настройки заменяемых узлов — в `blocks/`:
+
+```yaml
+name: vision-app
+profile: realtime-low-latency
+blocks:
+  camera: blocks/camera.yaml
+  detector: blocks/detectors/yolo26n-320.yaml
+  output: blocks/outputs/preview.yaml
+flow:
+  - camera.frame -> detector.frame
+  - camera.frame -> output.frame
+  - detector.detections -> output.detections
+```
+
+Посмотреть блоки и временно заменить детектор:
+
+```bash
+nodrix block list
+nodrix block inspect blocks/detectors/yolo26n-320.yaml
+nodrix validate --strict --block detector=blocks/detectors/rtdetr-640.yaml
+nodrix run --block detector=blocks/detectors/rtdetr-640.yaml \
+  --set detector.conf=0.15
+```
+
+Проверить итоговую конфигурацию:
+
+```bash
+nodrix inspect --resolved
+```
+
+Block-файлы разворачиваются до создания runtime-графа и не добавляют очередей,
+процессов или копирований.

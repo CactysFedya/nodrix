@@ -1,16 +1,16 @@
-# Установка Nodrix 1.1.0
+# Установка Nodrix 1.2.0
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip setuptools wheel
-pip install "nodrix[media,viewer]==1.1.0"
+pip install "nodrix[media,viewer]==1.2.0"
 ```
 
 Локальный release-файл:
 
 ```bash
-pip install nodrix-1.1.0.tar.gz
+pip install nodrix-1.2.0.tar.gz
 ```
 
 Проверка:

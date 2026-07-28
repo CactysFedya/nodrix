@@ -20,7 +20,7 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "nodrix==1.1.0\n",
+    "requirements.txt": "nodrix==1.2.0\n",
     ".gitignore": ".nodrix/\noutputs/*\n!outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
@@ -206,10 +206,10 @@ def _vision_files(project_name: str) -> dict[str, str]:
     pipeline = {
         "name": project_name,
         "profile": "realtime-low-latency",
-        "nodes": {
-            "camera": {"use": "vision.video_source", "uri": 0, "realtime": True, "buffer_size": 1},
-            "detector": {"use": "./nodes/detector.py:Detector"},
-            "preview_encoder": {"use": "vision.jpeg_encoder", "quality": 80},
+        "blocks": {
+            "camera": "blocks/camera.yaml",
+            "detector": "blocks/detectors/empty-fast.yaml",
+            "preview_encoder": "blocks/outputs/jpeg-preview.yaml",
         },
         "flow": [
             "camera.frame -> detector.frame",
@@ -223,7 +223,27 @@ def _vision_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[viewer]==1.1.0\n",
+        "requirements.txt": "nodrix[viewer]==1.2.0\n",
+        "blocks/camera.yaml": yaml.safe_dump({
+            "use": "vision.video_source",
+            "uri": 0,
+            "realtime": True,
+            "buffer_size": 1,
+        }, sort_keys=False),
+        "blocks/detectors/empty-fast.yaml": yaml.safe_dump({
+            "use": "./nodes/detector.py:Detector",
+            "mode": "fast",
+            "conf": 0.25,
+        }, sort_keys=False),
+        "blocks/detectors/empty-debug.yaml": yaml.safe_dump({
+            "use": "./nodes/detector.py:Detector",
+            "mode": "debug",
+            "conf": 0.05,
+        }, sort_keys=False),
+        "blocks/outputs/jpeg-preview.yaml": yaml.safe_dump({
+            "use": "vision.jpeg_encoder",
+            "quality": 80,
+        }, sort_keys=False),
         "nodes/detector.py": dedent(
             '''
             import numpy as np
@@ -246,7 +266,27 @@ def _vision_files(project_name: str) -> dict[str, str]:
                     return {"detections": source.with_updates(type="vision.detections", payload=detections)}
             '''
         ).lstrip(),
-        "README.md": f"# {project_name}\n\n```bash\nnodrix config show\nnodrix run\n# On a laptop:\nnodrix-viewer /{project_name}/preview\n```\n",
+        "README.md": dedent(
+            f"""
+            # {project_name}
+
+            ```bash
+            nodrix block list
+            nodrix block inspect blocks/detectors/empty-fast.yaml
+            nodrix config show
+            nodrix run
+
+            # Replace only the detector for this run:
+            nodrix run --block detector=blocks/detectors/empty-debug.yaml
+            ```
+
+            On a laptop:
+
+            ```bash
+            nodrix-viewer /{project_name}/preview
+            ```
+            """
+        ).lstrip(),
     })
 
 def _media_files(project_name: str) -> dict[str, str]:
@@ -270,7 +310,7 @@ def _media_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[media,viewer]==1.1.0\n",
+        "requirements.txt": "nodrix[media,viewer]==1.2.0\n",
         "README.md": dedent(
             f"""
             # {project_name}

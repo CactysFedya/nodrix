@@ -1,78 +1,78 @@
-# Nodrix 1.1.0 verification
+# Nodrix 1.2.0 verification
 
-Nodrix 1.1.0 adds compact authoring, runtime profiles, auto encoder selection and per-node resource telemetry while preserving the Nodrix 1.x Python API, Plugin ABI 1.0, wire protocol, `.ndrx`, `.ndpkg` and lock-file formats.
+Nodrix 1.2.0 adds reusable single-node YAML Blocks while preserving compact
+and canonical manifests, the Nodrix 1.x Python API, Plugin ABI 1.0, wire
+protocol, `.ndrx`, `.ndpkg`, and runtime execution behavior.
 
 ## Automated tests
 
 ```text
-Python/unit/integration: 73 passed
+Python/unit/integration: 81 passed
 C++ Release CTest:       1/1 passed
-Release metadata:        consistent for 1.1.0
+Release metadata:        consistent for 1.2.0
 ```
 
 The new suite covers:
 
-- compact manifests and canonical resolution;
-- all runtime profile merge rules;
-- repeatable `--set` and profile overrides;
-- lock/override conflict protection;
-- `config show`, `config explain` and `inspect --resolved`;
-- exact process telemetry and shared executor telemetry;
-- zombie-process RSS preservation;
-- `nodrix top` JSON snapshots;
-- Publisher metrics used by Nodrix Viewer;
-- auto FFmpeg encoder probing and fallback.
+- block expansion into canonical nodes;
+- temporary `--block name=path.yaml` replacement;
+- short parameter overrides such as `detector.conf=value`;
+- unknown-block and duplicate-name diagnostics;
+- block listing and inspection in text/JSON form;
+- source tracking in `config explain`;
+- real execution of resolved block graphs;
+- lock-file inclusion of used blocks only;
+- checksum failure after a referenced block changes;
+- rejection of `--locked` together with `--block`;
+- block-based vision project generation.
 
-## Media integration
+All earlier compact-manifest, profile, telemetry, process isolation, Media Pack,
+Viewer, networking, recording, package, lock, and native-runtime tests remain
+green.
 
-The compact `media` template was created, strictly validated and executed with FFmpeg:
+## Runtime behavior
 
-```text
-Source frames:    90
-Encoder messages: 90
-Writer messages:  90
-Edge drops:       0
-Output codec:     H.264
-Resolution:       640x360
-```
-
-The full recording path explicitly uses blocking queues, while the exported Viewer stream keeps the low-latency profile queue.
+A block graph was resolved and executed with the standard unified runtime. The
+block aliases became ordinary node names, and a lossless profile delivered all
+five generated messages to the sink. No extra runtime object or execution
+boundary exists for a block.
 
 ## Installed wheel
 
 Built artifact:
 
 ```text
-nodrix-1.1.0-cp313-cp313-linux_x86_64.whl
+nodrix-1.2.0-cp313-cp313-linux_x86_64.whl
 ```
 
 Verified outside the source tree:
 
-- `nodrix --version` reports 1.1.0;
-- all four native extensions import;
-- a generated `core` template validates and completes;
-- run reports contain profile/system/node resource telemetry.
+- `nodrix --version` reports 1.2.0;
+- a generated vision template contains camera/detector/output blocks;
+- `nodrix block list --json` discovers the generated blocks;
+- `nodrix inspect --resolved` expands the selected detector into a canonical
+  node;
+- all four native extensions import.
 
 ## Offline source installation
 
 Built artifact:
 
 ```text
-nodrix-1.1.0.tar.gz
+nodrix-1.2.0.tar.gz
 ```
 
 Installed with:
 
 ```bash
-pip install nodrix-1.1.0.tar.gz --no-build-isolation --no-deps
+pip install nodrix-1.2.0.tar.gz --no-build-isolation --no-deps
 ```
 
-The source package compiled and loaded all four native extensions without a network build-isolation environment.
-
-## Encoder probe
-
-The current test host probed available H.264 encoders. NVENC and VAAPI were rejected by real encode probes and `libx264` was selected as the working fallback. The selection result includes every attempted backend and its failure reason.
+The source package compiled and loaded all four native extensions without a
+network build-isolation environment.
 
 ## Platform scope
 
-The local wheel is a CPython 3.13 Linux x86-64 verification artifact. The GitHub release workflow remains responsible for manylinux x86-64, manylinux ARM64/Raspberry Pi and macOS Apple Silicon wheels for Python 3.11-3.14.
+The local wheel is a CPython 3.13 Linux x86-64 verification artifact. The
+GitHub release workflow remains responsible for manylinux x86-64, manylinux
+ARM64/Raspberry Pi, and macOS Apple Silicon wheels for Python 3.11-3.14.

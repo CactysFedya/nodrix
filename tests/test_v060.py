@@ -99,7 +99,8 @@ def test_vision_template_exports_compressed_preview(tmp_path: Path) -> None:
     project = tmp_path / "camera-app"
     create_project(project, "vision")
     manifest = (project / "pipeline.yaml").read_text(encoding="utf-8")
-    assert "vision.jpeg_encoder" in manifest
+    assert "blocks/outputs/jpeg-preview.yaml" in manifest
+    assert "vision.jpeg_encoder" in (project / "blocks/outputs/jpeg-preview.yaml").read_text(encoding="utf-8")
     assert "/camera-app/preview" in manifest
     assert "preview_encoder.frame" in manifest
     assert "nodrix-viewer /camera-app/preview" in (project / "README.md").read_text(encoding="utf-8")

@@ -66,24 +66,24 @@ Repository → Settings → Environments → New environment → pypi
 
 Рекомендуется включить Required reviewers. Секрет `PYPI_TOKEN` добавлять не нужно.
 
-## 4. Релиз 1.1.0
+## 4. Релиз 1.2.0
 
 После push основного репозитория:
 
 ```bash
-git tag -s v1.1.0 -m "Nodrix 1.1.0"
+git tag -s v1.2.0 -m "Nodrix 1.2.0"
 ```
 
 Если GPG-подпись не настроена:
 
 ```bash
-git tag -a v1.1.0 -m "Nodrix 1.1.0"
+git tag -a v1.2.0 -m "Nodrix 1.2.0"
 ```
 
 Затем:
 
 ```bash
-git push origin v1.1.0
+git push origin v1.2.0
 ```
 
 GitHub Actions автоматически:
@@ -113,10 +113,10 @@ pip install "nodrix[media]"
 ## 5. Следующие релизы
 
 ```bash
-scripts/release.sh 1.1.0
+scripts/release.sh 1.2.0
 ```
 
-Перед запуском добавь секцию `## [1.1.0]` в `CHANGELOG.md`. Скрипт обновит версии, создаст commit/tag и отправит их в GitHub.
+Перед запуском добавь секцию `## [1.2.0]` в `CHANGELOG.md`. Скрипт обновит версии, создаст commit/tag и отправит их в GitHub.
 
 PyPI запрещает перезаписывать уже опубликованную версию. Любое исправление требует новой версии.
 
@@ -132,6 +132,6 @@ python -m twine upload dist/*
 
 Используй project-scoped PyPI API token и не сохраняй его в репозитории или `.pypirc` внутри проекта.
 
-## Матрица 1.1.0
+## Матрица 1.2.0
 
 Релиз собирает wheels для Linux x86-64, Linux ARM64 и macOS Apple Silicon. macOS Intel временно исключён и не блокирует публикацию.

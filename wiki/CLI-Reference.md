@@ -4,11 +4,21 @@
 
 ```bash
 nodrix init PROJECT [--template TEMPLATE]
-nodrix validate [pipeline.yaml] [--strict] [--json]
-nodrix inspect [pipeline.yaml] [--memory|--live]
+nodrix validate [pipeline.yaml] [--strict] [--json] [--block NAME=FILE] [--set PATH=VALUE]
+nodrix inspect [pipeline.yaml] [--memory|--live|--resolved] [--block NAME=FILE]
 nodrix lock [pipeline.yaml] [--check]
-nodrix run [pipeline.yaml] [--locked] [--metrics-listen HOST:PORT]
-nodrix benchmark [pipeline.yaml]
+nodrix run [pipeline.yaml] [--locked] [--metrics-listen HOST:PORT] [--block NAME=FILE]
+nodrix benchmark [pipeline.yaml] [--block NAME=FILE]
+```
+
+## Reusable blocks and resolved configuration
+
+```bash
+nodrix block list [--project DIRECTORY]
+nodrix block inspect BLOCK.yaml
+nodrix config profiles
+nodrix config show [pipeline.yaml] [--block NAME=FILE] [--set PATH=VALUE]
+nodrix config explain PATH --pipeline pipeline.yaml
 ```
 
 ## Health and artifacts
