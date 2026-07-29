@@ -74,6 +74,53 @@ jobs:
       - name: Test
         run: ctest --test-dir build/native --output-on-failure
 
+  native-sanitizers:
+    name: C++ ASan and UBSan
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure sanitizers
+        run: |
+          cmake -S src/nodrix/native -B build/native-sanitized \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DNODRIX_NATIVE_LTO=OFF \
+            -DNODRIX_NATIVE_MARCH_NATIVE=OFF \
+            -DNODRIX_NATIVE_SANITIZERS=ON
+
+      - name: Build
+        run: cmake --build build/native-sanitized --parallel 2
+
+      - name: Test
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build/native-sanitized --output-on-failure
+
+  native-e2e:
+    name: Native end-to-end
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build and test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Compile and execute native graph
+        env:
+          NODRIX_NATIVE_E2E: "1"
+        run: pytest -q tests/test_native_runtime.py -k executes
+
   package-check:
     name: Build sdist and wheel
     runs-on: ubuntu-latest

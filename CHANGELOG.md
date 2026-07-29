@@ -1,4 +1,12 @@
 # Changelog
+## 1.2.1 — Cross-platform stabilization
+- Fixed `multiprocessing.shared_memory` compatibility across Python 3.11–3.14.
+- Added portable deterministic POSIX shared-memory names for macOS.
+- Added macOS physical-memory telemetry fallback through `sysctl`.
+- Removed duplicate native-extension rebuild instructions after editable installation.
+- Added native runner version consistency, native end-to-end CI, and ASan/UBSan coverage.
+- Added regression tests for shared-memory lifecycle and platform fallbacks.
+- Preserved the canonical manifest, public Node API, Plugin ABI 1.0, wire protocol, and runtime semantics.
 
 ## 1.2.0 — Reusable Blocks
 
