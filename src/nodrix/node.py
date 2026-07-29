@@ -54,6 +54,9 @@ class Node(ABC):
     output_types: dict[str, str] = {"output": "core.any"}
     input_memory: dict[str, Any] = {}
     output_memory: dict[str, Any] = {}
+    # Ports that may be absent from one process() call. This is primarily used
+    # by latest_available synchronization for slower multi-rate side inputs.
+    optional_inputs: frozenset[str] = frozenset()
 
     def __init__(self, parameters: dict[str, Any] | None = None) -> None:
         self.parameters = parameters or {}
@@ -91,6 +94,10 @@ class Node(ABC):
 
     def health(self) -> dict[str, Any]:
         return self._lifecycle.snapshot().as_dict()
+
+    def runtime_info(self) -> dict[str, Any]:
+        """Return lightweight backend/device information for diagnostics."""
+        return {}
 
     def allocate_output(self, size: int, *, readonly: bool = False) -> ManagedBuffer:
         if self.context is None:

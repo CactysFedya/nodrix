@@ -1,10 +1,29 @@
 use: vision.ncnn_detector
-model: ${NODRIX_MODEL:-models/yolo26n_ncnn_model}
-labels_file: "${NODRIX_LABELS:-}"
-conf: ${NODRIX_CONF:-0.18}
-iou: ${NODRIX_IOU:-0.65}
-max_det: ${NODRIX_MAX_DET:-150}
-threads: ${NODRIX_THREADS:-4}
-use_vulkan: false
+
+# Directory containing one NCNN .param/.bin pair.
+model: models/yolo26n_ncnn_model
+
+# Minimum detection confidence: 0.0..1.0.
+conf: 0.18
+
+# IoU threshold used by non-maximum suppression: 0.0..1.0.
+iou: 0.65
+
+# Maximum number of detections published for one frame.
+max_det: 150
+
+# Backend: auto, cpu, or vulkan. auto probes Vulkan first.
+backend: auto
+
+# Acceleration policy: required, preferred, or disabled.
+# preferred reports a visible CPU fallback when no GPU is usable.
+acceleration: preferred
+
+# Native NCNN CPU worker threads used by the CPU backend.
+threads: 3
+
+# Output tensor decoder: auto, xyxy, or yolo.
 output_format: auto
+
+# Separate objectness field: auto, true, or false.
 has_objectness: auto

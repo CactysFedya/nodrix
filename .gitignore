@@ -28,7 +28,7 @@ PKG-INFO
 .nodrix/
 *.ndrx
 *.ndpkg
-outputs/
+/outputs/
 
 # Native builds
 cmake-build-*/

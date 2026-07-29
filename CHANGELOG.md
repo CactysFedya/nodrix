@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.5.0 — Multi-rate Vision and Hardware-first Runtime
+- Added `vision.realtime_bytetrack`, driven by every source frame with slower detections as a latest side input.
+- Added bounded delayed-measurement replay, detector-result deduplication, prediction score decay and explicit too-old policies.
+- Added a compiled C++20 IoU-association extension and a required native tracker backend in the production block.
+- Added NCNN `auto|cpu|vulkan` backend selection and explicit acceleration policies.
+- Added hardware-first FFmpeg adapters for VideoToolbox, V4L2 M2M, Rockchip MPP, NVENC/NVMPI, QSV/VAAPI and AMF, with required, preferred and disabled policies and no hidden fallback.
+- Upgraded `inspect` to a graph-oriented view and added details and per-node modes.
+- Upgraded `run` to print actual lifecycle events and selected runtime backends.
+- Reworked `top` into a compact htop-style view and separated stale skips, overflow and synchronization misses.
+- Added manifest-configured HTTP metrics so the reference project starts with `nodrix run`.
+- Updated the Vision template to a 30 FPS multi-rate graph with block-local configuration and LAN discovery.
+- Documented host-BGR, device-memory and Raspberry Pi 5 encoder limitations honestly.
+
 ## 1.4.1 — Runtime UX and Vision Hardening
 - Kept normal Vision parameters inside self-contained block YAML files.
 - Added comments to generated source, preprocessing, detector, tracker, overlay and encoder blocks.

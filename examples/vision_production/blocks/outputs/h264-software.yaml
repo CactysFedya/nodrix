@@ -1,0 +1,11 @@
+use: media.ffmpeg_encoder
+
+# Explicit compatibility fallback. Select this block only after
+# accepting the CPU cost and reduced output frame rate.
+codec: h264
+encoder: libx264
+acceleration: disabled
+preset: ultrafast
+tune: zerolatency
+crf: 23
+keyint: 30

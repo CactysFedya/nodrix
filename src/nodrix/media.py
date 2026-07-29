@@ -339,6 +339,16 @@ class FFmpegSource(SourceNode):
                 )
             }
 
+    def runtime_info(self) -> dict[str, Any]:
+        return {
+            "backend": "ffmpeg",
+            "source": self.reader.uri,
+            "width": self.reader.width,
+            "height": self.reader.height,
+            "fps": self.reader.fps,
+            "hardware": False,
+        }
+
     def close(self) -> None:
         self.reader.close()
 
@@ -354,72 +364,309 @@ def _software_encoder(codec: str) -> str:
     return codec
 
 
-def _encoder_candidates(codec: str) -> list[str]:
+def _encoder_candidates(codec: str, *, include_software: bool = True) -> list[str]:
+    """Return hardware-first FFmpeg encoder candidates for this platform.
+
+    Runtime probing remains authoritative: an encoder being compiled into
+    FFmpeg does not prove that a device, driver, firmware, or permission is
+    usable on the current host.
+    """
+
     normalized = codec.lower().replace("hevc", "h265")
     h264 = normalized in {"h264", "avc"}
     prefix = "h264" if h264 else "hevc"
     candidates: list[str] = []
     machine = platform.machine().lower()
     system = platform.system().lower()
+
     if system == "darwin":
         candidates.append(f"{prefix}_videotoolbox")
-    if system == "linux":
+    elif system == "windows":
+        candidates.extend(
+            [
+                f"{prefix}_nvenc",
+                f"{prefix}_qsv",
+                f"{prefix}_amf",
+            ]
+        )
+    elif system == "linux":
+        # Platform media engines first on embedded ARM, then discrete/integrated
+        # GPU backends. Unknown encoders are discarded before probing.
         if machine in {"aarch64", "arm64", "armv7l"}:
-            candidates.append(f"{prefix}_v4l2m2m")
-        candidates.extend([f"{prefix}_nvenc", f"{prefix}_vaapi"])
-    candidates.append(_software_encoder(codec))
+            candidates.extend(
+                [
+                    f"{prefix}_v4l2m2m",
+                    f"{prefix}_rkmpp",
+                    f"{prefix}_nvmpi",
+                ]
+            )
+        candidates.extend(
+            [
+                f"{prefix}_nvenc",
+                f"{prefix}_qsv",
+                f"{prefix}_vaapi",
+            ]
+        )
+
+    # Keep order deterministic while removing aliases duplicated by a platform.
+    candidates = list(dict.fromkeys(candidates))
+    if include_software:
+        candidates.append(_software_encoder(codec))
     return candidates
+
+
+def is_hardware_encoder(encoder: str, codec: str = "h264") -> bool:
+    return encoder != _software_encoder(codec) and encoder not in {"mjpeg", "jpeg"}
+
+
+def _vaapi_device() -> str | None:
+    explicit = os.environ.get("NODRIX_VAAPI_DEVICE")
+    if explicit:
+        return explicit if Path(explicit).exists() else None
+    dri = Path("/dev/dri")
+    if not dri.is_dir():
+        return None
+    render_nodes = sorted(dri.glob("renderD*"))
+    return str(render_nodes[0]) if render_nodes else None
+
+
+def _encoder_backend_arguments(
+    encoder: str,
+    *,
+    quality: int = 23,
+    keyint: int = 30,
+) -> tuple[list[str], list[str], list[str], str | None]:
+    """Return FFmpeg arguments for a concrete encoder backend.
+
+    The tuple is ``(before_input, before_codec, after_codec, pixel_format)``.
+    Keeping this in one adapter prevents a backend from passing a simplistic
+    probe and then failing under the real persistent encoder command.
+    """
+
+    before_input: list[str] = []
+    before_codec: list[str] = []
+    after_codec: list[str] = []
+    pixel_format: str | None = "yuv420p"
+
+    if encoder.endswith("_vaapi"):
+        device = _vaapi_device()
+        if device is None:
+            raise MediaError(
+                "VAAPI encoder is present in FFmpeg but no /dev/dri/renderD* device is accessible; "
+                "set NODRIX_VAAPI_DEVICE when using a non-default render node"
+            )
+        before_input += ["-vaapi_device", device]
+        before_codec += ["-vf", "format=nv12,hwupload"]
+        after_codec += ["-qp", str(int(quality))]
+        pixel_format = None  # Frames are VAAPI surfaces after hwupload.
+    elif encoder.endswith("_videotoolbox"):
+        # Prevent VideoToolbox from silently switching back to software.
+        after_codec += ["-allow_sw", "0", "-realtime", "1"]
+    elif encoder.endswith("_nvenc"):
+        after_codec += ["-preset", "p1", "-tune", "ull", "-bf", "0"]
+    elif encoder.endswith("_qsv"):
+        after_codec += ["-preset", "veryfast", "-bf", "0"]
+        pixel_format = "nv12"
+    elif encoder.endswith("_amf"):
+        after_codec += ["-usage", "ultralowlatency", "-quality", "speed", "-bf", "0"]
+    elif encoder.endswith("_v4l2m2m"):
+        after_codec += ["-bf", "0"]
+    elif encoder.endswith("_rkmpp"):
+        pixel_format = "nv12"
+    elif encoder.endswith("_nvmpi"):
+        after_codec += ["-bf", "0"]
+
+    if keyint > 0 and encoder not in {"libx264", "libx265"}:
+        after_codec += ["-g", str(int(keyint))]
+    return before_input, before_codec, after_codec, pixel_format
+
+
+def _encoder_command_prefix(
+    encoder: str,
+    codec: str,
+    *,
+    width: int,
+    height: int,
+    fps: float,
+    quality: int = 23,
+    keyint: int = 30,
+    overwrite: bool = False,
+) -> tuple[list[str], list[str], str | None]:
+    before_input, before_codec, after_codec, pixel_format = _encoder_backend_arguments(
+        encoder,
+        quality=quality,
+        keyint=keyint,
+    )
+    command = [
+        _binary("ffmpeg"),
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        *(["-y"] if overwrite else []),
+        *before_input,
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "bgr24",
+        "-s:v",
+        f"{int(width)}x{int(height)}",
+        "-r",
+        f"{float(fps):g}",
+        "-i",
+        "pipe:0",
+        "-an",
+        *before_codec,
+        "-c:v",
+        encoder,
+    ]
+    return command, after_codec, pixel_format
 
 
 def probe_encoder(encoder: str, codec: str, timeout: float = 6.0) -> tuple[bool, str]:
     if encoder not in available_encoders():
         return False, "encoder is not listed by FFmpeg"
-    command = [
-        _binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
-        "-f", "lavfi", "-i", "color=size=64x64:rate=5:color=black",
-        "-frames:v", "2", "-an", "-c:v", encoder,
-    ]
+    try:
+        command, backend_options, pixel_format = _encoder_command_prefix(
+            encoder,
+            codec,
+            width=64,
+            height=64,
+            fps=5.0,
+            quality=23,
+            keyint=5,
+        )
+    except (MediaError, OSError) as exc:
+        return False, str(exc)
     if encoder in {"libx264", "libx265"}:
         command += ["-preset", "ultrafast", "-tune", "zerolatency"]
-    command += ["-f", "null", "-"]
+    command += backend_options
+    if pixel_format:
+        command += ["-pix_fmt", pixel_format]
+    command += ["-frames:v", "2", "-f", "null", "-"]
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False)
+        # Two raw BGR frames exercise the same CPU-to-encoder path as runtime.
+        frame_bytes = bytes(64 * 64 * 3 * 2)
+        result = subprocess.run(
+            command,
+            input=frame_bytes,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
     except (OSError, subprocess.SubprocessError) as exc:
         return False, str(exc)
-    detail = (result.stderr or "").strip().splitlines()
-    return result.returncode == 0, (detail[-1] if detail else "probe passed")
+    detail_bytes = (result.stderr or b"").strip().splitlines()
+    detail = detail_bytes[-1].decode("utf-8", errors="replace") if detail_bytes else "probe passed"
+    return result.returncode == 0, detail
 
 
-@lru_cache(maxsize=16)
-def select_encoder(codec: str, requested: str | None = None) -> dict[str, Any]:
-    if requested is None:
-        selected = _software_encoder(codec)
-        return {"selected": selected, "requested": "default", "reason": "built-in software default", "fallback": None}
-    if requested != "auto":
-        return {"selected": requested, "requested": requested, "reason": "explicit pipeline setting", "fallback": None}
-    candidates = _encoder_candidates(codec)
+@lru_cache(maxsize=32)
+def select_encoder(
+    codec: str,
+    requested: str | None = None,
+    acceleration: str = "preferred",
+) -> dict[str, Any]:
+    """Select an encoder with an explicit hardware acceleration policy.
+
+    ``required`` never falls back to a software encoder. ``preferred`` keeps
+    compatibility but reports the fallback. ``disabled`` selects software
+    intentionally. Generated Vision projects use hardware-first ``preferred``
+    so platforms without an encoder remain usable without a hidden fallback.
+    """
+
+    policy = str(acceleration).lower()
+    if policy not in {"required", "preferred", "disabled"}:
+        raise ValueError("acceleration must be required, preferred, or disabled")
+    selected_request = str(requested or "auto")
+    software = _software_encoder(codec)
     attempts: list[dict[str, Any]] = []
-    for candidate in candidates:
-        ok, reason = probe_encoder(candidate, codec)
-        attempts.append({"encoder": candidate, "ok": ok, "reason": reason})
-        if ok:
+
+    if selected_request != "auto":
+        hardware = is_hardware_encoder(selected_request, codec)
+        if policy == "required" and not hardware:
             return {
-                "selected": candidate,
-                "requested": requested or "default",
-                "reason": f"runtime probe passed for {candidate}",
-                "fallback": _software_encoder(codec) if candidate != _software_encoder(codec) else None,
+                "ok": False,
+                "selected": None,
+                "requested": selected_request,
+                "hardware": False,
+                "acceleration": policy,
+                "reason": f"software encoder {selected_request} is forbidden by acceleration: required",
                 "attempts": attempts,
             }
-    fallback = _software_encoder(codec)
+        ok, reason = probe_encoder(selected_request, codec)
+        attempts.append({"encoder": selected_request, "ok": ok, "reason": reason})
+        return {
+            "ok": ok,
+            "selected": selected_request if ok else None,
+            "requested": selected_request,
+            "hardware": hardware,
+            "acceleration": policy,
+            "reason": reason if ok else f"explicit encoder probe failed: {reason}",
+            "attempts": attempts,
+        }
+
+    if policy != "disabled":
+        for candidate in [item for item in _encoder_candidates(codec) if item != software]:
+            ok, reason = probe_encoder(candidate, codec)
+            attempts.append({"encoder": candidate, "ok": ok, "reason": reason})
+            if ok:
+                return {
+                    "ok": True,
+                    "selected": candidate,
+                    "requested": "auto",
+                    "hardware": True,
+                    "acceleration": policy,
+                    "reason": f"hardware probe passed for {candidate}",
+                    "fallback": None,
+                    "attempts": attempts,
+                }
+
+    if policy == "required":
+        return {
+            "ok": False,
+            "selected": None,
+            "requested": "auto",
+            "hardware": False,
+            "acceleration": policy,
+            "reason": "no hardware encoder passed the runtime probe; software fallback is disabled",
+            "fallback": None,
+            "attempts": attempts,
+        }
+
+    ok, reason = probe_encoder(software, codec)
+    attempts.append({"encoder": software, "ok": ok, "reason": reason})
     return {
-        "selected": fallback, "requested": requested or "default",
-        "reason": "all hardware probes failed; using software fallback",
-        "fallback": fallback, "attempts": attempts,
+        "ok": ok,
+        "selected": software if ok else None,
+        "requested": "auto",
+        "hardware": False,
+        "acceleration": policy,
+        "reason": (
+            "hardware probes failed; explicit preferred policy selected software fallback"
+            if policy == "preferred" and ok
+            else reason
+        ),
+        "fallback": software if ok else None,
+        "attempts": attempts,
     }
 
 
-def _codec_encoder(codec: str, explicit: str | None = None) -> str:
-    return str(select_encoder(codec, explicit).get("selected"))
+def _codec_encoder(
+    codec: str,
+    explicit: str | None = None,
+    acceleration: str = "preferred",
+) -> tuple[str, dict[str, Any]]:
+    selection = select_encoder(codec, explicit, acceleration)
+    selected = selection.get("selected")
+    if not selection.get("ok") or not selected:
+        attempts = "; ".join(
+            f"{item.get('encoder')}: {item.get('reason')}"
+            for item in selection.get("attempts", [])
+        )
+        detail = f" ({attempts})" if attempts else ""
+        raise MediaError(f"Cannot select {codec} encoder: {selection.get('reason')}{detail}")
+    return str(selected), selection
 
 
 @register_builtin("media.ffmpeg_writer")
@@ -434,12 +681,16 @@ class FFmpegWriter(SinkNode):
         configured.parent.mkdir(parents=True, exist_ok=True)
         self.path = configured
         self.codec = str(self.parameters.get("codec", "h264"))
-        self.encoder = _codec_encoder(self.codec, self.parameters.get("encoder"))
+        self.acceleration = str(self.parameters.get("acceleration", "preferred"))
+        self.encoder, self.encoder_selection = _codec_encoder(
+            self.codec, self.parameters.get("encoder"), self.acceleration
+        )
         self.preset = str(self.parameters.get("preset", "ultrafast"))
         self.tune = str(self.parameters.get("tune", "zerolatency"))
         self.crf = int(self.parameters.get("crf", 23))
         self.bitrate = str(self.parameters.get("bitrate", ""))
-        self.output_pixel_format = str(self.parameters.get("pixel_format", "yuv420p"))
+        pixel_format = self.parameters.get("pixel_format")
+        self.output_pixel_format = None if pixel_format in {None, "", "auto"} else str(pixel_format)
         self.fps = float(self.parameters.get("fps", 0.0))
         self.keyint = int(self.parameters.get("keyint", 30))
         self._process: subprocess.Popen[bytes] | None = None
@@ -453,19 +704,26 @@ class FFmpegWriter(SinkNode):
         fps = self.fps or float(message.metadata.get("fps", 0.0) or 30.0)
         self.fps = fps
         self.shape = (frame.width, frame.height)
-        command = [
-            _binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
-            "-f", "rawvideo", "-pix_fmt", "bgr24", "-s:v", f"{frame.width}x{frame.height}",
-            "-r", f"{fps:g}", "-i", "pipe:0", "-an", "-c:v", self.encoder,
-        ]
+        command, backend_options, backend_pixel_format = _encoder_command_prefix(
+            self.encoder,
+            self.codec,
+            width=frame.width,
+            height=frame.height,
+            fps=fps,
+            quality=self.crf,
+            keyint=self.keyint,
+            overwrite=True,
+        )
         if self.encoder in {"libx264", "libx265"}:
             command += ["-preset", self.preset, "-tune", self.tune, "-crf", str(self.crf)]
             if self.keyint > 0:
                 command += ["-g", str(self.keyint), "-bf", "0"]
+        command += backend_options
         if self.bitrate:
             command += ["-b:v", self.bitrate]
-        if self.output_pixel_format:
-            command += ["-pix_fmt", self.output_pixel_format]
+        selected_pixel_format = self.output_pixel_format or backend_pixel_format
+        if selected_pixel_format:
+            command += ["-pix_fmt", selected_pixel_format]
         if self.path.suffix.lower() in {".mp4", ".mov", ".m4v"}:
             command += ["-movflags", "+faststart"]
         command += [str(self.path)]
@@ -538,7 +796,10 @@ class FFmpegEncoder(Node):
         self.codec = str(self.parameters.get("codec", "h264")).lower().replace("hevc", "h265")
         if self.codec not in {"h264", "h265"}:
             raise MediaError("media.ffmpeg_encoder supports h264 or h265")
-        self.encoder = _codec_encoder(self.codec, self.parameters.get("encoder"))
+        self.acceleration = str(self.parameters.get("acceleration", "preferred"))
+        self.encoder, self.encoder_selection = _codec_encoder(
+            self.codec, self.parameters.get("encoder"), self.acceleration
+        )
         self.preset = str(self.parameters.get("preset", "ultrafast"))
         self.tune = str(self.parameters.get("tune", "zerolatency"))
         self.crf = int(self.parameters.get("crf", 23))
@@ -547,7 +808,8 @@ class FFmpegEncoder(Node):
         self.keyint = int(self.parameters.get("keyint", 30))
         self.read_timeout = float(self.parameters.get("read_timeout_ms", 10.0)) / 1000.0
         self.chunk_size = int(self.parameters.get("chunk_size", 1024 * 1024))
-        self.output_pixel_format = str(self.parameters.get("pixel_format", "yuv420p"))
+        pixel_format = self.parameters.get("pixel_format")
+        self.output_pixel_format = None if pixel_format in {None, "", "auto"} else str(pixel_format)
         self._process: subprocess.Popen[bytes] | None = None
         self.stderr: _StderrCollector | None = None
         self.shape: tuple[int, int] | None = None
@@ -560,11 +822,15 @@ class FFmpegEncoder(Node):
         self.fps = self.fps or float(message.metadata.get("fps", 0.0) or 30.0)
         self.shape = (frame.width, frame.height)
         muxer = "h264" if self.codec == "h264" else "hevc"
-        command = [
-            _binary("ffmpeg"), "-hide_banner", "-loglevel", "error", "-nostdin",
-            "-f", "rawvideo", "-pix_fmt", "bgr24", "-s:v", f"{frame.width}x{frame.height}",
-            "-r", f"{self.fps:g}", "-i", "pipe:0", "-an", "-c:v", self.encoder,
-        ]
+        command, backend_options, backend_pixel_format = _encoder_command_prefix(
+            self.encoder,
+            self.codec,
+            width=frame.width,
+            height=frame.height,
+            fps=self.fps,
+            quality=self.crf,
+            keyint=self.keyint,
+        )
         if self.encoder in {"libx264", "libx265"}:
             command += ["-preset", self.preset, "-tune", self.tune, "-crf", str(self.crf)]
             if self.keyint > 0:
@@ -573,10 +839,12 @@ class FFmpegEncoder(Node):
                 command += ["-x264-params", "repeat-headers=1:aud=1"]
             else:
                 command += ["-x265-params", "repeat-headers=1:aud=1"]
+        command += backend_options
         if self.bitrate:
             command += ["-b:v", self.bitrate]
-        if self.output_pixel_format:
-            command += ["-pix_fmt", self.output_pixel_format]
+        selected_pixel_format = self.output_pixel_format or backend_pixel_format
+        if selected_pixel_format:
+            command += ["-pix_fmt", selected_pixel_format]
         command += ["-f", muxer, "pipe:1"]
         self._process = subprocess.Popen(
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
@@ -653,6 +921,16 @@ class FFmpegEncoder(Node):
             self._process.terminate()
             self._process.wait(timeout=2.0)
         return self._message(self._drain(0.0), self.last_source)
+
+    def runtime_info(self) -> dict[str, Any]:
+        selection = dict(getattr(self, "encoder_selection", {}))
+        return {
+            "backend": getattr(self, "encoder", None),
+            "hardware": bool(selection.get("hardware", False)),
+            "acceleration": getattr(self, "acceleration", "preferred"),
+            "codec": getattr(self, "codec", None),
+            "reason": selection.get("reason"),
+        }
 
     def close(self) -> None:
         if self._process is None:

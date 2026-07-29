@@ -8,10 +8,6 @@ from nodrix.project_templates import create_project
 from nodrix.ux import render_top
 
 
-def test_v141_version() -> None:
-    assert nodrix.__version__ == "1.4.1"
-
-
 def test_vision_template_keeps_parameters_in_blocks(tmp_path: Path) -> None:
     project = tmp_path / "pi-detector"
     create_project(project, "vision")
@@ -30,8 +26,8 @@ def test_vision_template_keeps_parameters_in_blocks(tmp_path: Path) -> None:
     assert "NODRIX_" not in source
     assert "NODRIX_" not in detector
     assert "NODRIX_" not in encoder
-    assert "rate=15" in source
-    assert "fps: 15" in source
+    assert "rate=30" in source
+    assert "fps: 30" in source
     assert "threads: 3" in detector
     assert "# Minimum detection confidence" in detector
     assert "capacity: 4" in pipeline

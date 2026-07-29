@@ -1,0 +1,16 @@
+use: media.ffmpeg_encoder
+
+codec: h264
+encoder: auto
+
+# Probe hardware encoders first. If the platform has no encoder,
+# Nodrix reports the fallback explicitly instead of hiding it.
+acceleration: preferred
+
+# Applied only when the preferred policy selects a software fallback.
+preset: ultrafast
+tune: zerolatency
+crf: 23
+
+keyint: 30
+# fps is inherited from frame metadata.

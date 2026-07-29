@@ -44,5 +44,12 @@ setup(
             extra_compile_args=compile_args,
             extra_link_args=link_args + (["-ldl"] if sys.platform.startswith("linux") else []),
         ),
+        Extension(
+            "nodrix._native_tracking",
+            ["src/nodrix/native/python/tracking_module.cpp"],
+            language="c++",
+            extra_compile_args=compile_args,
+            extra_link_args=link_args,
+        ),
     ]
 )

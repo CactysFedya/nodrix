@@ -14,7 +14,7 @@ from pathlib import Path
 import queue as pyqueue
 import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from .cv_types import TYPE_REGISTRY, normalize_payload
 from .errors import RuntimeGraphError
@@ -254,12 +254,17 @@ class EdgeQueue:
 
     def report(self) -> dict[str, Any]:
         stats = dict(self.queue.stats())
+        dropped = int(stats.get("dropped", 0))
+        stale_skips = dropped if self.edge.queue.policy in {"latest", "drop_oldest"} else 0
+        overflow_drops = dropped if self.edge.queue.policy == "drop_newest" else 0
         return {
             "source": self.edge.source,
             "target": self.edge.target,
             "enqueued": int(stats.get("enqueued", 0)),
             "dequeued": int(stats.get("dequeued", 0)),
-            "dropped": int(stats.get("dropped", 0)),
+            "dropped": dropped,
+            "stale_skips": stale_skips,
+            "overflow_drops": overflow_drops,
             "max_depth": int(stats.get("max_depth", 0)),
             "depth": int(stats.get("depth", 0)),
             "capacity": self.edge.queue.capacity,
@@ -307,7 +312,13 @@ class HybridPipelineRuntime:
     queues, typed messages, lifecycle, synchronization, telemetry, and zero-copy
     buffer protocol.    """
 
-    def __init__(self, manifest: PipelineManifest, manifest_path: Path, run_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        manifest: PipelineManifest,
+        manifest_path: Path,
+        run_root: Path | None = None,
+        event_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> None:
         self.manifest = manifest
         self.manifest_path = manifest_path.resolve()
         self.base_dir = self.manifest_path.parent
@@ -324,6 +335,17 @@ class HybridPipelineRuntime:
         self._memory_plans: dict[tuple[str, str], MemoryPlan] = {}
         self._resource_sampler = ResourceSampler()
         self._last_node_resources: dict[str, dict[str, Any]] = {}
+        self._event_callback = event_callback
+        self._run_started_ns: int | None = None
+
+    def _emit_event(self, kind: str, **payload: Any) -> None:
+        if self._event_callback is None:
+            return
+        try:
+            self._event_callback({"kind": kind, "time_ns": time.time_ns(), **payload})
+        except Exception:
+            # Diagnostics must never destabilize the data plane.
+            pass
 
     @property
     def native_queue_enabled(self) -> bool:
@@ -371,6 +393,7 @@ class HybridPipelineRuntime:
                     output_types=dict(node.output_types),
                     input_memory=dict(getattr(node, "input_memory", {})),
                     output_memory=dict(getattr(node, "output_memory", {})),
+                    optional_inputs=set(getattr(node, "optional_inputs", frozenset())),
                     block_size=shared.block_size,
                     capacity=shared.capacity,
                     output_block_size=output_shared.block_size,
@@ -395,6 +418,11 @@ class HybridPipelineRuntime:
             if config.synchronization.trigger_port and config.synchronization.trigger_port not in node.input_types:
                 raise RuntimeGraphError(
                     f"Node {name!r} synchronization trigger_port {config.synchronization.trigger_port!r} is not an input"
+                )
+            unknown_optional = sorted(set(getattr(node, "optional_inputs", ())) - set(node.input_types))
+            if unknown_optional:
+                raise RuntimeGraphError(
+                    f"Node {name!r} declares unknown optional inputs: {unknown_optional}"
                 )
             self.nodes[name] = LoadedNode(
                 name=name,
@@ -510,6 +538,7 @@ class HybridPipelineRuntime:
                     "resources": loaded.config.resources.model_dump(),
                     "lifecycle": loaded.node.lifecycle_state,
                     "inputs": loaded.node.input_types,
+                    "optional_inputs": sorted(getattr(loaded.node, "optional_inputs", ())),
                     "outputs": loaded.node.output_types,
                     "input_memory": {**dict(getattr(loaded.node, "input_memory", {})), **dict(loaded.config.memory.inputs)},
                     "output_memory": {**dict(getattr(loaded.node, "output_memory", {})), **dict(loaded.config.memory.outputs)},
@@ -542,10 +571,19 @@ class HybridPipelineRuntime:
     async def run(self) -> dict[str, Any]:
         return await asyncio.to_thread(self.run_sync)
 
+    @staticmethod
+    def _safe_runtime_info(loaded: LoadedNode) -> dict[str, Any]:
+        try:
+            return dict(loaded.node.runtime_info() or {})
+        except Exception as exc:
+            return {"diagnostic_error": f"{type(exc).__name__}: {exc}"}
+
     def _node_report(self, loaded: LoadedNode, duration: float | None = None) -> dict[str, Any]:
         pressures = []
         estimated_queue_bytes = 0
         dropped = 0
+        stale_skips = 0
+        overflow_drops = 0
         for edge in loaded.inputs.values():
             stats = edge.report()
             pressures.append(float(stats.get("depth", 0)) / max(int(stats.get("capacity", 1)), 1))
@@ -553,6 +591,8 @@ class HybridPipelineRuntime:
             average = int(stats.get("bytes", 0)) / enqueued
             estimated_queue_bytes += int(average * int(stats.get("depth", 0)))
             dropped += int(stats.get("dropped", 0))
+            stale_skips += int(stats.get("stale_skips", 0))
+            overflow_drops += int(stats.get("overflow_drops", 0))
         loaded.node._lifecycle.set_queue_pressure(max(pressures, default=0.0))
         report = loaded.stats.report(duration)  # type: ignore[union-attr]
         if isinstance(loaded.node, ProcessNodeProxy):
@@ -578,14 +618,22 @@ class HybridPipelineRuntime:
             resources["shared_buffer_bytes"] = 0
         resources["estimated_queue_bytes"] = estimated_queue_bytes
         resources["input_drops"] = dropped
+        resources["stale_skips"] = stale_skips
+        resources["overflow_drops"] = overflow_drops
+        resources["sync_misses"] = int(report.get("synchronization_drops", 0))
         report["resources"] = resources
         report["health"] = loaded.node.health()
+        report["runtime_info"] = self._safe_runtime_info(loaded)
         return report
 
     def snapshot(self, duration_seconds: float | None = None) -> dict[str, Any]:
         """Return a lock-free best-effort live telemetry snapshot."""
+        if duration_seconds is None and self._run_started_ns is not None:
+            duration_seconds = max((time.perf_counter_ns() - self._run_started_ns) / 1e9, 0.0)
         return {
             "pipeline": self.manifest.metadata.name,
+            "status": "running" if self._run_started_ns is not None and not self._stop.is_set() else "idle",
+            "duration_seconds": float(duration_seconds or 0.0),
             "profile": self.manifest.runtime.profile,
             "nodes": {name: self._node_report(loaded, duration_seconds) for name, loaded in self.nodes.items()},
             "edges": [edge.report() for edge in self.edges],
@@ -623,6 +671,8 @@ class HybridPipelineRuntime:
         except Exception as exc:
             (run_dir / "logs" / "lock-warning.log").write_text(str(exc), encoding="utf-8")
         started_ns = time.perf_counter_ns()
+        self._run_started_ns = started_ns
+        self._emit_event("pipeline_starting", pipeline=self.manifest.metadata.name)
         if self._stream_exports:
             resolved_exports: list[dict[str, Any]] = []
             for item in self._stream_exports:
@@ -645,6 +695,12 @@ class HybridPipelineRuntime:
                 max_message_bytes=self.manifest.streams.max_message_bytes,
             )
             self._stream_publisher.start()
+            self._emit_event(
+                "stream_server_ready",
+                host=self.manifest.streams.bind_host,
+                port=self._stream_publisher.server.port,
+                streams=[item["name"] for item in resolved_exports],
+            )
         metrics_recorder = None
         if self.manifest.runtime.metrics.enabled:
             metrics_recorder = MetricsRecorder(
@@ -668,6 +724,8 @@ class HybridPipelineRuntime:
         while not all(node.ready.wait(0.01) for node in self.nodes.values()):
             if self._errors:
                 break
+        if not self._errors:
+            self._emit_event("pipeline_running", pipeline=self.manifest.metadata.name)
         self._start.set()
         watchdog = threading.Thread(target=self._watchdog_loop, name="nodrix-watchdog", daemon=True)
         watchdog.start()
@@ -734,6 +792,8 @@ class HybridPipelineRuntime:
                 json.dumps({"node": error[0], "error": f"{type(error[1]).__name__}: {error[1]}"}) + "\n",
                 encoding="utf-8",
             )
+        self._emit_event("pipeline_stopped", pipeline=self.manifest.metadata.name, status=report["status"])
+        self._run_started_ns = None
         if error is not None:
             raise error[1]
         return report
@@ -752,6 +812,16 @@ class HybridPipelineRuntime:
             loaded.node._lifecycle.transition(LifecycleState.STARTING)
             bridge.resolve(loaded.node.configure(context))
             bridge.resolve(loaded.node.start())
+            self._emit_event(
+                "node_ready",
+                node=loaded.name,
+                uses=loaded.config.uses,
+                lifecycle=loaded.node.lifecycle_state,
+                runtime_info=self._safe_runtime_info(loaded),
+            )
+            # Publish READY before releasing the runtime-wide readiness barrier.
+            # This guarantees that RUNNING is never printed before a node's
+            # successful configure/start event has been delivered.
             loaded.ready.set()
             self._start.wait()
             if self._stop.is_set():
@@ -766,6 +836,7 @@ class HybridPipelineRuntime:
                     async_flush=inspect.iscoroutinefunction(loaded.node.flush),
                 )
         except BaseException as exc:
+            self._emit_event("node_failed", node=loaded.name, uses=loaded.config.uses, error=f"{type(exc).__name__}: {exc}")
             loaded.stats.errors += 1  # type: ignore[union-attr]
             loaded.node._lifecycle.error(exc)
             loaded.node._lifecycle.transition(LifecycleState.FAILED, status=HealthStatus.UNHEALTHY)
@@ -786,6 +857,7 @@ class HybridPipelineRuntime:
             was_failed = loaded.node.lifecycle_state == LifecycleState.FAILED.value
             try:
                 bridge.resolve(loaded.node.stop())
+                self._emit_event("node_stopped", node=loaded.name, uses=loaded.config.uses)
                 if was_failed:
                     loaded.node._lifecycle.transition(LifecycleState.FAILED, status=HealthStatus.UNHEALTHY)
             except BaseException as exc:
@@ -895,7 +967,8 @@ class HybridPipelineRuntime:
         for port in input_ports:
             if port == trigger:
                 continue
-            if port not in loaded.latest_inputs:
+            optional = port in getattr(loaded.node, "optional_inputs", ())
+            if port not in loaded.latest_inputs and not optional:
                 initial = self._blocking_received(loaded.inputs[port])
                 if initial is None:
                     return None
@@ -904,9 +977,10 @@ class HybridPipelineRuntime:
                 newest = loaded.inputs[port].try_get()
                 if newest is None or newest is _EOS:
                     break
+                if port in loaded.latest_inputs:
+                    loaded.stats.synchronization_drops += 1  # type: ignore[union-attr]
                 loaded.latest_inputs[port] = newest
-                loaded.stats.synchronization_drops += 1  # type: ignore[union-attr]
-        return {port: loaded.latest_inputs[port] for port in input_ports}
+        return {port: loaded.latest_inputs[port] for port in input_ports if port in loaded.latest_inputs}
 
     def _receive_matching(
         self, loaded: LoadedNode, input_ports: tuple[str, ...], *, approximate: bool

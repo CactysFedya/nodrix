@@ -41,6 +41,7 @@ from .ux import (
     render_node_details,
     render_pipeline_graph,
     render_startup_summary,
+    render_runtime_event,
     render_top,
 )
 
@@ -123,6 +124,7 @@ def _runtime(
     profile: str | None = None,
     overrides: list[str] | None = None,
     block_overrides: list[str] | None = None,
+    event_callback=None,
 ):
     manifest = load_manifest(
         path,
@@ -145,7 +147,12 @@ def _runtime(
             )
         runtime = NativePipelineRuntime(manifest, path, run_root=run_root)
     else:
-        runtime = HybridPipelineRuntime(manifest, path, run_root=run_root)
+        runtime = HybridPipelineRuntime(
+            manifest,
+            path,
+            run_root=run_root,
+            event_callback=event_callback,
+        )
     runtime.build()
     return runtime
 
@@ -266,6 +273,7 @@ def inspect(
     memory: Annotated[bool, typer.Option("--memory", help="Show the static memory-domain and copy plan")] = False,
     resolved: Annotated[bool, typer.Option("--resolved", help="Print the canonical manifest after profiles and overrides")] = False,
     node_name: Annotated[str | None, typer.Option("--node", help="Inspect one node instance")] = None,
+    details_view: Annotated[bool, typer.Option("--details", help="Include resolved block parameters in the graph")] = False,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Write resolved YAML to a file")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
@@ -294,7 +302,7 @@ def inspect(
             )
             return
         if not live and not memory:
-            console.print(render_pipeline_graph(details.manifest))
+            console.print(render_pipeline_graph(details.manifest, details=details_view))
             return
         runtime = _runtime(
             pipeline,
@@ -366,35 +374,47 @@ def run(
             overrides=set_values,
             block_overrides=block_values,
         )
-        console.print(render_startup_summary(details.manifest))
+        console.print(render_startup_summary(details.manifest, __version__))
         for instance, config in details.manifest.nodes.items():
             if config.uses != "media.ffmpeg_encoder":
                 continue
             selection = select_encoder(
                 str(config.parameters.get("codec", "h264")),
                 str(config.parameters.get("encoder", "auto")),
+                str(config.parameters.get("acceleration", "preferred")),
             )
-            console.print(
-                f"Encoder {instance}: "
-                f"[bold]{selection.get('selected')}[/bold] — "
-                f"{selection.get('reason')}"
-            )
+            if not selection.get("ok"):
+                attempts = "; ".join(
+                    f"{item.get('encoder')}: {item.get('reason')}"
+                    for item in selection.get("attempts", [])
+                )
+                raise MediaError(
+                    f"Encoder {instance} cannot start: {selection.get('reason')}"
+                    + (f" ({attempts})" if attempts else "")
+                )
+
+        indexes = {name: index for index, name in enumerate(details.manifest.nodes, start=1)}
+
+        def runtime_event(event: dict[str, object]) -> None:
+            console.print(render_runtime_event(event, indexes, len(indexes)))
+
         runtime = _runtime(
             pipeline,
             run_root=run_root,
             profile=profile,
             overrides=set_values,
             block_overrides=block_values,
+            event_callback=runtime_event,
         )
-        if metrics_listen:
+        metrics_target = metrics_listen or details.manifest.runtime.metrics.listen
+        if metrics_target:
             if not hasattr(runtime, "snapshot"):
-                raise NodrixError("--metrics-listen currently requires engine: unified")
-            host, port_text = metrics_listen.rsplit(":", 1)
+                raise NodrixError("HTTP metrics currently require engine: unified")
+            host, port_text = metrics_target.rsplit(":", 1)
             metrics_server = MetricsServer(lambda: runtime.snapshot(), host, int(port_text))
             metrics_server.start()
             host, port = metrics_server.address
-            console.print(f"Metrics: http://{host}:{port}/metrics")
-        console.print("[green]Pipeline is running.[/green] Press Ctrl+C to stop.")
+            console.print(f"Metrics READY · http://{host}:{port}/metrics")
         report = runtime.run_sync() if isinstance(runtime, HybridPipelineRuntime) else asyncio.run(runtime.run())
     except KeyboardInterrupt:
         console.print("[yellow]Shutdown requested; stopping pipeline gracefully.[/yellow]")
@@ -735,27 +755,29 @@ def media_doctor_command(
 def media_select_encoder_command(
     codec: Annotated[str, typer.Argument(help="h264 or h265")] = "h264",
     requested: Annotated[str, typer.Option("--encoder", help="auto or an explicit FFmpeg encoder")] = "auto",
+    acceleration: Annotated[str, typer.Option("--acceleration", help="required, preferred, or disabled")] = "required",
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Probe FFmpeg encoders and select the fastest working backend."""
+    """Probe encoder backends using an explicit hardware policy."""
     try:
-        result = select_encoder(codec, requested)
+        result = select_encoder(codec, requested, acceleration)
     except Exception as exc:
         console.print(f"[red]Encoder selection failed:[/red] {exc}")
         raise typer.Exit(1)
     if json_output:
         console.print_json(json.dumps(result))
         return
-    console.print(f"Selected: [bold]{result.get('selected')}[/bold]")
+    selected = result.get("selected") or "none"
+    style = "green" if result.get("hardware") else "yellow"
+    console.print(f"Selected: [{style}]{selected}[/{style}]")
+    console.print(f"Policy: {result.get('acceleration')}")
+    console.print(f"Hardware: {'yes' if result.get('hardware') else 'no'}")
     console.print(f"Reason: {result.get('reason')}")
-    if result.get("fallback"):
-        console.print(f"Fallback: {result['fallback']}")
-    attempts = list(result.get("attempts") or [])
-    if attempts:
-        table = Table("Encoder", "Probe", "Detail")
-        for item in attempts:
-            table.add_row(str(item.get("encoder")), "pass" if item.get("ok") else "fail", str(item.get("reason")))
-        console.print(table)
+    for attempt in result.get("attempts", []):
+        marker = "✓" if attempt.get("ok") else "×"
+        console.print(f"  {marker} {attempt.get('encoder')}: {attempt.get('reason')}")
+    if not result.get("ok"):
+        raise typer.Exit(1)
 
 
 @media_app.command("probe")
@@ -815,13 +837,33 @@ def media_relay_command(
 
 
 @node_app.command("list")
-def node_list() -> None:
-    """List built-in nodes."""
+def node_list(
+    pipeline: Annotated[Path | None, typer.Option("--pipeline", "-p", help="Show only node types used by a pipeline")] = None,
+) -> None:
+    """List available node types, or only the types used by one pipeline."""
     from . import builtin_nodes  # noqa: F401
-    table = Table("Node id", "Inputs", "Outputs")
-    for node_id, cls in sorted(BUILTINS.items()):
-        table.add_row(node_id, json.dumps(cls.input_types), json.dumps(cls.output_types))
-    console.print(table)
+    selected: dict[str, type] = dict(BUILTINS)
+    title = f"Available node types ({len(selected)})"
+    if pipeline is not None:
+        manifest = load_manifest(pipeline)
+        used = {config.uses for config in manifest.nodes.values()}
+        selected = {name: cls for name, cls in BUILTINS.items() if name in used}
+        title = f"Node types used by {manifest.metadata.name} ({len(selected)})"
+    console.print(f"[bold]{title}[/bold]")
+    groups: dict[str, list[tuple[str, type]]] = {}
+    for node_id, cls in sorted(selected.items()):
+        group = node_id.split(".", 1)[0].upper()
+        groups.setdefault(group, []).append((node_id, cls))
+    for group, items in groups.items():
+        console.print(f"\n[cyan]{group}[/cyan]")
+        for node_id, cls in items:
+            optional = set(getattr(cls, "optional_inputs", ()))
+            inputs = ", ".join(
+                f"{name}{'?' if name in optional else ''}:{kind}"
+                for name, kind in cls.input_types.items()
+            ) or "source"
+            outputs = ", ".join(f"{name}:{kind}" for name, kind in cls.output_types.items()) or "sink"
+            console.print(f"  [bold]{node_id:<30}[/bold] {inputs} → {outputs}")
 
 
 @node_app.command("create")
@@ -1500,7 +1542,7 @@ def top_command(
     interval: Annotated[float, typer.Option("--interval", min=0.1)] = 1.0,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Show process resources and per-node busy time."""
+    """Show a compact htop-style runtime dashboard."""
     selected = run_id or _latest_run_id(project)
 
     def snapshot() -> dict[str, object]:

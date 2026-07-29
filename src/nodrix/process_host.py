@@ -271,7 +271,18 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
         except (ImportError, OSError, ValueError):
             pass
         node.start()
-        connection.send({"ok": True, "event": "ready", "source": isinstance(node, SourceNode)})
+        try:
+            runtime_info = dict(node.runtime_info() or {})
+        except Exception as exc:
+            runtime_info = {"diagnostic_error": f"{type(exc).__name__}: {exc}"}
+        connection.send(
+            {
+                "ok": True,
+                "event": "ready",
+                "source": isinstance(node, SourceNode),
+                "runtime_info": runtime_info,
+            }
+        )
         threshold = int(config["threshold"])
         while True:
             command = connection.recv()
@@ -370,6 +381,7 @@ class ProcessNodeProxy(Node):
         output_types: dict[str, str],
         input_memory: dict[str, Any] | None = None,
         output_memory: dict[str, Any] | None = None,
+        optional_inputs: set[str] | frozenset[str] | None = None,
         block_size: int = 8 * 1024 * 1024,
         capacity: int = 8,
         output_block_size: int | None = None,
@@ -391,6 +403,7 @@ class ProcessNodeProxy(Node):
         self.output_types = dict(output_types)
         self.input_memory = dict(input_memory or {})
         self.output_memory = dict(output_memory or {})
+        self.optional_inputs = frozenset(optional_inputs or ())
         self.threshold = int(threshold)
         self.failure_policy = failure_policy
         self.max_restarts = int(max_restarts)
@@ -417,6 +430,7 @@ class ProcessNodeProxy(Node):
         self.output_copies = 0
         self.output_zero_copy = 0
         self._last_eos = False
+        self._runtime_info: dict[str, Any] = {}
 
     def open(self, context: NodeContext) -> None:
         super().open(context)
@@ -452,6 +466,7 @@ class ProcessNodeProxy(Node):
         if not response.get("ok"):
             self._terminate()
             raise ProcessNodeError(response.get("error", "isolated node startup failed"))
+        self._runtime_info = dict(response.get("runtime_info") or {})
 
     def _terminate(self) -> None:
         if self._connection is not None:
@@ -579,6 +594,9 @@ class ProcessNodeProxy(Node):
         self._terminate()
         self.input_pool.close()
         self.output_pool.close()
+
+    def runtime_info(self) -> dict[str, Any]:
+        return {**self._runtime_info, "isolation": "process", "pid": self.pid}
 
     def transport_report(self) -> dict[str, Any]:
         return {

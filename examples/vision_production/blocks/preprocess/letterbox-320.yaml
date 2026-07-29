@@ -1,4 +1,6 @@
 use: vision.letterbox
+
+# Square detector input size.
 imgsz: 320
 scale_up: true
 color: [114, 114, 114]

@@ -20,8 +20,8 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "nodrix==1.4.1\n",
-    ".gitignore": ".nodrix/\noutputs/*\n!outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
+    "requirements.txt": "nodrix==1.5.0\n",
+    ".gitignore": ".nodrix/\n/outputs/*\n!/outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
         apiVersion: nodrix.dev/v1
@@ -200,35 +200,70 @@ def _core_files(project_name: str) -> dict[str, str]:
     })
 
 
+
 def _vision_files(project_name: str) -> dict[str, str]:
     pipeline = dedent(
         f"""
         name: {project_name}
         profile: realtime-low-latency
 
+        runtime:
+          metrics:
+            enabled: true
+            interval_ms: 1000
+            listen: 0.0.0.0:9464
+
         blocks:
           source: blocks/sources/ffmpeg.yaml
           preprocess: blocks/preprocess/letterbox-320.yaml
           detector: blocks/detectors/yolo26n-ncnn.yaml
-          tracker: blocks/trackers/bytetrack.yaml
+          tracker: blocks/trackers/realtime-bytetrack.yaml
           overlay: blocks/outputs/overlay.yaml
           encoder: blocks/outputs/h264.yaml
 
         flow:
-          - source.frame -> preprocess.frame
-          - preprocess.frame -> detector.frame
-          - detector.detections -> tracker.detections
+          # Detector branch: bounded latest-frame processing.
+          - from: source.frame
+            to: preprocess.frame
+            queue:
+              capacity: 1
+              policy: latest
+          - from: preprocess.frame
+            to: detector.frame
+            queue:
+              capacity: 1
+              policy: latest
 
-          # Detection is delayed relative to the source frame. Keep a
-          # small bounded frame history for exact-sequence overlay.
+          # Tracker clock: every fresh source frame, with detections as a
+          # slower side input. The tracker predicts between measurements.
+          - from: source.frame
+            to: tracker.frame
+            queue:
+              capacity: 2
+              policy: drop_oldest
+          - from: detector.detections
+            to: tracker.detections
+            queue:
+              capacity: 1
+              policy: latest
+
+          # Exact-sequence overlay keeps a small bounded frame history.
           - from: source.frame
             to: overlay.frame
             queue:
               capacity: 4
               policy: drop_oldest
+          - from: tracker.tracks
+            to: overlay.tracks
+            queue:
+              capacity: 2
+              policy: drop_oldest
 
-          - tracker.tracks -> overlay.tracks
-          - overlay.frame -> encoder.frame
+          - from: overlay.frame
+            to: encoder.frame
+            queue:
+              capacity: 1
+              policy: latest
 
         streams:
           bind_host: 0.0.0.0
@@ -252,23 +287,19 @@ def _vision_files(project_name: str) -> dict[str, str]:
         """
         use: media.ffmpeg_source
 
-        # Video input. Replace this with an RTSP URL or local video path.
-        uri: lavfi:testsrc=size=640x360:rate=15
+        # Video input. Replace this test generator with an RTSP URL or file.
+        uri: lavfi:testsrc=size=640x360:rate=30
 
-        # Declared decoded frame size.
+        # Decoded frame geometry and frame clock.
         width: 640
         height: 360
+        fps: 30
 
-        # Declared input frame rate.
-        fps: 15
-
-        # RTSP transport: tcp is reliable; udp can reduce latency but may lose packets.
+        # RTSP: tcp is reliable; udp may reduce latency but can lose packets.
         rtsp_transport: tcp
 
-        # Minimize FFmpeg input buffering.
+        # Minimize FFmpeg buffering and pace generated/file input in real time.
         low_latency: true
-
-        # Pace a generated source or video file in real time.
         realtime: true
         """
     ).lstrip()
@@ -279,11 +310,7 @@ def _vision_files(project_name: str) -> dict[str, str]:
 
         # Square detector input size.
         imgsz: 320
-
-        # Allow enlarging a source image smaller than imgsz.
         scale_up: true
-
-        # Neutral padding color.
         color: [114, 114, 114]
         """
     ).lstrip()
@@ -292,49 +319,95 @@ def _vision_files(project_name: str) -> dict[str, str]:
         """
         use: vision.ncnn_detector
 
-        # Directory containing one NCNN .param/.bin model pair.
+        # Directory containing one NCNN .param/.bin pair.
         model: models/yolo26n_ncnn_model
 
         # Minimum detection confidence: 0.0..1.0.
         conf: 0.18
 
-        # NMS IoU threshold: 0.0..1.0.
+        # IoU threshold used by non-maximum suppression: 0.0..1.0.
         iou: 0.65
 
-        # Maximum detections published for one frame.
+        # Maximum number of detections published for one frame.
         max_det: 150
 
-        # NCNN CPU threads. Three leaves one Pi 5 core for media/runtime work.
+        # Backend: auto, cpu, or vulkan. auto probes Vulkan first.
+        backend: auto
+
+        # Acceleration policy: required, preferred, or disabled.
+        # preferred reports a visible CPU fallback when no GPU is usable.
+        acceleration: preferred
+
+        # Native NCNN CPU worker threads used by the CPU backend.
         threads: 3
 
-        # Output decoder: auto, xyxy or yolo.
+        # Output tensor decoder: auto, xyxy, or yolo.
         output_format: auto
 
-        # Whether the model output has objectness: auto, true or false.
+        # Separate objectness field: auto, true, or false.
         has_objectness: auto
         """
     ).lstrip()
 
-    tracker = dedent(
+    realtime_tracker = dedent(
         """
-        use: vision.bytetrack
+        use: vision.realtime_bytetrack
+
+        # Source frames drive this node. The most recent detection is a
+        # slower side input and is never applied twice.
+        synchronization:
+          policy: latest_available
+          trigger_port: frame
+
+        # Association backend: native, auto, or python. Production requires native.
+        backend: native
 
         # Confidence threshold for primary association.
         track_thresh: 0.25
 
-        # Minimum confidence for low-score recovery.
+        # Minimum confidence used by the low-score recovery stage.
         low_thresh: 0.10
 
         # IoU threshold for primary matching.
         match_iou: 0.30
 
-        # IoU threshold for recovery-stage matching.
+        # IoU threshold for low-score recovery matching.
         second_match_iou: 0.20
 
-        # Number of frames to retain a temporarily lost track.
-        track_buffer: 30
+        # Frames retained before an unobserved track is deleted.
+        track_buffer: 60
 
-        # Hits required before a track is published.
+        # Measurement hits required before a track is published.
+        min_hits: 1
+
+        # Frames a track may remain visible using prediction only.
+        max_prediction_frames: 15
+
+        # Score multiplier applied for every prediction-only frame.
+        prediction_score_decay: 0.97
+
+        # Replay delayed measurements from their matching historical state.
+        delayed_measurement_replay: true
+
+        # Bounded history depth used by delayed-measurement replay.
+        history_frames: 60
+
+        # Measurement older than history: discard or current (approximate).
+        too_old_policy: discard
+        """
+    ).lstrip()
+
+    detection_tracker = dedent(
+        """
+        use: vision.bytetrack
+
+        # Compatibility tracker: emits only when detections arrive.
+        backend: native
+        track_thresh: 0.25
+        low_thresh: 0.10
+        match_iou: 0.30
+        second_match_iou: 0.20
+        track_buffer: 30
         min_hits: 1
         """
     ).lstrip()
@@ -346,87 +419,111 @@ def _vision_files(project_name: str) -> dict[str, str]:
         # Draw the persistent track identifier.
         show_track_id: true
 
-        # Draw object class names.
+        # Draw the object class name or numeric class ID.
         show_class: true
 
-        # Draw detection confidence.
+        # Draw the current measured or decayed prediction score.
         show_score: true
         """
     ).lstrip()
 
-    encoder = dedent(
+    hardware_encoder = dedent(
         """
         use: media.ffmpeg_encoder
 
-        # Encoded stream codec: h264 or h265.
         codec: h264
-
-        # auto probes hardware encoders and falls back to software.
         encoder: auto
 
-        # Software encoder settings used by libx264/libx265.
+        # Probe hardware encoders first. If the platform has no encoder,
+        # Nodrix reports the fallback explicitly instead of hiding it.
+        acceleration: preferred
+
+        # Applied only when the preferred policy selects a software fallback.
         preset: ultrafast
         tune: zerolatency
         crf: 23
 
-        # Keyframe interval. A short interval improves reconnect time.
-        keyint: 15
+        keyint: 30
+        # fps is inherited from frame metadata.
+        """
+    ).lstrip()
 
-        # fps is intentionally omitted: it is inherited from frame metadata.
+    software_encoder = dedent(
+        """
+        use: media.ffmpeg_encoder
+
+        # Explicit compatibility fallback. Select this block only after
+        # accepting the CPU cost and reduced output frame rate.
+        codec: h264
+        encoder: libx264
+        acceleration: disabled
+        preset: ultrafast
+        tune: zerolatency
+        crf: 23
+        keyint: 30
         """
     ).lstrip()
 
     return {
         "pipeline.yaml": pipeline,
-        "requirements.txt": "nodrix[vision-ncnn,media,viewer]==1.4.1\n",
+        "requirements.txt": "nodrix[vision-ncnn,media,viewer]==1.5.0\n",
         "blocks/sources/ffmpeg.yaml": source,
         "blocks/preprocess/letterbox-320.yaml": preprocess,
         "blocks/detectors/yolo26n-ncnn.yaml": detector,
-        "blocks/trackers/bytetrack.yaml": tracker,
+        "blocks/trackers/realtime-bytetrack.yaml": realtime_tracker,
+        "blocks/trackers/bytetrack.yaml": detection_tracker,
         "blocks/outputs/overlay.yaml": overlay,
-        "blocks/outputs/h264.yaml": encoder,
+        "blocks/outputs/h264.yaml": hardware_encoder,
+        "blocks/outputs/h264-software.yaml": software_encoder,
         "models/README.md": (
             "Place one NCNN .param/.bin model pair in "
             "models/yolo26n_ncnn_model/.\n"
         ),
-        "scripts/run.sh": (
-            "#!/usr/bin/env bash\n"
-            "set -euo pipefail\n"
-            "nodrix run pipeline.yaml "
-            "--metrics-listen 0.0.0.0:9464\n"
-        ),
+        "scripts/run.sh": "#!/usr/bin/env bash\nset -euo pipefail\nnodrix run\n",
         "README.md": dedent(
             f"""
             # {project_name}
 
-            Configure each node in its own block YAML:
+            The default graph is multi-rate and hardware-first:
 
             ```text
-            blocks/sources/ffmpeg.yaml
-            blocks/preprocess/letterbox-320.yaml
-            blocks/detectors/yolo26n-ncnn.yaml
-            blocks/trackers/bytetrack.yaml
-            blocks/outputs/overlay.yaml
-            blocks/outputs/h264.yaml
+            source 30 FPS ─┬─ detector latest frame (~10 FPS) ─┐
+                           └─ realtime tracker frame clock ─────┤
+                                                              ▼
+                                                 tracks at source FPS
+                                                              │
+                                                     overlay → hardware H.264
             ```
 
-            Run:
+            Configure each implementation in its own block YAML, then run:
 
             ```bash
-            nodrix validate pipeline.yaml
-            nodrix inspect pipeline.yaml
-            nodrix inspect pipeline.yaml --node detector
-            ./scripts/run.sh
+            nodrix validate
+            nodrix inspect
+            nodrix run
             ```
 
-            View from another computer:
+            Discover and view from another LAN computer:
+
+            ```bash
+            nodrix stream list
+            nodrix-viewer /{project_name}/preview/h264 --overlay
+            ```
+
+            Direct URI remains available:
 
             ```bash
             nodrix-viewer nodrix://DEVICE_IP:7420/{project_name}/preview/h264 --overlay
             ```
+
+            The selected encoder block always probes hardware first and prints
+            any software fallback explicitly. For strict hardware-only startup,
+            set `acceleration: required`. For an intentional software run, use
+            `blocks/outputs/h264-software.yaml`.
             """
         ).lstrip(),
     }
+
 
 
 def _media_files(project_name: str) -> dict[str, str]:
@@ -450,7 +547,7 @@ def _media_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[media,viewer]==1.4.1\n",
+        "requirements.txt": "nodrix[media,viewer]==1.5.0\n",
         "README.md": dedent(
             f"""
             # {project_name}

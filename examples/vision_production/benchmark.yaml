@@ -3,13 +3,17 @@ pipeline: pipeline.yaml
 warmup: 1
 repeat: 3
 variants:
-  fast-320:
+  native-tracker:
     profile: realtime-low-latency
     set:
-      - detector.conf=0.18
-      - detector.threads=4
-  accurate-320:
-    profile: realtime-balanced
+      - detector.threads=3
+      - tracker.backend=native
+  python-tracker:
+    profile: realtime-low-latency
     set:
-      - detector.conf=0.25
-      - detector.max_det=300
+      - detector.threads=3
+      - tracker.backend=python
+  strict-hardware-encoder:
+    profile: realtime-low-latency
+    set:
+      - encoder.acceleration=required

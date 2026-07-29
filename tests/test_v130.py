@@ -41,7 +41,8 @@ def test_v130_vision_template_uses_h264_preview(tmp_path: Path) -> None:
     assert "blocks/outputs/h264.yaml" in manifest
     assert "media.ffmpeg_encoder" in encoder
     assert "/production-vision/preview/h264" in manifest
-    assert "overlay.frame -> encoder.frame" in manifest
+    assert "from: overlay.frame" in manifest
+    assert "to: encoder.frame" in manifest
     assert "encoder.encoded" in manifest
     assert "nodrix-viewer nodrix://DEVICE_IP:7420/production-vision/preview/h264 --overlay" in readme
 

@@ -1,48 +1,46 @@
-# Nodrix Production Vision example
-
-This is the reference host-memory pipeline for Nodrix 1.3.0:
+# Nodrix 1.5.0 multi-rate Vision example
 
 ```text
-FFmpeg source -> letterbox -> NCNN YOLO -> ByteTrack -> overlay -> H.264 stream
+source 30 FPS ─┬─ latest → letterbox → NCNN detector ─┐
+               └─ every frame ─────────────────────────▶ realtime ByteTrack
+                                                          │
+                                               tracks at source clock
+                                                          │
+                                               overlay → H.264 stream
 ```
 
-Install:
+Each implementation and its parameters live in one block YAML. The pipeline
+contains graph structure, queue policy, stream exports and runtime metrics.
+
+Place one NCNN `.param/.bin` model pair under
+`models/yolo26n_ncnn_model/`, then:
 
 ```bash
-python -m pip install -e ".[vision-ncnn,media,viewer]"
+nodrix validate
+nodrix inspect
+nodrix run
+nodrix top
 ```
 
-Place an exported NCNN model and labels in `models/`, or set:
+On another LAN computer:
 
 ```bash
-export NODRIX_MODEL=/absolute/path/to/yolo26n_ncnn_model
-export NODRIX_LABELS=/absolute/path/to/coco.names
-export NODRIX_SOURCE=rtsp://camera/stream
+nodrix stream list
+nodrix-viewer /vision_production/preview/h264 --overlay
 ```
 
-Validate and run:
-
-```bash
-nodrix validate examples/vision_production/pipeline.yaml
-nodrix inspect examples/vision_production/pipeline.yaml --resolved
-nodrix run examples/vision_production/pipeline.yaml
-```
-
-Open the encoded preview from another machine:
-
-```bash
-nodrix-viewer nodrix://HOST:7420/vision/preview/h264
-```
-
-The 1.3.0 implementation intentionally uses BGR host memory between FFmpeg,
-OpenCV and the NCNN Python binding. Copy/device-transfer accounting remains
-visible; DMA-BUF, Vulkan and fully native inference are later optimization
-stages, not claims of this reference pipeline.
+The encoder block probes hardware first and reports a visible software fallback
+when the platform has no hardware encoder. Set `acceleration: required` for a
+strict deployment. Host BGR frames remain an honest limitation of this example.
 
 ## Benchmark
+
+The example source stops after 300 frames so variants terminate:
 
 ```bash
 nodrix benchmark --spec benchmark.yaml
 ```
 
-The suite is stored under `.nodrix/benchmarks/` and retains every measured run artifact.
+`native-tracker` and `python-tracker` compare the same algorithm with different
+association backends. `strict-hardware-encoder` intentionally fails on a machine
+without a working hardware encoder instead of hiding a software fallback.

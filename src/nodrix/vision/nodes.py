@@ -12,7 +12,7 @@ from ..messages import Message
 from ..node import Node, NodeContext
 from ..registry import register_builtin
 from .geometry import decode_yolo_output, restore_letterbox_boxes
-from .tracking import ByteTrackCore
+from .tracking import ByteTrackCore, RealtimeByteTrackCore, native_tracking_available
 
 try:
     import cv2
@@ -243,9 +243,37 @@ class NcnnDetectorNode(Node):
 
         self.net = ncnn.Net()
         options = self.net.opt
+        requested_backend = str(self.parameters.get("backend", "auto")).lower()
+        acceleration = str(self.parameters.get("acceleration", "preferred")).lower()
+        if requested_backend not in {"auto", "cpu", "vulkan"}:
+            raise ValueError("vision.ncnn_detector backend must be auto, cpu, or vulkan")
+        if acceleration not in {"required", "preferred", "disabled"}:
+            raise ValueError("vision.ncnn_detector acceleration must be required, preferred, or disabled")
+        if "use_vulkan" in self.parameters:
+            requested_backend = "vulkan" if bool(self.parameters["use_vulkan"]) else "cpu"
+        gpu_count = 0
+        get_gpu_count = getattr(ncnn, "get_gpu_count", None)
+        if callable(get_gpu_count):
+            try:
+                gpu_count = max(int(get_gpu_count()), 0)
+            except Exception:
+                gpu_count = 0
+        use_vulkan = requested_backend == "vulkan" or (
+            requested_backend == "auto" and acceleration != "disabled" and gpu_count > 0
+        )
+        if use_vulkan and gpu_count <= 0:
+            raise RuntimeError("NCNN Vulkan backend was requested but no NCNN Vulkan device is available")
+        if acceleration == "required" and not use_vulkan:
+            raise RuntimeError(
+                "Hardware acceleration is required for vision.ncnn_detector, but NCNN Vulkan is unavailable. "
+                "Use acceleration: preferred only after measuring the native ARM CPU backend."
+            )
+        self.detector_backend = "ncnn-vulkan" if use_vulkan else "ncnn-native-cpu"
+        self.acceleration_policy = acceleration
+        self.gpu_count = gpu_count
         settings = {
             "num_threads": int(self.parameters.get("threads", min(max(os.cpu_count() or 1, 1), 4))),
-            "use_vulkan_compute": bool(self.parameters.get("use_vulkan", False)),
+            "use_vulkan_compute": use_vulkan,
             "lightmode": bool(self.parameters.get("lightmode", True)),
             "use_fp16_packed": bool(self.parameters.get("use_fp16_packed", True)),
             "use_fp16_storage": bool(self.parameters.get("use_fp16_storage", True)),
@@ -316,7 +344,7 @@ class NcnnDetectorNode(Node):
             coordinate_space=CoordinateSpace.PIXELS,
             labels=self.labels,
             attributes={
-                "backend": "ncnn",
+                "backend": self.detector_backend,
                 "param": str(self.param_path),
                 "bin": str(self.bin_path),
                 "input_blob": self.input_blob,
@@ -330,10 +358,19 @@ class NcnnDetectorNode(Node):
                 metadata={
                     **source.metadata,
                     "detections": len(detections),
-                    "detector_backend": "ncnn",
+                    "detector_backend": self.detector_backend,
                     "model": str(self.param_path.parent),
                 },
             )
+        }
+
+    def runtime_info(self) -> dict[str, Any]:
+        return {
+            "backend": self.detector_backend,
+            "acceleration": self.acceleration_policy,
+            "gpu_count": self.gpu_count,
+            "threads": int(self.parameters.get("threads", min(max(os.cpu_count() or 1, 1), 4))),
+            "model": str(self.param_path.parent),
         }
 
     def close(self) -> None:
@@ -361,6 +398,7 @@ class ByteTrackNode(Node):
             class_agnostic=bool(self.parameters.get("class_agnostic", False)),
             process_noise=float(self.parameters.get("process_noise", 1.0)),
             measurement_noise=float(self.parameters.get("measurement_noise", 10.0)),
+            backend=str(self.parameters.get("backend", "auto")),
         )
 
     def process(self, inputs: dict[str, Message]) -> dict[str, Message]:
@@ -395,6 +433,118 @@ class ByteTrackNode(Node):
                 payload=tracks,
                 metadata={**source.metadata, "tracks": len(tracks), "tracker": "bytetrack"},
             )
+        }
+
+
+@register_builtin("vision.realtime_bytetrack")
+class RealtimeByteTrackNode(Node):
+    """Track at the frame rate while accepting slower delayed detections."""
+
+    input_types = {"frame": "vision.frame", "detections": "vision.detections"}
+    optional_inputs = frozenset({"detections"})
+    output_types = {"tracks": "vision.tracks"}
+    input_memory = {"frame": ["cpu", "shared"], "detections": ["cpu", "shared"]}
+    output_memory = {"tracks": "cpu"}
+
+    def open(self, context: NodeContext) -> None:
+        super().open(context)
+        backend = str(self.parameters.get("backend", "native"))
+        if backend == "native" and not native_tracking_available():
+            raise RuntimeError(
+                "vision.realtime_bytetrack requires the Nodrix native C++20 tracking extension. "
+                "Install a compiled Nodrix wheel/editable build, or explicitly set backend: python."
+            )
+        core = ByteTrackCore(
+            track_threshold=float(self.parameters.get("track_thresh", 0.25)),
+            low_threshold=float(self.parameters.get("low_thresh", 0.10)),
+            new_track_threshold=self.parameters.get("new_track_thresh"),
+            match_iou=float(self.parameters.get("match_iou", 0.30)),
+            second_match_iou=float(self.parameters.get("second_match_iou", 0.20)),
+            track_buffer=int(self.parameters.get("track_buffer", 60)),
+            minimum_hits=int(self.parameters.get("min_hits", 1)),
+            maximum_visible_missed=int(self.parameters.get("max_prediction_frames", 15)),
+            class_agnostic=bool(self.parameters.get("class_agnostic", False)),
+            process_noise=float(self.parameters.get("process_noise", 1.0)),
+            measurement_noise=float(self.parameters.get("measurement_noise", 10.0)),
+            backend=backend,
+        )
+        self.tracker = RealtimeByteTrackCore(
+            core,
+            history_frames=int(self.parameters.get("history_frames", 60)),
+            maximum_prediction_frames=int(self.parameters.get("max_prediction_frames", 15)),
+            prediction_score_decay=float(self.parameters.get("prediction_score_decay", 0.97)),
+            delayed_measurement_replay=bool(self.parameters.get("delayed_measurement_replay", True)),
+            too_old_policy=str(self.parameters.get("too_old_policy", "discard")),
+        )
+        self.backend = core.backend_name
+        self.labels: list[str] | None = None
+
+    def process(self, inputs: dict[str, Message]) -> dict[str, Message]:
+        frame_message = inputs["frame"]
+        detection_message = inputs.get("detections")
+        frame = frame_message.payload
+        if not isinstance(frame, Frame):
+            raise TypeError("vision.realtime_bytetrack expects a nodrix.Frame payload on frame")
+
+        step_kwargs: dict[str, Any] = {
+            "frame_sequence": frame_message.sequence,
+            "frame_timestamp_ns": frame_message.timestamp_ns,
+        }
+        if detection_message is not None:
+            detections = detection_message.payload
+            if not isinstance(detections, Detections):
+                raise TypeError("vision.realtime_bytetrack expects nodrix.Detections on detections")
+            if detections.box_format != BoxFormat.XYXY or detections.coordinate_space != CoordinateSpace.PIXELS:
+                raise ValueError("vision.realtime_bytetrack requires pixel-space XYXY detections")
+            if detections.labels is not None:
+                self.labels = list(detections.labels)
+            step_kwargs.update(
+                detection_sequence=detection_message.sequence,
+                detection_timestamp_ns=detection_message.timestamp_ns,
+                boxes=detections.boxes,
+                scores=detections.scores,
+                class_ids=detections.class_ids,
+            )
+
+        current, telemetry = self.tracker.step(**step_kwargs)
+        boxes, track_ids, scores, class_ids, states = current
+        tracks = Tracks(
+            boxes=boxes,
+            track_ids=track_ids,
+            scores=scores,
+            class_ids=class_ids,
+            states=states,
+            box_format=BoxFormat.XYXY,
+            coordinate_space=CoordinateSpace.PIXELS,
+            attributes={
+                "labels": self.labels,
+                "tracker": "realtime-bytetrack",
+                "backend": self.backend,
+                **telemetry,
+            },
+        )
+        return {
+            "tracks": frame_message.with_updates(
+                type="vision.tracks",
+                payload=tracks,
+                metadata={
+                    **frame_message.metadata,
+                    "tracks": len(tracks),
+                    "tracker": "realtime-bytetrack",
+                    "tracker_backend": self.backend,
+                    "detector_sequence": None if detection_message is None else detection_message.sequence,
+                    **telemetry,
+                },
+            )
+        }
+
+    def runtime_info(self) -> dict[str, Any]:
+        return {
+            "backend": self.backend,
+            "frame_clocked": True,
+            "delayed_measurement_replay": self.tracker.delayed_measurement_replay,
+            "history_frames": self.tracker.history.maxlen,
+            "max_prediction_frames": self.tracker.maximum_prediction_frames,
         }
 
 

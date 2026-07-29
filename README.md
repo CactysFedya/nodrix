@@ -1,4 +1,4 @@
-# Nodrix 1.4.1
+# Nodrix 1.5.0
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -8,18 +8,29 @@
 Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
 
 
-## Nodrix 1.4 highlights
+## Nodrix 1.5 highlights
 
-Benchmark complete pipelines with named variants and reproducible artifacts:
+Run detection and tracking at different rates without duplicating stale work:
 
-```bash
-nodrix benchmark pipeline.yaml --warmup 1 --repeat 3
-nodrix benchmark --spec examples/vision_production/benchmark.yaml
-nodrix runs compare <run-a> <run-b> --table
-nodrix replay <run-id>
+```text
+source 30 FPS ─┬─ latest frame → detector ~10 FPS ─┐
+               └─ every frame → realtime tracker ──┤
+                                                   └─ tracks at source rate
 ```
 
-Every suite stores measured and warm-up runs separately, aggregates latency/rate/drop/resource metrics, captures a filtered environment snapshot, and hashes discoverable local model files.
+```bash
+nodrix init camera_app --template vision
+cd camera_app
+nodrix inspect
+nodrix run
+nodrix top
+```
+
+`vision.realtime_bytetrack` predicts on every source frame, applies each
+detection once, and replays delayed measurements through bounded state history.
+Native C++20 IoU association is used by the production block. Encoder and NCNN
+selection are hardware-first and always expose the selected backend and any
+fallback.
 
 ## Core model
 
@@ -59,7 +70,7 @@ pip install "nodrix[vision-ncnn,media,viewer]"
 
 ### Raspberry Pi and offline source installation
 
-Nodrix 1.4.1 can be built without PyPI build isolation when the runtime dependencies are already present:
+Nodrix 1.5.0 can be built without PyPI build isolation when the runtime dependencies are already present:
 
 ```bash
 python3 -m pip install . --no-build-isolation --no-deps
@@ -224,7 +235,8 @@ The validator checks graph cycles, port/type compatibility, memory transfers, un
 ## Metrics, resources and runs
 
 ```bash
-nodrix run --metrics-listen 127.0.0.1:9464
+# runtime.metrics.listen can be stored in pipeline.yaml
+nodrix run
 nodrix top
 nodrix metrics --format prometheus
 nodrix runs list
@@ -255,6 +267,6 @@ Nodrix Plugin ABI 1.0 uses numeric ABI `65536` and feature flags for typed ports
 
 ## Honest limitations
 
-Nodrix 1.0 stabilizes the contracts and production control plane. Hardware-specific CUDA IPC mapping, full V4L2 DMA-BUF capture/requeue, native libav nodes, QUIC/UDP data plane, TLS certificates, ROS 2 bridge, and ready-made detector/tracker packs remain later backends or releases.
+Nodrix 1.5.0 adds multi-rate tracking but does not claim a fully device-resident vision path. The current FFmpeg source and overlay use host BGR frames; full V4L2 DMA-BUF capture, native libav processing, timestamped H.264/H.265 access units, CUDA IPC mapping, QUIC/UDP and ROS 2 bridges remain future backends.
 
-See [docs/BLOCKS.md](docs/BLOCKS.md), [docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md), [docs/PROFILES.md](docs/PROFILES.md), [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md), [docs/BENCHMARKING.md](docs/BENCHMARKING.md), [docs/RELEASE_1.4.1.md](docs/RELEASE_1.4.1.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).
+See [docs/BLOCKS.md](docs/BLOCKS.md), [docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md), [docs/PROFILES.md](docs/PROFILES.md), [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md), [docs/BENCHMARKING.md](docs/BENCHMARKING.md), [docs/MULTI_RATE_VISION.md](docs/MULTI_RATE_VISION.md), [docs/RELEASE_1.5.0.md](docs/RELEASE_1.5.0.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).

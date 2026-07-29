@@ -66,6 +66,15 @@ class ShutdownConfig(BaseModel):
 class MetricsConfig(BaseModel):
     enabled: bool = True
     interval_ms: int = Field(default=1000, ge=100, le=60_000)
+    listen: str | None = None
+
+    @model_validator(mode="after")
+    def validate_listen(self) -> "MetricsConfig":
+        if self.listen is not None:
+            host, separator, port = self.listen.rpartition(":")
+            if not separator or not host or not port.isdigit() or not 0 <= int(port) <= 65535:
+                raise ValueError("runtime.metrics.listen must use host:port")
+        return self
 
 
 class RuntimeConfig(BaseModel):
