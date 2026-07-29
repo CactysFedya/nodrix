@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.9.0 — Planner, Diagnose, Explain and Measured Tuning
+- Added `nodrix plan` with declared-rate propagation, memory/copy analysis, real encoder probes and explicit unknown estimates.
+- Added `nodrix diagnose` for completed runs and opt-in executions, with evidence-backed bottleneck, queue, copy, synchronization, fallback and thermal findings.
+- Added top-level `nodrix explain` for nodes, edges, backend decisions and resolved configuration sources.
+- Added `nodrix optimize`, which generates separate benchmark variants without modifying the production manifest.
+- Added optional constraint-aware benchmark evaluation and a measured variant recommendation that is never applied automatically.
+- Kept the existing reproducible benchmark engine as the sole evaluation path, including warm-up, P50/P95/P99, environment, models and per-run artifacts.
+
 ## 1.8.0 — Secure Remote Edges
 - Added verified TLS 1.2+ transport and `nodrix+tls://` endpoints to the existing direct stream data plane.
 - Added optional mutual TLS with a private client CA and mandatory certificate verification.

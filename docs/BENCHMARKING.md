@@ -1,5 +1,15 @@
 # Nodrix Benchmarking
 
+For guided variant generation and constraint-aware selection, see
+`PLANNING_DIAGNOSIS.md` or run:
+
+```bash
+nodrix optimize pipeline.yaml --benchmark --latency-p95-ms 100
+```
+
+This uses the benchmark engine described below and never modifies the source
+pipeline.
+
 Nodrix 1.4.0 replaces the earlier repeat-only benchmark helper with a versioned benchmark suite.
 
 ## Direct benchmark

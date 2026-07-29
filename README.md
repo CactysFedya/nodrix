@@ -236,9 +236,15 @@ mandatory; mutual TLS is available with `client_ca` and
 ```bash
 nodrix validate --strict
 nodrix inspect --memory
+nodrix plan pipeline.yaml
+nodrix diagnose runs/RUN-ID
+nodrix explain edge source.output:sink.input --pipeline pipeline.yaml
 ```
 
 The validator checks graph cycles, port/type compatibility, memory transfers, unsupported copies, open LAN streams, stream backpressure, watchdog/isolation conflicts, resource configuration, and native plugin loading.
+
+`nodrix optimize` writes separate benchmark variants and a decision report. It
+never edits or applies the production pipeline.
 
 ## Metrics, resources and runs
 

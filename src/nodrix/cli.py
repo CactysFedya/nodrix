@@ -40,6 +40,13 @@ from .lockfile import write_lock, verify_lock
 from .packages import build_package, install_package, list_packages, package_info, remove_package
 from .runs import list_runs, load_run, compare_runs, resolve_run
 from .benchmarking import direct_benchmark_plan, load_benchmark_plan, replay_plan, run_benchmark_suite
+from .planning import (
+    build_static_plan,
+    diagnose_report,
+    explain_target,
+    select_optimization_variant,
+    write_optimization_bundle,
+)
 from .validation import validate_production
 from .metrics import MetricsServer, prometheus_text
 from .profiles import profile_names
@@ -741,6 +748,247 @@ def benchmark(
         )
     console.print(table)
     console.print(f"Artifacts: {summary['suite_dir']}")
+
+
+@app.command("plan")
+def plan_command(
+    pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block")] = None,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Plan rates, memory paths, queues, and probed hardware without running the graph."""
+    try:
+        details = load_manifest_details(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
+        runtime = _runtime(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
+        result = build_static_plan(details.manifest, runtime.describe())
+    except Exception as exc:
+        console.print(f"[red]Planning failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        console.print(f"[green]Written[/green] {output.resolve()}")
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False))
+        return
+    table = Table("Node", "Configured estimate", "Basis")
+    for name, raw in result["rates"].items():
+        rate = raw.get("estimated_hz")
+        table.add_row(
+            name,
+            f"{float(rate):.2f} Hz" if rate is not None else "unknown",
+            str(raw.get("basis", "")),
+        )
+    console.print(table)
+    expected = result.get("expected_output_hz")
+    console.print(
+        "Expected output: "
+        + (f"{float(expected):.2f} Hz" if expected is not None else "unknown until measured")
+    )
+    for decision in result["backend_decisions"]:
+        console.print(
+            f"{decision['target']}: {decision.get('selected') or 'unavailable'}"
+            f" · {decision.get('reason')}"
+        )
+    for recommendation in result["recommendations"]:
+        console.print(
+            f"[yellow]{recommendation['code']}[/yellow] "
+            f"{recommendation['target']}: {recommendation['message']}"
+        )
+
+
+def _latest_run_report(root: Path) -> Path:
+    candidates = [
+        path
+        for base in (root / ".nodrix" / "runs", root / "runs")
+        if base.is_dir()
+        for path in base.rglob("summary.json")
+    ]
+    if not candidates:
+        raise FileNotFoundError(
+            "No completed run was found; pass a run directory/report or use --run with a pipeline."
+        )
+    return max(candidates, key=lambda path: path.stat().st_mtime_ns)
+
+
+@app.command("diagnose")
+def diagnose_command(
+    target: Annotated[Path | None, typer.Argument(help="Run directory, summary JSON, or pipeline")] = None,
+    run_pipeline: Annotated[bool, typer.Option("--run", help="Execute a pipeline before diagnosis")] = False,
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Diagnose measured bottlenecks, queue pressure, copies, fallbacks, and thermals."""
+    try:
+        if target is None:
+            report_path = _latest_run_report(Path.cwd())
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        else:
+            resolved = target.expanduser().resolve()
+            if resolved.is_dir():
+                report_path = resolved / "summary.json"
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            elif resolved.suffix.lower() in {".yaml", ".yml"}:
+                if not run_pipeline:
+                    raise ValueError(
+                        "Diagnosing a pipeline requires measurements; add --run or pass a completed run."
+                    )
+                runtime = _runtime(resolved)
+                report = (
+                    runtime.run_sync()
+                    if isinstance(runtime, HybridPipelineRuntime)
+                    else asyncio.run(runtime.run())
+                )
+            else:
+                report = json.loads(resolved.read_text(encoding="utf-8"))
+        result = diagnose_report(report)
+    except Exception as exc:
+        console.print(f"[red]Diagnosis failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if output is not None:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        console.print(f"[green]Written[/green] {output.resolve()}")
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False))
+        return
+    table = Table("Severity", "Code", "Target", "Finding", "Evidence")
+    for finding in result["findings"]:
+        table.add_row(
+            str(finding["severity"]),
+            str(finding["code"]),
+            str(finding["target"]),
+            str(finding["message"]),
+            json.dumps(finding.get("evidence"), ensure_ascii=False, default=str),
+        )
+    console.print(table)
+    if not result["findings"]:
+        console.print("[green]No measured bottleneck or pressure finding.[/green]")
+
+
+@app.command("explain")
+def explain_command(
+    target: Annotated[list[str], typer.Argument(help="Node, dotted config path, backend, or edge SOURCE:TARGET")],
+    pipeline: Annotated[Path, typer.Option("--pipeline", "-p", exists=True, readable=True)] = Path("pipeline.yaml"),
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Explain a resolved value, node, edge, or backend selection."""
+    rendered_target = " ".join(target)
+    try:
+        details = load_manifest_details(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
+        runtime = _runtime(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
+        result = explain_target(details, runtime.describe(), rendered_target)
+    except Exception as exc:
+        console.print(f"[red]Cannot explain {rendered_target!r}:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False, default=str))
+        return
+    console.print(f"Target: [bold]{result.get('target')}[/bold]")
+    console.print(
+        "Value: "
+        + yaml.safe_dump(result.get("value", result.get("selected")), sort_keys=False).strip()
+    )
+    console.print(f"Source: {result.get('source', result.get('evidence', '-'))}")
+    console.print(f"Reason: {result.get('reason', '-')}")
+    rejected = result.get("rejected") or []
+    if rejected:
+        console.print("Rejected: " + json.dumps(rejected, ensure_ascii=False, default=str))
+
+
+@app.command("optimize")
+def optimize_command(
+    pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
+    output_dir: Annotated[Path, typer.Option("--output-dir", "-o")] = Path(".nodrix/optimization"),
+    max_variants: Annotated[int, typer.Option("--max-variants", min=1, max=100)] = 12,
+    latency_p95_ms: Annotated[float | None, typer.Option("--latency-p95-ms", min=0.0)] = None,
+    temperature_c: Annotated[float | None, typer.Option("--temperature-c", min=0.0)] = None,
+    memory_mb: Annotated[float | None, typer.Option("--memory-mb", min=0.0)] = None,
+    run_benchmarks: Annotated[bool, typer.Option("--benchmark", help="Evaluate generated variants now")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Generate separate tuning variants; never modify the production pipeline."""
+    try:
+        details = load_manifest_details(pipeline)
+        constraints = {
+            key: value
+            for key, value in {
+                "latency_p95_ms": latency_p95_ms,
+                "temperature_c": temperature_c,
+                "memory_mb": memory_mb,
+            }.items()
+            if value is not None
+        }
+        spec_path, report_path, result = write_optimization_bundle(
+            pipeline,
+            details.manifest,
+            output_dir.expanduser().resolve(),
+            max_variants=max_variants,
+            constraints=constraints,
+        )
+        if run_benchmarks:
+            benchmark_plan = load_benchmark_plan(spec_path)
+            benchmark_result = run_benchmark_suite(
+                benchmark_plan,
+                _execute_benchmark_run,
+                output_root=output_dir.expanduser().resolve() / "benchmarks",
+            )
+            result = {**result, "benchmark": benchmark_result}
+            result["recommendation"] = select_optimization_variant(
+                benchmark_result,
+                constraints=constraints,
+            )
+            report_path.write_text(
+                json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+    except Exception as exc:
+        console.print(f"[red]Optimization planning failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False, default=str))
+        return
+    console.print(f"[green]Generated[/green] {len(result['variants'])} variants")
+    console.print(f"Benchmark spec: {spec_path}")
+    console.print(f"Decision report: {report_path}")
+    if result.get("recommendation"):
+        console.print(
+            "Recommended measured variant: "
+            f"{result['recommendation'].get('selected') or 'none'}"
+        )
+    console.print("Source pipeline was not modified.")
 
 @app.command("view")
 def view(
