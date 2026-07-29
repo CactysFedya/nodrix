@@ -1,4 +1,12 @@
 # Changelog
+## 1.4.0 — Benchmark and Reproducibility
+- Added the versioned `nodrix.benchmark/v1` benchmark specification and named variants.
+- Separated warm-up runs from measured runs and retained every runtime artifact.
+- Added P50/P95/P99 aggregation, source/sink rates, end-to-end latency, drops, errors, memory and temperature summaries.
+- Added filtered environment snapshots and SHA-256 model inventory for benchmark suites.
+- Expanded `runs compare` while preserving the existing node and duration delta fields.
+- Added `nodrix replay` eligibility checks and safe automatic replay for captured `.ndrx` inputs.
+- Preserved Nodrix 1.x manifests, reusable blocks, Node API, Plugin ABI 1.0, wire protocol and `.ndrx` format.
 ## 1.3.0 — Production Vision Vertical Slice
 - Added built-in letterbox preprocessing with reversible source-coordinate metadata.
 - Added an optional NCNN detector with common modern and legacy YOLO output decoding.

@@ -38,3 +38,11 @@ The 1.3.0 implementation intentionally uses BGR host memory between FFmpeg,
 OpenCV and the NCNN Python binding. Copy/device-transfer accounting remains
 visible; DMA-BUF, Vulkan and fully native inference are later optimization
 stages, not claims of this reference pipeline.
+
+## Benchmark
+
+```bash
+nodrix benchmark --spec benchmark.yaml
+```
+
+The suite is stored under `.nodrix/benchmarks/` and retains every measured run artifact.

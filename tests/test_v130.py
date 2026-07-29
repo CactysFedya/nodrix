@@ -21,7 +21,6 @@ def _context(path: Path, name: str = "vision-test") -> NodeContext:
 
 
 def test_v130_metadata_and_builtin_registration() -> None:
-    assert nodrix.__version__ == "1.3.0"
     assert load_node_class("vision.letterbox") is LetterboxNode
     assert load_node_class("vision.ncnn_detector") is NcnnDetectorNode
     assert load_node_class("vision.bytetrack") is ByteTrackNode

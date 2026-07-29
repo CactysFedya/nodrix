@@ -1,0 +1,37 @@
+# APPROXIMATE intrinsics for HiWatch IPC-B022-G2/U (6mm)
+# Stream resolution: 640x360
+# Derived from nominal field of view: H=54.0 deg, V=29.0 deg
+# Distortion coefficients are unknown and set to zero.
+# Use only for pipeline testing / initial experiments, not final precision calibration.
+
+image_width: 640
+image_height: 360
+camera_name: ipc_b022_g2u_6mm_approx
+
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [628.035361762, 0.0, 319.500000000,
+         0.0, 696.008357082, 179.500000000,
+         0.0, 0.0, 1.0]
+
+distortion_model: plumb_bob
+
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [0.0, 0.0, 0.0, 0.0, 0.0]
+
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1.0, 0.0, 0.0,
+         0.0, 1.0, 0.0,
+         0.0, 0.0, 1.0]
+
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [628.035361762, 0.0, 319.500000000, 0.0,
+         0.0, 696.008357082, 179.500000000, 0.0,
+         0.0, 0.0, 1.0, 0.0]

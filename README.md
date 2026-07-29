@@ -1,4 +1,4 @@
-# Nodrix 1.3.0
+# Nodrix 1.4.0
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -8,26 +8,18 @@
 Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
 
 
-## Nodrix 1.3 highlights
+## Nodrix 1.4 highlights
 
-Run a complete built-in perception path without user-written detector or tracker code:
-
-```text
-FFmpeg/RTSP -> letterbox -> NCNN YOLO -> ByteTrack -> overlay -> H.264 -> Viewer
-```
+Benchmark complete pipelines with named variants and reproducible artifacts:
 
 ```bash
-pip install "nodrix[vision-ncnn,media,viewer]"
-nodrix init camera_app --template vision
-cd camera_app
-export NODRIX_MODEL=/absolute/path/to/yolo26n_ncnn_model
-nodrix validate
-nodrix run
+nodrix benchmark pipeline.yaml --warmup 1 --repeat 3
+nodrix benchmark --spec examples/vision_production/benchmark.yaml
+nodrix runs compare <run-a> <run-b> --table
+nodrix replay <run-id>
 ```
 
-The initial reference implementation is an explicit host-memory baseline. It
-uses the NCNN Python binding and does not claim end-to-end DMA-BUF/device
-zero-copy; those transfers remain measurable and are later optimization stages.
+Every suite stores measured and warm-up runs separately, aggregates latency/rate/drop/resource metrics, captures a filtered environment snapshot, and hashes discoverable local model files.
 
 ## Core model
 
@@ -67,7 +59,7 @@ pip install "nodrix[vision-ncnn,media,viewer]"
 
 ### Raspberry Pi and offline source installation
 
-Nodrix 1.3.0 can be built without PyPI build isolation when the runtime dependencies are already present:
+Nodrix 1.4.0 can be built without PyPI build isolation when the runtime dependencies are already present:
 
 ```bash
 python3 -m pip install . --no-build-isolation --no-deps
@@ -265,4 +257,4 @@ Nodrix Plugin ABI 1.0 uses numeric ABI `65536` and feature flags for typed ports
 
 Nodrix 1.0 stabilizes the contracts and production control plane. Hardware-specific CUDA IPC mapping, full V4L2 DMA-BUF capture/requeue, native libav nodes, QUIC/UDP data plane, TLS certificates, ROS 2 bridge, and ready-made detector/tracker packs remain later backends or releases.
 
-See [docs/BLOCKS.md](docs/BLOCKS.md), [docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md), [docs/PROFILES.md](docs/PROFILES.md), [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md), [docs/RELEASE_1.3.0.md](docs/RELEASE_1.3.0.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).
+See [docs/BLOCKS.md](docs/BLOCKS.md), [docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md), [docs/PROFILES.md](docs/PROFILES.md), [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md), [docs/BENCHMARKING.md](docs/BENCHMARKING.md), [docs/RELEASE_1.4.0.md](docs/RELEASE_1.4.0.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).

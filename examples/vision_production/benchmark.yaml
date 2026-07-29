@@ -1,0 +1,15 @@
+version: 1
+pipeline: pipeline.yaml
+warmup: 1
+repeat: 3
+variants:
+  fast-320:
+    profile: realtime-low-latency
+    set:
+      - detector.conf=0.18
+      - detector.threads=4
+  accurate-320:
+    profile: realtime-balanced
+    set:
+      - detector.conf=0.25
+      - detector.max_det=300
