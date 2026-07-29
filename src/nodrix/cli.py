@@ -4,7 +4,6 @@ import asyncio
 import json
 from pathlib import Path
 import shutil
-import statistics
 import subprocess
 import sys
 import time
@@ -33,6 +32,7 @@ from .recording import NdrxReader, play_recording, record_streams
 from .lockfile import write_lock, verify_lock
 from .packages import build_package, install_package, list_packages, package_info, remove_package
 from .runs import list_runs, load_run, compare_runs, resolve_run
+from .benchmarking import direct_benchmark_plan, load_benchmark_plan, replay_plan, run_benchmark_suite
 from .validation import validate_production
 from .metrics import MetricsServer, prometheus_text
 from .profiles import profile_names
@@ -433,6 +433,40 @@ def play(
     console.print(f"[green]Played[/green] {report['messages']} messages")
 
 
+@app.command()
+def replay(
+    run_id: Annotated[str, typer.Argument(help="Run id or unique run-id fragment")],
+    project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd(),
+    execute: Annotated[bool, typer.Option("--execute", help="Execute replay when a captured .ndrx input is available")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Inspect whether a run is reproducible and replay captured .ndrx input."""
+    try:
+        directory = resolve_run(run_id, project)
+        plan = replay_plan(directory)
+    except Exception as exc:
+        console.print(f"[red]Replay inspection failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(plan))
+    else:
+        console.print(f"Replayable: {'yes' if plan['replayable'] else 'no'}")
+        console.print(f"Mode: {plan['mode']}")
+        console.print(f"Reason: {plan['reason']}")
+        if plan.get("command"):
+            console.print("Command: " + " ".join(str(item) for item in plan["command"]))
+    if not execute:
+        if not plan["replayable"]:
+            raise typer.Exit(2)
+        return
+    if plan.get("mode") != "recording":
+        console.print("[red]Automatic execution is restricted to captured .ndrx recordings.[/red]")
+        raise typer.Exit(2)
+    completed = subprocess.run([str(item) for item in plan["command"]], check=False)
+    if completed.returncode:
+        raise typer.Exit(completed.returncode)
+
+
 @recording_app.command("info")
 def recording_info(recording: Annotated[Path, typer.Argument(exists=True, readable=True)]) -> None:
     """Show streams, types, counts, and size of an .ndrx file."""
@@ -527,77 +561,83 @@ def device_v4l2_probe(
     console.print(table)
 
 
-@app.command()
-def benchmark(
-    pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
-    repeat: Annotated[int, typer.Option("--repeat", min=1)] = 3,
-    warmup: Annotated[int, typer.Option("--warmup", min=0)] = 1,
-    output: Annotated[Path | None, typer.Option("--output", help="Write benchmark summary JSON")] = None,
-    profile: Annotated[str | None, typer.Option("--profile")] = None,
-    set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
-    block_values: Annotated[list[str] | None, typer.Option("--block")] = None,
-) -> None:
-    """Run the same pipeline repeatedly and aggregate runtime/node latency."""
-    for _ in range(warmup):
-        asyncio.run(_runtime(
-            pipeline,
-            profile=profile,
-            overrides=set_values,
-            block_overrides=block_values,
-        ).run())
-    reports = [asyncio.run(_runtime(
+def _execute_benchmark_run(
+    pipeline: Path,
+    run_root: Path,
+    profile: str | None,
+    set_values: list[str],
+    block_values: list[str],
+) -> dict[str, object]:
+    runtime = _runtime(
         pipeline,
+        run_root=run_root,
         profile=profile,
         overrides=set_values,
         block_overrides=block_values,
-    ).run()) for _ in range(repeat)]
-    durations = [r["duration_seconds"] for r in reports]
-    node_names = reports[0]["nodes"].keys()
-    nodes = {}
-    for name in node_names:
-        means = [r["nodes"][name]["mean_ms"] for r in reports]
-        p95 = [r["nodes"][name].get("p95_ms", r["nodes"][name]["max_ms"]) for r in reports]
-        e2e_p95 = [r["nodes"][name].get("end_to_end", {}).get("p95_ms", 0.0) for r in reports]
-        nodes[name] = {
-            "mean_ms": statistics.fmean(means),
-            "min_mean_ms": min(means),
-            "max_mean_ms": max(means),
-            "p95_ms": statistics.fmean(p95),
-            "end_to_end_p95_ms": statistics.fmean(e2e_p95),
-        }
-    summary = {
-        "pipeline": reports[0]["pipeline"],
-        "repeat": repeat,
-        "warmup": warmup,
-        "duration_seconds": {
-            "mean": statistics.fmean(durations),
-            "min": min(durations),
-            "max": max(durations),
-        },
-        "nodes": nodes,
-        "runs": [r["run_dir"] for r in reports],
-    }
-    table = Table("Metric", "Mean", "Min", "Max")
-    d = summary["duration_seconds"]
-    table.add_row("Pipeline seconds", f"{d['mean']:.4f}", f"{d['min']:.4f}", f"{d['max']:.4f}")
-    for name, stats in nodes.items():
+    )
+    return runtime.run_sync() if isinstance(runtime, HybridPipelineRuntime) else asyncio.run(runtime.run())
+
+
+@app.command()
+def benchmark(
+    pipeline: Annotated[Path | None, typer.Argument(help="Pipeline manifest; defaults to pipeline.yaml")] = None,
+    spec: Annotated[Path | None, typer.Option("--spec", help="Versioned benchmark YAML specification")] = None,
+    repeat: Annotated[int | None, typer.Option("--repeat", min=1)] = None,
+    warmup: Annotated[int | None, typer.Option("--warmup", min=0)] = None,
+    output: Annotated[Path | None, typer.Option("--output", help="Benchmark artifact root or legacy summary .json path")] = None,
+    variants: Annotated[list[str] | None, typer.Option("--variant", help="Run only a named variant from --spec")] = None,
+    profile: Annotated[str | None, typer.Option("--profile")] = None,
+    set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
+    block_values: Annotated[list[str] | None, typer.Option("--block")] = None,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Run a reproducible benchmark suite with warm-up, variants, artifacts and percentiles."""
+    try:
+        if spec is not None:
+            plan = load_benchmark_plan(
+                spec,
+                pipeline_override=pipeline,
+                repeat_override=repeat,
+                warmup_override=warmup,
+                selected_variants=variants,
+            )
+            if profile is not None or set_values or block_values:
+                raise ValueError("--profile, --set and --block belong in benchmark variants when --spec is used")
+        else:
+            plan = direct_benchmark_plan(
+                pipeline or Path("pipeline.yaml"),
+                repeat=repeat if repeat is not None else 3,
+                warmup=warmup if warmup is not None else 1,
+                profile=profile,
+                set_values=set_values,
+                block_values=block_values,
+            )
+        legacy_json = output if output is not None and output.suffix.lower() == ".json" else None
+        root = output.parent if legacy_json is not None else output
+        summary = run_benchmark_suite(plan, _execute_benchmark_run, output_root=root)
+        if legacy_json is not None:
+            legacy_json.parent.mkdir(parents=True, exist_ok=True)
+            legacy_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as exc:
+        console.print(f"[red]Benchmark failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(summary))
+        return
+    table = Table("Variant", "Runs", "Source Hz", "Sink Hz", "E2E P95 ms", "Drops", "Memory")
+    for name, raw in dict(summary.get("variants", {})).items():
+        item = dict(raw)
         table.add_row(
-            f"{name} mean ms",
-            f"{stats['mean_ms']:.4f}",
-            f"{stats['min_mean_ms']:.4f}",
-            f"{stats['max_mean_ms']:.4f}",
-        )
-        table.add_row(
-            f"{name} P95 / E2E P95 ms",
-            f"{stats['p95_ms']:.4f}",
-            f"{stats['end_to_end_p95_ms']:.4f}",
-            "-",
+            str(name),
+            str(item.get("runs", 0)),
+            f"{float(dict(item.get('source_rate_hz') or {}).get('mean', 0.0)):.2f}",
+            f"{float(dict(item.get('sink_rate_hz') or {}).get('mean', 0.0)):.2f}",
+            f"{float(dict(item.get('end_to_end_p95_ms') or {}).get('mean', 0.0)):.3f}",
+            f"{float(dict(item.get('dropped_messages') or {}).get('mean', 0.0)):.1f}",
+            _format_bytes(dict(item.get("estimated_memory_bytes") or {}).get("mean")),
         )
     console.print(table)
-    if output:
-        output.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        console.print(f"Saved: {output}")
-
+    console.print(f"Artifacts: {summary['suite_dir']}")
 
 @app.command("view")
 def view(
@@ -1533,8 +1573,28 @@ def runs_logs_command(run_id: str, project: Annotated[Path, typer.Option("--proj
 
 
 @runs_app.command("compare")
-def runs_compare_command(first: str, second: str, project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd()) -> None:
-    console.print_json(json.dumps(compare_runs(first, second, project)))
+def runs_compare_command(
+    first: str,
+    second: str,
+    project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd(),
+    table_output: Annotated[bool, typer.Option("--table", help="Render the principal metrics as a table")] = False,
+) -> None:
+    comparison = compare_runs(first, second, project)
+    if not table_output:
+        console.print_json(json.dumps(comparison))
+        return
+    table = Table("Metric", "First", "Second", "Delta", "Change")
+    for name, raw in dict(comparison.get("metrics", {})).items():
+        item = dict(raw)
+        percent = item.get("percent")
+        table.add_row(
+            name,
+            f"{float(item.get('first', 0.0)):.3f}",
+            f"{float(item.get('second', 0.0)):.3f}",
+            f"{float(item.get('delta', 0.0)):+.3f}",
+            "-" if percent is None else f"{float(percent):+.1f}%",
+        )
+    console.print(table)
 
 
 @native_app.command("inspect")
