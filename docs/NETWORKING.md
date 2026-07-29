@@ -71,6 +71,42 @@ CLI:
 nodrix stream echo nodrix://192.168.1.50:7420/robot/camera/front
 ```
 
+## Encrypted transport and mutual TLS
+
+Use TLS for every non-loopback production export. Certificate paths are
+resolved relative to the pipeline manifest:
+
+```yaml
+streams:
+  bind_host: 0.0.0.0
+  tls:
+    enabled: true
+    certificate: secrets/server.crt
+    private_key: secrets/server.key
+    minimum_version: TLSv1.2
+  exports:
+    - name: /robot/events
+      from: source.output
+      access:
+        mode: token
+        token_env: NODRIX_STREAM_TOKEN
+```
+
+Discovery advertises such endpoints as
+`nodrix+tls://HOST:PORT/robot/events`. Clients verify the system trust store by
+default. For a private CA:
+
+```bash
+nodrix stream echo \
+  nodrix+tls://robot.local:7420/robot/events \
+  --ca secrets/ca.crt
+```
+
+For mutual TLS add `client_ca` and `require_client_certificate: true` on the
+server, then use `--cert` and `--key` on the client. Non-interactive consumers
+can use `NODRIX_STREAM_CA`, `NODRIX_STREAM_CERT`, and `NODRIX_STREAM_KEY`.
+There is deliberately no option to disable certificate verification.
+
 ## Multiple network interfaces
 
 Nodrix enumerates active IPv4 interfaces and joins/sends discovery on each of
@@ -97,6 +133,20 @@ queue: {capacity: 256, policy: block}
 ```
 
 Recommended when every item must arrive and slowing the publisher is acceptable.
+
+Remote sources can use a finite reconnect budget:
+
+```yaml
+parameters:
+  uri: nodrix+tls://robot.local:7420/robot/events
+  ca_file: secrets/ca.crt
+  reconnect_attempts: 5
+  reconnect_backoff: 0.25
+  reconnect_max_backoff: 4.0
+```
+
+Backoff is exponential and capped. A permanently unavailable endpoint therefore
+becomes an explicit node failure instead of an infinite retry loop or queue.
 
 ## What can be transmitted
 

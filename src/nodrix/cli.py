@@ -498,12 +498,16 @@ def play(
     prefix: Annotated[str, typer.Option("--prefix", help="Prefix exported stream names")] = "",
     loop: Annotated[bool, typer.Option("--loop")] = False,
     startup_delay: Annotated[float, typer.Option("--startup-delay", min=0.0, help="Discovery window before playback starts")] = 1.0,
+    start: Annotated[int, typer.Option("--start", min=0, help="Seek to zero-based message index")] = 0,
+    count: Annotated[int, typer.Option("--count", min=0, help="Play at most N messages; 0 means all")] = 0,
+    fixed_fps: Annotated[float, typer.Option("--fixed-fps", min=0.0, help="Use a fixed replay rate; 0 preserves timing")] = 0.0,
 ) -> None:
     """Replay an .ndrx recording as discoverable Nodrix streams."""
     try:
         report = play_recording(
             recording, speed=speed, as_fast_as_possible=as_fast_as_possible,
             stream_prefix=prefix, loop=loop, startup_delay=startup_delay,
+            start=start, count=count, fixed_fps=fixed_fps,
         )
     except (OSError, ValueError, RecordingError) as exc:
         console.print(f"[red]Playback failed:[/red] {exc}")
@@ -1251,13 +1255,27 @@ def stream_info(
 
 @stream_app.command("echo")
 def stream_echo(
-    target: Annotated[str, typer.Argument(help="Stream name or nodrix:// URI")],
+    target: Annotated[str, typer.Argument(help="Stream name or nodrix:// or nodrix+tls:// URI")],
     count: Annotated[int, typer.Option("--count", "-n", min=1)] = 1,
     discovery_timeout: Annotated[float, typer.Option("--discovery-timeout", min=0.05)] = 3.0,
     token: Annotated[str | None, typer.Option("--token", help="Stream access token")] = None,
+    ca_file: Annotated[Path | None, typer.Option("--ca", help="Trusted CA for TLS")] = None,
+    certificate: Annotated[Path | None, typer.Option("--cert", help="Client certificate for mTLS")] = None,
+    private_key: Annotated[Path | None, typer.Option("--key", help="Client private key for mTLS")] = None,
+    server_hostname: Annotated[str | None, typer.Option("--server-name", help="Expected TLS server name")] = None,
+    reconnect_attempts: Annotated[int, typer.Option("--reconnect-attempts", min=0, max=100)] = 0,
 ) -> None:
     """Subscribe directly to a stream and print message headers/payload summaries."""
-    client = StreamClient(target, discovery_timeout=discovery_timeout, token=token)
+    client = StreamClient(
+        target,
+        discovery_timeout=discovery_timeout,
+        token=token,
+        ca_file=str(ca_file) if ca_file else None,
+        certificate=str(certificate) if certificate else None,
+        private_key=str(private_key) if private_key else None,
+        server_hostname=server_hostname,
+        reconnect_attempts=reconnect_attempts,
+    )
     try:
         client.connect()
         for _ in range(count):

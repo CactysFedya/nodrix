@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.8.0 — Secure Remote Edges
+- Added verified TLS 1.2+ transport and `nodrix+tls://` endpoints to the existing direct stream data plane.
+- Added optional mutual TLS with a private client CA and mandatory certificate verification.
+- Made discovery advertise the actual transport scheme so named and direct subscriptions use the same security path.
+- Added finite reconnect budgets with bounded exponential backoff and observable reconnect counts.
+- Added transport metadata to stream metrics and the deterministic execution plan.
+- Added strict production validation for unencrypted non-loopback stream exports.
+- Added manifest-relative server credential paths and environment-based client credentials without putting secrets in URIs.
+
 ## 1.7.0 — Crash-safe NDRX2 and Run Provenance
 - Added NDRX2 checkpoint chunks with bounded in-memory indexes and per-chunk SHA-256 integrity.
 - Made finalized checkpoints readable independently of the final summary.

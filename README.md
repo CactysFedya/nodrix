@@ -205,6 +205,10 @@ Only explicitly exported ports become network streams. Local edges remain direct
 streams:
   bind_host: 0.0.0.0
   max_message_bytes: 67108864
+  tls:
+    enabled: true
+    certificate: secrets/server.crt
+    private_key: secrets/server.key
   exports:
     - name: /camera/front/h264
       from: encoder.encoded
@@ -219,9 +223,13 @@ streams:
 
 ```bash
 export NODRIX_STREAM_TOKEN=...
-nodrix stream echo /camera/front/h264
+nodrix stream echo /camera/front/h264 --ca secrets/ca.crt
 nodrix-viewer /camera/front/h264
 ```
+
+TLS endpoints are advertised as `nodrix+tls://`. Certificate verification is
+mandatory; mutual TLS is available with `client_ca` and
+`require_client_certificate`.
 
 ## Production validation
 

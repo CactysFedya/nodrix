@@ -127,6 +127,28 @@ class StreamExportConfig(StrictModel):
         return self
 
 
+class StreamTlsConfig(StrictModel):
+    enabled: bool = False
+    certificate: str | None = None
+    private_key: str | None = None
+    client_ca: str | None = None
+    require_client_certificate: bool = False
+    minimum_version: Literal["TLSv1.2", "TLSv1.3"] = "TLSv1.2"
+
+    @model_validator(mode="after")
+    def validate_tls(self) -> "StreamTlsConfig":
+        configured = any(
+            (self.certificate, self.private_key, self.client_ca, self.require_client_certificate)
+        )
+        if configured and not self.enabled:
+            raise ValueError("streams.tls must be enabled when TLS credentials are configured")
+        if self.enabled and not (self.certificate and self.private_key):
+            raise ValueError("Enabled stream TLS requires certificate and private_key")
+        if self.require_client_certificate and not self.client_ca:
+            raise ValueError("Mutual TLS requires client_ca")
+        return self
+
+
 class StreamsConfig(StrictModel):
     exports: list[StreamExportConfig] = Field(default_factory=list)
     bind_host: str = "127.0.0.1"
@@ -136,6 +158,7 @@ class StreamsConfig(StrictModel):
     handshake_timeout_ms: int = Field(default=5000, ge=100, le=60_000)
     max_handshakes: int = Field(default=32, ge=1, le=4096)
     max_clients: int = Field(default=128, ge=1, le=65_536)
+    tls: StreamTlsConfig = Field(default_factory=StreamTlsConfig)
 
 
 class MetadataConfig(StrictModel):

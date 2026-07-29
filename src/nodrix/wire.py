@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, is_dataclass
 import hashlib
 import json
+import ssl
 import socket
 import struct
 from typing import Any, Callable, Iterable
@@ -308,7 +309,7 @@ def _send_all(sock: socket.socket, view: memoryview) -> None:
 def send_packet(sock: socket.socket, packet: WirePacket) -> int:
     parts = list(packet.parts())
     total = sum(part.nbytes for part in parts)
-    if hasattr(sock, "sendmsg"):
+    if hasattr(sock, "sendmsg") and not isinstance(sock, ssl.SSLSocket):
         while parts:
             sent = sock.sendmsg(parts)
             if sent <= 0:

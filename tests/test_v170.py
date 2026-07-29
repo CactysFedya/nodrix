@@ -81,7 +81,7 @@ def _write_v1(path: Path, messages: list[Message]) -> None:
 
 
 def test_v170_version() -> None:
-    assert nodrix.__version__ == "1.7.0"
+    assert nodrix.__version__ == "1.8.0"
 
 
 def test_ndrx2_uses_bounded_checkpoints_and_checksums(tmp_path: Path) -> None:
@@ -101,6 +101,19 @@ def test_ndrx2_uses_bounded_checkpoints_and_checksums(tmp_path: Path) -> None:
     assert info["finalized"] is True
     assert "entries" not in reader.index
     assert values == list(range(10))
+
+
+def test_ndrx2_indexed_seek_and_limit(tmp_path: Path) -> None:
+    path = tmp_path / "seek.ndrx"
+    with NdrxWriter(path, checkpoint_records=3, durable=False) as writer:
+        for message in _messages(10):
+            writer.write(message)
+    with NdrxReader(path) as reader:
+        values = [
+            message.payload["value"]
+            for _, message in reader.iter_messages(start=4, limit=3)
+        ]
+    assert values == [4, 5, 6]
 
 
 def test_ndrx2_recovers_complete_records_after_interruption(tmp_path: Path) -> None:

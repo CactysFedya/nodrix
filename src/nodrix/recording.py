@@ -736,9 +736,14 @@ def play_recording(
     loop: bool = False,
     startup_delay: float = 1.0,
     linger: float = 0.25,
+    start: int = 0,
+    count: int = 0,
+    fixed_fps: float = 0.0,
 ) -> dict[str, Any]:
     if speed <= 0 and not as_fast_as_possible:
         raise ValueError("speed must be positive")
+    if start < 0 or count < 0 or fixed_fps < 0:
+        raise ValueError("start, count, and fixed_fps must be non-negative")
     total = 0
     with NdrxReader(path) as reader:
         stream_specs = reader.index.get("streams", {})
@@ -761,9 +766,16 @@ def play_recording(
         try:
             while True:
                 previous_arrival: int | None = None
-                for arrival, message in reader.iter_messages():
+                for arrival, message in reader.iter_messages(
+                    start=start,
+                    limit=count,
+                ):
                     if previous_arrival is not None and not as_fast_as_possible:
-                        delay = (arrival - previous_arrival) / 1e9 / speed
+                        delay = (
+                            1.0 / fixed_fps
+                            if fixed_fps > 0
+                            else (arrival - previous_arrival) / 1e9 / speed
+                        )
                         if delay > 0:
                             time.sleep(delay)
                     previous_arrival = arrival
@@ -815,6 +827,8 @@ class NdrxSourceNode(SourceNode):
         self.speed = float(self.parameters.get("speed", 1.0))
         self.fast = bool(self.parameters.get("as_fast_as_possible", False))
         self.limit = int(self.parameters.get("max_messages", 0))
+        self.start = int(self.parameters.get("start", 0))
+        self.fixed_fps = float(self.parameters.get("fixed_fps", 0.0))
         configured = self.parameters.get("streams") or []
         self.streams = set(configured) if configured else None
 
@@ -822,10 +836,15 @@ class NdrxSourceNode(SourceNode):
         previous: int | None = None
         for arrival, message in self.reader.iter_messages(
             streams=self.streams,
+            start=self.start,
             limit=self.limit,
         ):
             if previous is not None and not self.fast:
-                delay = (arrival - previous) / 1e9 / self.speed
+                delay = (
+                    1.0 / self.fixed_fps
+                    if self.fixed_fps > 0
+                    else (arrival - previous) / 1e9 / self.speed
+                )
                 if delay > 0:
                     time.sleep(delay)
             previous = arrival

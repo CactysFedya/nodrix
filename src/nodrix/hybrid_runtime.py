@@ -723,6 +723,18 @@ class HybridPipelineRuntime:
                 handshake_timeout=self.manifest.streams.handshake_timeout_ms / 1000.0,
                 max_handshakes=self.manifest.streams.max_handshakes,
                 max_clients=self.manifest.streams.max_clients,
+                tls={
+                    key: (
+                        str(
+                            value
+                            if Path(str(value)).is_absolute()
+                            else self.manifest_path.parent / str(value)
+                        )
+                        if key in {"certificate", "private_key", "client_ca"} and value
+                        else value
+                    )
+                    for key, value in self.manifest.streams.tls.model_dump().items()
+                },
             )
             self._stream_publisher.start()
             self._emit_event(
@@ -730,6 +742,11 @@ class HybridPipelineRuntime:
                 host=self.manifest.streams.bind_host,
                 port=self._stream_publisher.server.port,
                 streams=[item["name"] for item in resolved_exports],
+                transport=(
+                    "tls"
+                    if self._stream_publisher.server.tls_context is not None
+                    else "tcp"
+                ),
             )
         metrics_recorder = None
         if self.manifest.runtime.metrics.enabled:

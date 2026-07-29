@@ -356,6 +356,15 @@ class StreamSource(SourceNode):
             capacity=int(self.parameters.get("capacity", 1)),
             policy=str(self.parameters.get("policy", "latest")),
             receive_buffer_bytes=int(self.parameters.get("receive_buffer_bytes", 262144)),
+            token=self.parameters.get("token"),
+            ca_file=self.parameters.get("ca_file"),
+            certificate=self.parameters.get("certificate"),
+            private_key=self.parameters.get("private_key"),
+            server_hostname=self.parameters.get("server_hostname"),
+            minimum_tls_version=str(self.parameters.get("minimum_tls_version", "TLSv1.2")),
+            reconnect_attempts=int(self.parameters.get("reconnect_attempts", 0)),
+            reconnect_backoff=float(self.parameters.get("reconnect_backoff", 0.1)),
+            reconnect_max_backoff=float(self.parameters.get("reconnect_max_backoff", 5.0)),
         )
         self.client.connect(timeout=float(self.parameters.get("connect_timeout", 5.0)))
         self.limit = int(self.parameters.get("max_messages", 0))

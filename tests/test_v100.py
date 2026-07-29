@@ -192,7 +192,8 @@ def test_token_env_is_not_required_for_static_validation(tmp_path: Path, monkeyp
     runtime = HybridPipelineRuntime(manifest, path, run_root=tmp_path / "runs")
     runtime.build()
     assert runtime.describe()["streams"][0]["token_env"] == "NODRIX_TEST_TOKEN"
-    assert not validate_production(manifest, runtime.describe(), strict=True)
+    issues = validate_production(manifest, runtime.describe(), strict=True)
+    assert {item.code for item in issues} == {"S104"}
     with pytest.raises(Exception, match="NODRIX_TEST_TOKEN"):
         runtime.run_sync()
 

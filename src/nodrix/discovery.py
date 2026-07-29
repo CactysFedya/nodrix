@@ -159,11 +159,15 @@ class DiscoveryAdvertiser:
         pipeline: str,
         endpoint_port: int,
         streams: Callable[[], list[dict[str, Any]]],
+        endpoint_scheme: str = "nodrix",
         interval: float = 1.0,
     ) -> None:
         self.pipeline = pipeline
         self.endpoint_port = int(endpoint_port)
         self.streams = streams
+        if endpoint_scheme not in {"nodrix", "nodrix+tls"}:
+            raise ValueError(f"Unsupported Nodrix endpoint scheme: {endpoint_scheme}")
+        self.endpoint_scheme = endpoint_scheme
         self.interval = max(0.2, float(interval))
         self.instance_id = uuid.uuid4().hex
         self._stop = threading.Event()
@@ -187,7 +191,11 @@ class DiscoveryAdvertiser:
                 "instance_id": self.instance_id,
                 "host": socket.gethostname(),
                 "pipeline": self.pipeline,
-                "endpoint": {"host": "0.0.0.0", "port": self.endpoint_port},
+                "endpoint": {
+                    "host": "0.0.0.0",
+                    "port": self.endpoint_port,
+                    "scheme": self.endpoint_scheme,
+                },
                 "streams": self.streams(),
                 "expires_ms": int(self.interval * 3000),
             }
@@ -267,6 +275,9 @@ def discover_streams(timeout: float = 1.2, name: str | None = None) -> list[Disc
             if endpoint_host in {"0.0.0.0", "::", ""}:
                 endpoint_host = address[0]
             endpoint_port = int(endpoint.get("port", 0))
+            endpoint_scheme = str(endpoint.get("scheme", "nodrix"))
+            if endpoint_scheme not in {"nodrix", "nodrix+tls"}:
+                continue
             for stream in message.get("streams") or []:
                 stream_name = str(stream.get("name", ""))
                 if not stream_name or (name is not None and stream_name != name):
@@ -277,7 +288,7 @@ def discover_streams(timeout: float = 1.2, name: str | None = None) -> list[Disc
                     host=str(message.get("host", endpoint_host)),
                     pipeline=str(message.get("pipeline", "")),
                     instance_id=str(message.get("instance_id", "")),
-                    endpoint=f"nodrix://{endpoint_host}:{endpoint_port}{stream_name}",
+                    endpoint=f"{endpoint_scheme}://{endpoint_host}:{endpoint_port}{stream_name}",
                     codec=str(stream.get("codec", "nodrix-wire/1")),
                     metadata=dict(stream.get("metadata") or {}),
                 )

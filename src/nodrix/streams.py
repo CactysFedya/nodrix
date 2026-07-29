@@ -7,8 +7,10 @@ import ipaddress
 import os
 import queue
 import socket
+import ssl
 import struct
 import threading
+import time
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
@@ -17,6 +19,52 @@ from .messages import Message
 from .wire import WirePacket, encode_message, recv_message, send_packet
 
 _HANDSHAKE_LENGTH = struct.Struct("!I")
+_TLS_VERSIONS = {
+    "TLSv1.2": ssl.TLSVersion.TLSv1_2,
+    "TLSv1.3": ssl.TLSVersion.TLSv1_3,
+}
+
+
+def _tls_version(name: str) -> ssl.TLSVersion:
+    try:
+        return _TLS_VERSIONS[name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported minimum TLS version: {name}") from exc
+
+
+def server_tls_context(
+    *,
+    certificate: str,
+    private_key: str,
+    client_ca: str | None = None,
+    require_client_certificate: bool = False,
+    minimum_version: str = "TLSv1.2",
+) -> ssl.SSLContext:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.minimum_version = _tls_version(minimum_version)
+    context.load_cert_chain(certificate, private_key)
+    if require_client_certificate:
+        if not client_ca:
+            raise ValueError("Mutual TLS requires a client CA")
+        context.load_verify_locations(cafile=client_ca)
+        context.verify_mode = ssl.CERT_REQUIRED
+    return context
+
+
+def client_tls_context(
+    *,
+    ca_file: str | None = None,
+    certificate: str | None = None,
+    private_key: str | None = None,
+    minimum_version: str = "TLSv1.2",
+) -> ssl.SSLContext:
+    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH, cafile=ca_file)
+    context.minimum_version = _tls_version(minimum_version)
+    if bool(certificate) != bool(private_key):
+        raise ValueError("Client TLS certificate and private key must be configured together")
+    if certificate and private_key:
+        context.load_cert_chain(certificate, private_key)
+    return context
 
 try:
     from ._native_queue import BoundedQueue as _NativeBoundedQueue
@@ -126,6 +174,7 @@ class StreamServer:
         self, host: str = "127.0.0.1", port: int = 0, *,
         max_handshake_bytes: int = 64 * 1024, max_message_bytes: int = 256 * 1024 * 1024,
         handshake_timeout: float = 5.0, max_handshakes: int = 32, max_clients: int = 128,
+        tls_context: ssl.SSLContext | None = None,
     ) -> None:
         self.host = host
         self.requested_port = int(port)
@@ -133,6 +182,7 @@ class StreamServer:
         self.max_message_bytes = int(max_message_bytes)
         self.handshake_timeout = max(0.1, float(handshake_timeout))
         self.max_clients = max(1, int(max_clients))
+        self.tls_context = tls_context
         self._handshake_slots = threading.BoundedSemaphore(max(1, int(max_handshakes)))
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
@@ -285,6 +335,8 @@ class StreamServer:
     def _configure_client(self, sock: socket.socket, address: tuple[str, int]) -> None:
         try:
             sock.settimeout(self.handshake_timeout)
+            if self.tls_context is not None:
+                sock = self.tls_context.wrap_socket(sock, server_side=True)
             request = self._receive_json(sock, self.max_handshake_bytes)
             if request.get("protocol") != "nodrix-stream/1" or request.get("action") != "subscribe":
                 raise ValueError("unsupported handshake")
@@ -395,6 +447,7 @@ class StreamServer:
                     "sent_messages": item.total_sent_messages + sum(client.sent_messages for client in item.clients),
                     "sent_bytes": item.total_sent_bytes + sum(client.sent_bytes for client in item.clients),
                     "client_errors": item.total_client_errors + sum(client.errors for client in item.clients),
+                    "transport": "tls" if self.tls_context is not None else "tcp",
                 }
                 for name, item in self._streams.items()
             }
@@ -436,9 +489,20 @@ class StreamPublisher:
         self, pipeline: str, exports: list[dict[str, Any]], *, host: str = "127.0.0.1", port: int = 0,
         max_handshake_bytes: int = 64 * 1024, max_message_bytes: int = 256 * 1024 * 1024,
         handshake_timeout: float = 5.0, max_handshakes: int = 32, max_clients: int = 128,
+        tls: dict[str, Any] | None = None,
     ) -> None:
         self.pipeline = pipeline
         self.exports = exports
+        tls = dict(tls or {})
+        tls_context = None
+        if tls.get("enabled"):
+            tls_context = server_tls_context(
+                certificate=str(tls["certificate"]),
+                private_key=str(tls["private_key"]),
+                client_ca=str(tls["client_ca"]) if tls.get("client_ca") else None,
+                require_client_certificate=bool(tls.get("require_client_certificate", False)),
+                minimum_version=str(tls.get("minimum_version", "TLSv1.2")),
+            )
         self.server = StreamServer(
             host=host,
             port=port,
@@ -447,6 +511,7 @@ class StreamPublisher:
             handshake_timeout=handshake_timeout,
             max_handshakes=max_handshakes,
             max_clients=max_clients,
+            tls_context=tls_context,
         )
         self._by_source: dict[str, list[str]] = {}
         for export in exports:
@@ -468,6 +533,7 @@ class StreamPublisher:
             pipeline=self.pipeline,
             endpoint_port=self.server.port,
             streams=self.server.definitions,
+            endpoint_scheme="nodrix+tls" if self.server.tls_context is not None else "nodrix",
         )
         self.advertiser.start()
 
@@ -496,18 +562,27 @@ class StreamClient:
         receive_buffer_bytes: int = 262144,
         token: str | None = None,
         max_message_bytes: int = 256 * 1024 * 1024,
+        ca_file: str | None = None,
+        certificate: str | None = None,
+        private_key: str | None = None,
+        server_hostname: str | None = None,
+        minimum_tls_version: str = "TLSv1.2",
+        reconnect_attempts: int = 0,
+        reconnect_backoff: float = 0.1,
+        reconnect_max_backoff: float = 5.0,
     ) -> None:
-        if uri_or_name.startswith("nodrix://"):
+        if uri_or_name.startswith(("nodrix://", "nodrix+tls://")):
             uri = uri_or_name
         else:
             uri = resolve_stream(uri_or_name, timeout=discovery_timeout).endpoint
         parsed = urlparse(uri)
-        if parsed.scheme != "nodrix" or not parsed.hostname or not parsed.port or not parsed.path:
+        if parsed.scheme not in {"nodrix", "nodrix+tls"} or not parsed.hostname or not parsed.port or not parsed.path:
             raise ValueError(f"Invalid Nodrix stream URI: {uri!r}")
         self.uri = uri
         self.host = parsed.hostname
         self.port = parsed.port
         self.stream = parsed.path
+        self.tls = parsed.scheme == "nodrix+tls"
         if capacity <= 0:
             raise ValueError("StreamClient capacity must be positive")
         if policy not in {"block", "latest", "drop_oldest", "drop_newest"}:
@@ -520,35 +595,86 @@ class StreamClient:
         self.token = token or os.environ.get("NODRIX_STREAM_TOKEN")
         self.max_message_bytes = int(max_message_bytes)
         self.receive_buffer_bytes = max(16384, int(receive_buffer_bytes))
+        if reconnect_attempts < 0:
+            raise ValueError("reconnect_attempts cannot be negative")
+        if reconnect_backoff < 0 or reconnect_max_backoff < reconnect_backoff:
+            raise ValueError("Reconnect backoff must be non-negative and bounded")
+        self.reconnect_attempts = int(reconnect_attempts)
+        self.reconnect_backoff = float(reconnect_backoff)
+        self.reconnect_max_backoff = float(reconnect_max_backoff)
+        self.server_hostname = server_hostname or self.host
+        ca_file = ca_file or os.environ.get("NODRIX_STREAM_CA")
+        certificate = certificate or os.environ.get("NODRIX_STREAM_CERT")
+        private_key = private_key or os.environ.get("NODRIX_STREAM_KEY")
+        self._tls_context = (
+            client_tls_context(
+                ca_file=ca_file,
+                certificate=certificate,
+                private_key=private_key,
+                minimum_version=minimum_tls_version,
+            )
+            if self.tls
+            else None
+        )
         self.socket: socket.socket | None = None
         self.type: str | None = None
+        self.reconnects = 0
 
     def connect(self, timeout: float = 5.0) -> None:
-        sock = socket.create_connection((self.host, self.port), timeout=timeout)
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.receive_buffer_bytes)
-        request = {
-            "protocol": "nodrix-stream/1",
-            "action": "subscribe",
-            "stream": self.stream,
-            "capacity": self.capacity,
-            "policy": self.policy,
-            "token": self.token,
-        }
-        StreamServer._send_json(sock, request)
-        response = StreamServer._receive_json(sock)
-        if not response.get("ok"):
-            sock.close()
-            raise LookupError(response.get("error", "Nodrix stream subscription failed"))
-        sock.settimeout(None)
-        self.socket = sock
-        self.type = str(response.get("type", "core.any"))
+        last_error: Exception | None = None
+        for attempt in range(self.reconnect_attempts + 1):
+            sock: socket.socket | None = None
+            try:
+                sock = socket.create_connection((self.host, self.port), timeout=timeout)
+                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.receive_buffer_bytes)
+                if self._tls_context is not None:
+                    sock = self._tls_context.wrap_socket(
+                        sock,
+                        server_hostname=self.server_hostname,
+                    )
+                request = {
+                    "protocol": "nodrix-stream/1",
+                    "action": "subscribe",
+                    "stream": self.stream,
+                    "capacity": self.capacity,
+                    "policy": self.policy,
+                    "token": self.token,
+                }
+                StreamServer._send_json(sock, request)
+                response = StreamServer._receive_json(sock)
+                if not response.get("ok"):
+                    raise LookupError(response.get("error", "Nodrix stream subscription failed"))
+                sock.settimeout(None)
+                self.socket = sock
+                self.type = str(response.get("type", "core.any"))
+                return
+            except (OSError, EOFError, LookupError, ValueError) as exc:
+                last_error = exc
+                if sock is not None:
+                    sock.close()
+                if attempt >= self.reconnect_attempts:
+                    raise
+                self.reconnects += 1
+                delay = min(self.reconnect_backoff * (2**attempt), self.reconnect_max_backoff)
+                if delay:
+                    time.sleep(delay)
+        assert last_error is not None
+        raise last_error
 
     def receive(self) -> Message:
         if self.socket is None:
             self.connect()
         assert self.socket is not None
-        return recv_message(self.socket, max_message_bytes=self.max_message_bytes)
+        try:
+            return recv_message(self.socket, max_message_bytes=self.max_message_bytes)
+        except (OSError, EOFError, ConnectionError):
+            self.close()
+            if self.reconnect_attempts <= 0:
+                raise
+            self.connect()
+            assert self.socket is not None
+            return recv_message(self.socket, max_message_bytes=self.max_message_bytes)
 
     def close(self) -> None:
         if self.socket is not None:

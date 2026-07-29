@@ -160,6 +160,15 @@ def compile_execution_plan(
             }
             for export in manifest.streams.exports
         ],
+        "stream_transport": {
+            "protocol": "tls" if manifest.streams.tls.enabled else "tcp",
+            "mutual_tls": manifest.streams.tls.require_client_certificate,
+            "minimum_tls_version": (
+                manifest.streams.tls.minimum_version
+                if manifest.streams.tls.enabled
+                else None
+            ),
+        },
         "summary": {
             "nodes": len(nodes),
             "edges": len(edges),

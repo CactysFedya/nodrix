@@ -73,6 +73,17 @@ def validate_production(manifest: PipelineManifest, description: dict[str, Any],
             issues.append(ValidationIssue(severity, "S102", "Inline stream token can leak through source control; use token_env", export.name))
         if export.queue.policy == "block":
             issues.append(ValidationIssue("warning", "W401", "Network export uses block policy and may propagate backpressure", export.name))
+    if manifest.streams.exports and manifest.streams.bind_host not in loopback_hosts:
+        if not manifest.streams.tls.enabled:
+            severity = "error" if strict else "warning"
+            issues.append(
+                ValidationIssue(
+                    severity,
+                    "S104",
+                    "LAN stream transport is not encrypted; enable streams.tls",
+                    "streams.tls",
+                )
+            )
     if manifest.runtime.metrics.listen:
         metrics_host = manifest.runtime.metrics.listen.rpartition(":")[0].strip("[]")
         if metrics_host not in loopback_hosts:

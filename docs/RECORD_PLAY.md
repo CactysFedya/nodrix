@@ -61,10 +61,13 @@ nodrix play flight-01.ndrx --speed 0.5
 nodrix play flight-01.ndrx --speed 2
 nodrix play flight-01.ndrx --as-fast-as-possible
 nodrix play flight-01.ndrx --prefix /replay
+nodrix play flight-01.ndrx --start 1000 --count 300 --fixed-fps 30
 ```
 
 Playback starts a normal Nodrix stream publisher. A short startup delay allows
 subscribers to discover and connect before the first record.
+`--start` performs an indexed message seek; `--count 1` is a scriptable
+single-step primitive.
 
 ## Pipeline nodes
 
@@ -87,6 +90,8 @@ source:
   parameters:
     path: data/experiment.ndrx
     speed: 1.0
+    start: 0
+    fixed_fps: 0
 ```
 
 The source output is `core.any`, so the original message type remains attached
