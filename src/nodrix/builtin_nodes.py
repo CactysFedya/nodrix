@@ -373,6 +373,9 @@ class StreamSource(SourceNode):
     def close(self):
         self.client.close()
 
+# Register Vision Pack nodes.
+from .vision import nodes as _vision_nodes  # noqa: E402,F401
+
 # Register FFmpeg-backed Media Pack nodes.
 from . import media as _media  # noqa: E402,F401
 

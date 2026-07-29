@@ -1,0 +1,10 @@
+use: vision.ncnn_detector
+model: ${NODRIX_MODEL:-models/yolo26n_ncnn_model}
+labels_file: "${NODRIX_LABELS:-}"
+conf: ${NODRIX_CONF:-0.18}
+iou: ${NODRIX_IOU:-0.65}
+max_det: ${NODRIX_MAX_DET:-150}
+threads: ${NODRIX_THREADS:-4}
+use_vulkan: false
+output_format: auto
+has_objectness: auto

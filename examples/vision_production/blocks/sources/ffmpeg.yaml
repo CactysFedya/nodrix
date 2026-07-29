@@ -1,0 +1,9 @@
+use: media.ffmpeg_source
+uri: ${NODRIX_SOURCE:-lavfi:testsrc=size=640x360:rate=30}
+width: ${NODRIX_WIDTH:-640}
+height: ${NODRIX_HEIGHT:-360}
+fps: ${NODRIX_FPS:-30}
+rtsp_transport: tcp
+low_latency: true
+realtime: true
+max_frames: ${NODRIX_MAX_FRAMES:-0}

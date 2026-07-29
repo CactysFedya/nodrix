@@ -20,7 +20,7 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "nodrix==1.2.1\n",
+    "requirements.txt": "nodrix==1.3.0\n",
     ".gitignore": ".nodrix/\noutputs/*\n!outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
@@ -207,88 +207,90 @@ def _vision_files(project_name: str) -> dict[str, str]:
         "name": project_name,
         "profile": "realtime-low-latency",
         "blocks": {
-            "camera": "blocks/camera.yaml",
-            "detector": "blocks/detectors/empty-fast.yaml",
-            "preview_encoder": "blocks/outputs/jpeg-preview.yaml",
+            "source": "blocks/sources/ffmpeg.yaml",
+            "preprocess": "blocks/preprocess/letterbox-320.yaml",
+            "detector": "blocks/detectors/yolo26n-ncnn.yaml",
+            "tracker": "blocks/trackers/bytetrack.yaml",
+            "overlay": "blocks/outputs/overlay.yaml",
+            "encoder": "blocks/outputs/h264.yaml",
         },
         "flow": [
-            "camera.frame -> detector.frame",
-            "camera.frame -> preview_encoder.frame",
+            "source.frame -> preprocess.frame",
+            "preprocess.frame -> detector.frame",
+            "detector.detections -> tracker.detections",
+            "source.frame -> overlay.frame",
+            "tracker.tracks -> overlay.tracks",
+            "overlay.frame -> encoder.frame",
         ],
-        "streams": {"bind_host": "127.0.0.1"},
+        "streams": {"bind_host": "0.0.0.0"},
         "publish": {
-            f"/{project_name}/preview": "preview_encoder.frame",
-            f"/{project_name}/detections": {"from": "detector.detections", "queue": {"capacity": 2, "policy": "latest"}},
+            f"/{project_name}/preview/h264": {
+                "from": "encoder.encoded", "queue": {"capacity": 2, "policy": "latest"}
+            },
+            f"/{project_name}/tracks": {
+                "from": "tracker.tracks", "queue": {"capacity": 2, "policy": "latest"}
+            },
         },
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[viewer]==1.2.1\n",
-        "blocks/camera.yaml": yaml.safe_dump({
-            "use": "vision.video_source",
-            "uri": 0,
-            "realtime": True,
-            "buffer_size": 1,
+        "requirements.txt": "nodrix[vision-ncnn,media,viewer]==1.3.0\n",
+        "blocks/sources/ffmpeg.yaml": yaml.safe_dump({
+            "use": "media.ffmpeg_source",
+            "uri": "${NODRIX_SOURCE:-lavfi:testsrc=size=640x360:rate=30}",
+            "width": "${NODRIX_WIDTH:-640}", "height": "${NODRIX_HEIGHT:-360}",
+            "fps": "${NODRIX_FPS:-30}", "rtsp_transport": "tcp",
+            "low_latency": True, "realtime": True,
         }, sort_keys=False),
-        "blocks/detectors/empty-fast.yaml": yaml.safe_dump({
-            "use": "./nodes/detector.py:Detector",
-            "mode": "fast",
-            "conf": 0.25,
+        "blocks/preprocess/letterbox-320.yaml": yaml.safe_dump({
+            "use": "vision.letterbox", "imgsz": 320, "scale_up": True,
+            "color": [114, 114, 114],
         }, sort_keys=False),
-        "blocks/detectors/empty-debug.yaml": yaml.safe_dump({
-            "use": "./nodes/detector.py:Detector",
-            "mode": "debug",
-            "conf": 0.05,
+        "blocks/detectors/yolo26n-ncnn.yaml": yaml.safe_dump({
+            "use": "vision.ncnn_detector",
+            "model": "${NODRIX_MODEL:-models/yolo26n_ncnn_model}",
+            "conf": "${NODRIX_CONF:-0.18}", "iou": "${NODRIX_IOU:-0.65}",
+            "max_det": "${NODRIX_MAX_DET:-150}", "threads": "${NODRIX_THREADS:-4}",
+            "output_format": "auto", "has_objectness": "auto",
         }, sort_keys=False),
-        "blocks/outputs/jpeg-preview.yaml": yaml.safe_dump({
-            "use": "vision.jpeg_encoder",
-            "quality": 80,
+        "blocks/trackers/bytetrack.yaml": yaml.safe_dump({
+            "use": "vision.bytetrack", "track_thresh": 0.25, "low_thresh": 0.10,
+            "match_iou": 0.30, "second_match_iou": 0.20,
+            "track_buffer": 30, "min_hits": 1,
         }, sort_keys=False),
-        "nodes/detector.py": dedent(
-            '''
-            import numpy as np
-            from nodrix import Node
-            from nodrix.vision import Detections
-
-            class Detector(Node):
-                input_types = {"frame": "vision.frame"}
-                output_types = {"detections": "vision.detections"}
-                def open(self, context):
-                    super().open(context)
-                    self.model = None  # Load ONNX/NCNN/TensorRT/OpenVINO here.
-                def process(self, inputs):
-                    source = inputs["frame"]
-                    detections = Detections(
-                        boxes=np.empty((0, 4), np.float32),
-                        scores=np.empty((0,), np.float32),
-                        class_ids=np.empty((0,), np.int32),
-                    )
-                    return {"detections": source.with_updates(type="vision.detections", payload=detections)}
-            '''
-        ).lstrip(),
+        "blocks/outputs/overlay.yaml": yaml.safe_dump({
+            "use": "vision.overlay", "show_track_id": True,
+            "show_class": True, "show_score": True,
+        }, sort_keys=False),
+        "blocks/outputs/h264.yaml": yaml.safe_dump({
+            "use": "media.ffmpeg_encoder", "codec": "h264", "encoder": "auto",
+            "preset": "ultrafast", "tune": "zerolatency", "crf": 23,
+            "fps": "${NODRIX_FPS:-30}", "keyint": 15,
+        }, sort_keys=False),
+        "models/README.md": "Place one NCNN .param/.bin model pair here, or set NODRIX_MODEL.\n",
         "README.md": dedent(
             f"""
             # {project_name}
 
-            ```bash
-            nodrix block list
-            nodrix block inspect blocks/detectors/empty-fast.yaml
-            nodrix config show
-            nodrix run
+            Production Vision Pack pipeline:
 
-            # Replace only the detector for this run:
-            nodrix run --block detector=blocks/detectors/empty-debug.yaml
+            ```text
+            FFmpeg -> letterbox -> NCNN YOLO -> ByteTrack -> overlay -> H.264
             ```
 
-            On a laptop:
+            Supply a model, then run:
 
             ```bash
-            nodrix-viewer /{project_name}/preview
+            export NODRIX_MODEL=/absolute/path/to/yolo26n_ncnn_model
+            export NODRIX_SOURCE=rtsp://camera/stream  # optional
+            nodrix validate
+            nodrix inspect --resolved
+            nodrix run
+            nodrix-viewer /{project_name}/preview/h264
             ```
             """
         ).lstrip(),
     })
-
 def _media_files(project_name: str) -> dict[str, str]:
     pipeline = {
         "name": project_name,
@@ -310,7 +312,7 @@ def _media_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[media,viewer]==1.2.1\n",
+        "requirements.txt": "nodrix[media,viewer]==1.3.0\n",
         "README.md": dedent(
             f"""
             # {project_name}

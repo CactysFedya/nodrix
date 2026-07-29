@@ -38,7 +38,7 @@ def check_versions() -> list[str]:
     errors = [f"{path}: {value} != {expected}" for path, value in observed.items() if value != expected]
 
     templates = (ROOT / "src/nodrix/project_templates.py").read_text(encoding="utf-8")
-    for package_name in ("nodrix", "nodrix[viewer]", "nodrix[media,viewer]"):
+    for package_name in ("nodrix", "nodrix[media,viewer]", "nodrix[vision-ncnn,media,viewer]"):
         if f"{package_name}=={expected}" not in templates:
             errors.append(f"project_templates.py does not pin {package_name}=={expected}")
     return errors

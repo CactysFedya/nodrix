@@ -1,4 +1,12 @@
 # Changelog
+## 1.3.0 — Production Vision Vertical Slice
+- Added built-in letterbox preprocessing with reversible source-coordinate metadata.
+- Added an optional NCNN detector with common modern and legacy YOLO output decoding.
+- Added deterministic NumPy NMS, class filtering, and source-frame box restoration.
+- Added a ByteTrack-style two-stage IoU tracker with bounded Kalman state.
+- Added tracked-object overlay and a complete RTSP/video-to-H.264 reference pipeline.
+- Added the `vision-ncnn` optional dependency group, Vision Pack documentation, and fake-backend CI tests.
+- Preserved Nodrix 1.x manifests, blocks, message contracts, Node API, wire protocol, and native runtime behavior.
 ## 1.2.1 — Cross-platform stabilization
 - Fixed `multiprocessing.shared_memory` compatibility across Python 3.11–3.14.
 - Added portable deterministic POSIX shared-memory names for macOS.
