@@ -45,6 +45,7 @@ jobs:
           import nodrix._native_buffer
           import nodrix._native_device
           import nodrix._native_plugin
+          import nodrix._native_tracking
 
           print("All Nodrix native extensions loaded")
           PY
@@ -150,4 +151,5 @@ jobs:
           python -m venv /tmp/nodrix-wheel-test
           /tmp/nodrix-wheel-test/bin/python -m pip install --upgrade pip
           /tmp/nodrix-wheel-test/bin/python -m pip install dist/*.whl
+          /tmp/nodrix-wheel-test/bin/python -c "import nodrix._native_queue, nodrix._native_buffer, nodrix._native_device, nodrix._native_plugin, nodrix._native_tracking"
           /tmp/nodrix-wheel-test/bin/nodrix --version

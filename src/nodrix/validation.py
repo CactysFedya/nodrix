@@ -54,6 +54,7 @@ def _find_cycles(manifest: PipelineManifest) -> list[list[str]]:
 
 def validate_production(manifest: PipelineManifest, description: dict[str, Any], *, strict: bool = False) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    loopback_hosts = {"127.0.0.1", "::1", "localhost"}
     for cycle in _find_cycles(manifest):
         issues.append(ValidationIssue("error", "E301", f"Graph cycle requires an explicit feedback-buffer node: {' -> '.join(cycle)}"))
     for edge in description.get("edges", []):
@@ -64,7 +65,7 @@ def validate_production(manifest: PipelineManifest, description: dict[str, Any],
             issues.append(ValidationIssue("warning", "W205", f"Edge requires {memory.get('planned_copies')} payload copy/copies", f"{edge['from']} -> {edge['to']}"))
     for export in manifest.streams.exports:
         access = export.access
-        if access.mode == "open" and manifest.streams.bind_host not in {"127.0.0.1", "::1", "localhost"}:
+        if access.mode == "open" and manifest.streams.bind_host not in loopback_hosts:
             severity = "error" if strict else "warning"
             issues.append(ValidationIssue(severity, "S101", "LAN stream is open without token authentication", export.name))
         if access.token:
@@ -72,6 +73,18 @@ def validate_production(manifest: PipelineManifest, description: dict[str, Any],
             issues.append(ValidationIssue(severity, "S102", "Inline stream token can leak through source control; use token_env", export.name))
         if export.queue.policy == "block":
             issues.append(ValidationIssue("warning", "W401", "Network export uses block policy and may propagate backpressure", export.name))
+    if manifest.runtime.metrics.listen:
+        metrics_host = manifest.runtime.metrics.listen.rpartition(":")[0].strip("[]")
+        if metrics_host not in loopback_hosts:
+            severity = "error" if strict else "warning"
+            issues.append(
+                ValidationIssue(
+                    severity,
+                    "S103",
+                    "Metrics endpoint is exposed beyond loopback without authentication",
+                    "runtime.metrics.listen",
+                )
+            )
     for name, config in manifest.nodes.items():
         if config.health.timeout_ms > 0 and config.execution.isolation == "in_process" and config.health.on_timeout == "restart":
             issues.append(ValidationIssue("warning", "W501", "An in-process Python thread cannot be force-restarted safely; use process isolation", name))

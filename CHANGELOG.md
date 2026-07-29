@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.5.1 — Safety and Reproducibility Hardening
+- Made optional Vision, Media and Recording providers lazy so Core remains usable without NumPy or OpenCV.
+- Made every manifest model reject unknown fields and unsupported API versions.
+- Implemented and validated explicit optional-input declarations.
+- Added side-effect-free built-in parameter validation before nodes or hardware are opened.
+- Extended lock verification to dependencies, Python ABI, implementation, machine and Plugin ABI.
+- Bound streams and generated metrics endpoints to loopback by default.
+- Bounded stream handshakes and clients, fixed fragmented TCP handshakes and rejected credentials in stream URIs.
+- Persisted runtime events and the resolved execution plan in every run directory.
+- Applied graceful shutdown deadlines after finite sources finish, on errors and on interruption.
+- Added native-tracking import checks to CI and installed-wheel smoke tests.
+
 ## 1.5.0 — Multi-rate Vision and Hardware-first Runtime
 - Added `vision.realtime_bytetrack`, driven by every source frame with slower detections as a latest side input.
 - Added bounded delayed-measurement replay, detector-result deduplication, prediction score decay and explicit too-old policies.

@@ -22,6 +22,7 @@ from .manifest import EdgeConfig, NodeConfig, PipelineManifest, dump_manifest_re
 from .messages import Message
 from .native_plugin import NativePluginNode
 from .node import Node, NodeContext, SourceNode
+from .node_docs import validate_parameters
 from .process_host import ProcessNodeProxy, ProcessSourceProxy
 from .registry import load_node_class
 from .telemetry import LatencyWindow
@@ -336,16 +337,25 @@ class HybridPipelineRuntime:
         self._resource_sampler = ResourceSampler()
         self._last_node_resources: dict[str, dict[str, Any]] = {}
         self._event_callback = event_callback
+        self._event_lock = threading.Lock()
+        self._events_path: Path | None = None
         self._run_started_ns: int | None = None
 
     def _emit_event(self, kind: str, **payload: Any) -> None:
-        if self._event_callback is None:
-            return
-        try:
-            self._event_callback({"kind": kind, "time_ns": time.time_ns(), **payload})
-        except Exception:
-            # Diagnostics must never destabilize the data plane.
-            pass
+        event = {"kind": kind, "time_ns": time.time_ns(), **payload}
+        if self._events_path is not None:
+            try:
+                encoded = json.dumps(event, ensure_ascii=False, default=str)
+                with self._event_lock, self._events_path.open("a", encoding="utf-8") as stream:
+                    stream.write(encoded + "\n")
+            except Exception:
+                # Diagnostics must never destabilize the data plane.
+                pass
+        if self._event_callback is not None:
+            try:
+                self._event_callback(event)
+            except Exception:
+                pass
 
     @property
     def native_queue_enabled(self) -> bool:
@@ -378,6 +388,7 @@ class HybridPipelineRuntime:
         self._memory_plans.clear()
         sample_capacity = self.manifest.runtime.telemetry_samples
         for name, config in self.manifest.nodes.items():
+            validate_parameters(config.uses, config.parameters)
             node = self._load_node(config.uses, config.parameters)
             if config.execution.isolation == "process":
                 original_is_source = isinstance(node, SourceNode)
@@ -419,10 +430,22 @@ class HybridPipelineRuntime:
                 raise RuntimeGraphError(
                     f"Node {name!r} synchronization trigger_port {config.synchronization.trigger_port!r} is not an input"
                 )
-            unknown_optional = sorted(set(getattr(node, "optional_inputs", ())) - set(node.input_types))
+            implementation_optional = set(getattr(node, "optional_inputs", ()))
+            configured_optional = set(config.synchronization.optional_inputs)
+            unknown_optional = sorted(implementation_optional - set(node.input_types))
             if unknown_optional:
                 raise RuntimeGraphError(
                     f"Node {name!r} declares unknown optional inputs: {unknown_optional}"
+                )
+            unknown_configured = sorted(configured_optional - set(node.input_types))
+            if unknown_configured:
+                raise RuntimeGraphError(
+                    f"Node {name!r} configures unknown optional inputs: {unknown_configured}"
+                )
+            unsupported_optional = sorted(configured_optional - implementation_optional)
+            if unsupported_optional:
+                raise RuntimeGraphError(
+                    f"Node {name!r} cannot make required inputs optional: {unsupported_optional}"
                 )
             self.nodes[name] = LoadedNode(
                 name=name,
@@ -505,7 +528,8 @@ class HybridPipelineRuntime:
             })
 
         for name, loaded in self.nodes.items():
-            missing = sorted(set(loaded.node.input_types) - set(loaded.inputs))
+            optional = set(getattr(loaded.node, "optional_inputs", ()))
+            missing = sorted(set(loaded.node.input_types) - optional - set(loaded.inputs))
             if missing:
                 raise RuntimeGraphError(f"Node {name!r} has unconnected inputs: {missing}")
         if not any(isinstance(item.node, SourceNode) for item in self.nodes.values()):
@@ -654,6 +678,7 @@ class HybridPipelineRuntime:
         run_dir = self._create_run_dir()
         (run_dir / "logs").mkdir(exist_ok=True)
         (run_dir / "outputs").mkdir(exist_ok=True)
+        self._events_path = run_dir / "events.jsonl"
         dump_source_manifest_redacted(self.manifest_path, run_dir / "manifest.yaml")
         dump_manifest_redacted(self.manifest, run_dir / "resolved-manifest.yaml")
         (run_dir / "runtime.json").write_text(
@@ -693,6 +718,9 @@ class HybridPipelineRuntime:
                 port=self.manifest.streams.listen_port,
                 max_handshake_bytes=self.manifest.streams.max_handshake_bytes,
                 max_message_bytes=self.manifest.streams.max_message_bytes,
+                handshake_timeout=self.manifest.streams.handshake_timeout_ms / 1000.0,
+                max_handshakes=self.manifest.streams.max_handshakes,
+                max_clients=self.manifest.streams.max_clients,
             )
             self._stream_publisher.start()
             self._emit_event(
@@ -724,31 +752,63 @@ class HybridPipelineRuntime:
         while not all(node.ready.wait(0.01) for node in self.nodes.values()):
             if self._errors:
                 break
+        (run_dir / "resolved-plan.json").write_text(
+            json.dumps(
+                {
+                    **self.describe(),
+                    "runtime_info": {
+                        name: self._safe_runtime_info(loaded)
+                        for name, loaded in self.nodes.items()
+                    },
+                },
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            ),
+            encoding="utf-8",
+        )
         if not self._errors:
             self._emit_event("pipeline_running", pipeline=self.manifest.metadata.name)
         self._start.set()
         watchdog = threading.Thread(target=self._watchdog_loop, name="nodrix-watchdog", daemon=True)
         watchdog.start()
-        timeout_seconds = self.manifest.runtime.shutdown.timeout_ms / 1000.0
+        timeout_seconds = max(self.manifest.runtime.shutdown.timeout_ms / 1000.0, 0.0)
         interrupted = False
-        try:
-            for thread in threads:
-                thread.join()
-        except KeyboardInterrupt:
-            interrupted = True
-            self.request_stop()
-            deadline = time.monotonic() + timeout_seconds
-            for thread in threads:
-                thread.join(timeout=max(0.0, deadline - time.monotonic()))
+        deadline: float | None = None
+        source_threads = {
+            thread
+            for thread, loaded in zip(threads, self.nodes.values(), strict=True)
+            if isinstance(loaded.node, SourceNode)
+        }
+        while any(thread.is_alive() for thread in threads):
+            try:
+                if deadline is None and (
+                    self._errors
+                    or self._stop.is_set()
+                    or all(not thread.is_alive() for thread in source_threads)
+                ):
+                    deadline = time.monotonic() + timeout_seconds
+                if deadline is not None and time.monotonic() >= deadline:
+                    self.request_stop()
+                    self._record_error("runtime", TimeoutError("graceful shutdown timeout exceeded"))
+                    break
+                wait = 0.05 if deadline is None else min(0.05, max(deadline - time.monotonic(), 0.0))
+                for thread in threads:
+                    if thread.is_alive():
+                        thread.join(timeout=wait)
+                        break
+            except KeyboardInterrupt:
+                interrupted = True
+                self.request_stop()
+                deadline = time.monotonic() + timeout_seconds
         alive = [thread for thread in threads if thread.is_alive()]
         if alive:
-            self._stop.set()
-            for edge in self.edges:
-                edge.close()
+            self.request_stop()
             for thread in alive:
                 thread.join(timeout=2.0)
             if any(thread.is_alive() for thread in alive):
-                self._record_error("runtime", TimeoutError("graceful shutdown timeout exceeded"))
+                if not any(isinstance(exc, TimeoutError) for _, exc in self._errors):
+                    self._record_error("runtime", TimeoutError("graceful shutdown timeout exceeded"))
         self._stop.set()
         watchdog.join(timeout=1.0)
         # Capture process RSS/CPU before isolated children and shared pools close.
@@ -793,6 +853,7 @@ class HybridPipelineRuntime:
                 encoding="utf-8",
             )
         self._emit_event("pipeline_stopped", pipeline=self.manifest.metadata.name, status=report["status"])
+        self._events_path = None
         self._run_started_ns = None
         if error is not None:
             raise error[1]

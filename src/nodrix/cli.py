@@ -21,7 +21,7 @@ from .cv_types import TYPE_REGISTRY
 from .manifest import canonical_config_path, load_block, load_manifest, load_manifest_details
 from .hybrid_runtime import HybridPipelineRuntime
 from .native_runtime import NATIVE_BUILTINS, NativePipelineRuntime, NativeToolchain
-from .registry import BUILTINS, load_node_class
+from .registry import BUILTINS, load_builtin_providers, load_node_class
 from . import __version__
 from .discovery import discover_streams, resolve_stream
 from .project_templates import TEMPLATES, create_project
@@ -841,7 +841,7 @@ def node_list(
     pipeline: Annotated[Path | None, typer.Option("--pipeline", "-p", help="Show only node types used by a pipeline")] = None,
 ) -> None:
     """List available node types, or only the types used by one pipeline."""
-    from . import builtin_nodes  # noqa: F401
+    load_builtin_providers()
     selected: dict[str, type] = dict(BUILTINS)
     title = f"Available node types ({len(selected)})"
     if pipeline is not None:

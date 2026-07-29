@@ -68,3 +68,46 @@ NODE_PARAMETER_SCHEMAS: dict[str, list[dict[str, Any]]] = {
 
 def parameter_schema(reference: str) -> list[dict[str, Any]]:
     return list(NODE_PARAMETER_SCHEMAS.get(reference, ()))
+
+
+def validate_parameters(reference: str, parameters: dict[str, Any]) -> None:
+    """Validate side-effect-free built-in parameter contracts.
+
+    Node-specific ``open`` methods remain authoritative for hardware and file
+    checks. This validator catches missing required values, enum typos and
+    numeric range errors during ``nodrix validate``.
+    """
+    if reference == "media.ffmpeg_source" and not parameters.get("uri") and not parameters.get("source"):
+        raise ValueError("media.ffmpeg_source requires parameter 'uri'")
+    if reference == "vision.ncnn_detector":
+        has_pair = bool(
+            (parameters.get("param") or parameters.get("param_path"))
+            and (parameters.get("bin") or parameters.get("bin_path"))
+        )
+        if not parameters.get("model") and not has_pair:
+            raise ValueError("vision.ncnn_detector requires 'model', or both 'param' and 'bin'")
+
+    by_name = {str(item["name"]): item for item in parameter_schema(reference)}
+    for name, value in parameters.items():
+        spec = by_name.get(name)
+        if spec is None:
+            continue
+        type_name = str(spec.get("type", ""))
+        values = str(spec.get("values", ""))
+        if type_name == "enum" and "|" in values:
+            allowed = tuple(item.strip() for item in values.split("|"))
+            if str(value).lower() not in allowed:
+                raise ValueError(f"{reference}.{name} must be one of {', '.join(allowed)}")
+        if type_name in {"integer", "float"}:
+            try:
+                number = int(value) if type_name == "integer" else float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{reference}.{name} must be {type_name}") from exc
+            if ".." in values:
+                lower, upper = values.split("..", 1)
+                if not float(lower) <= float(number) <= float(upper):
+                    raise ValueError(f"{reference}.{name} must be in range {values}")
+            elif values.startswith(">=") and float(number) < float(values.removeprefix(">=").strip()):
+                raise ValueError(f"{reference}.{name} must be {values}")
+            elif values.startswith(">") and float(number) <= float(values.removeprefix(">").strip()):
+                raise ValueError(f"{reference}.{name} must be {values}")

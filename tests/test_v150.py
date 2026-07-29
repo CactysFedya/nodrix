@@ -19,7 +19,7 @@ from nodrix.vision.tracking import (
 
 
 def test_v150_version() -> None:
-    assert nodrix.__version__ == "1.5.0"
+    assert nodrix.__version__ == "1.5.1"
 
 
 def test_v150_template_is_multirate_hardware_first_and_self_contained(tmp_path: Path) -> None:
@@ -42,7 +42,7 @@ def test_v150_template_is_multirate_hardware_first_and_self_contained(tmp_path: 
     assert detector.parameters["acceleration"] == "preferred"
     assert encoder.parameters["encoder"] == "auto"
     assert encoder.parameters["acceleration"] == "preferred"
-    assert manifest.runtime.metrics.listen == "0.0.0.0:9464"
+    assert manifest.runtime.metrics.listen == "127.0.0.1:9464"
 
     edges = {(edge.source, edge.target): edge for edge in manifest.edges}
     assert edges[("source.frame", "tracker.frame")].queue.capacity == 2

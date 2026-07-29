@@ -10,7 +10,7 @@ import socket
 import struct
 import threading
 from typing import Any
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import parse_qs, urlparse
 
 from .discovery import DiscoveryAdvertiser, resolve_stream
 from .messages import Message
@@ -123,13 +123,17 @@ class StreamServer:
     """Direct publisher-to-subscriber data plane for named streams."""
 
     def __init__(
-        self, host: str = "0.0.0.0", port: int = 0, *,
+        self, host: str = "127.0.0.1", port: int = 0, *,
         max_handshake_bytes: int = 64 * 1024, max_message_bytes: int = 256 * 1024 * 1024,
+        handshake_timeout: float = 5.0, max_handshakes: int = 32, max_clients: int = 128,
     ) -> None:
         self.host = host
         self.requested_port = int(port)
         self.max_handshake_bytes = int(max_handshake_bytes)
         self.max_message_bytes = int(max_message_bytes)
+        self.handshake_timeout = max(0.1, float(handshake_timeout))
+        self.max_clients = max(1, int(max_clients))
+        self._handshake_slots = threading.BoundedSemaphore(max(1, int(max_handshakes)))
         self._socket: socket.socket | None = None
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
@@ -229,18 +233,31 @@ class StreamServer:
             except OSError:
                 break
             client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            if not self._handshake_slots.acquire(blocking=False):
+                client_socket.close()
+                continue
             threading.Thread(
-                target=self._configure_client,
+                target=self._handshake_client,
                 args=(client_socket, address),
                 name=f"nodrix-handshake:{address[0]}",
                 daemon=True,
             ).start()
 
     @staticmethod
-    def _receive_json(sock: socket.socket, max_handshake_bytes: int = 64 * 1024) -> dict[str, Any]:
-        raw_length = sock.recv(_HANDSHAKE_LENGTH.size)
-        if len(raw_length) != _HANDSHAKE_LENGTH.size:
-            raise EOFError("incomplete Nodrix handshake")
+    def _receive_exact(sock: socket.socket, size: int) -> bytes:
+        data = bytearray(size)
+        view = memoryview(data)
+        offset = 0
+        while offset < size:
+            count = sock.recv_into(view[offset:])
+            if count <= 0:
+                raise EOFError("incomplete Nodrix handshake")
+            offset += count
+        return bytes(data)
+
+    @classmethod
+    def _receive_json(cls, sock: socket.socket, max_handshake_bytes: int = 64 * 1024) -> dict[str, Any]:
+        raw_length = cls._receive_exact(sock, _HANDSHAKE_LENGTH.size)
         length = _HANDSHAKE_LENGTH.unpack(raw_length)[0]
         if length <= 0 or length > int(max_handshake_bytes):
             raise ValueError(f"invalid Nodrix handshake length: {length}")
@@ -259,8 +276,15 @@ class StreamServer:
         data = json.dumps(value, separators=(",", ":")).encode("utf-8")
         sock.sendall(_HANDSHAKE_LENGTH.pack(len(data)) + data)
 
+    def _handshake_client(self, sock: socket.socket, address: tuple[str, int]) -> None:
+        try:
+            self._configure_client(sock, address)
+        finally:
+            self._handshake_slots.release()
+
     def _configure_client(self, sock: socket.socket, address: tuple[str, int]) -> None:
         try:
+            sock.settimeout(self.handshake_timeout)
             request = self._receive_json(sock, self.max_handshake_bytes)
             if request.get("protocol") != "nodrix-stream/1" or request.get("action") != "subscribe":
                 raise ValueError("unsupported handshake")
@@ -293,6 +317,11 @@ class StreamServer:
                         self._send_json(sock, {"ok": False, "error": "authentication failed"})
                         sock.close()
                         return
+                active_clients = sum(len(item.clients) for item in self._streams.values())
+                if active_clients >= self.max_clients:
+                    self._send_json(sock, {"ok": False, "error": "stream server client limit reached"})
+                    sock.close()
+                    return
                 requested_capacity = int(request.get("capacity", definition.capacity))
                 capacity = max(1, min(requested_capacity, 1024))
                 requested_policy = str(request.get("policy", definition.policy))
@@ -305,6 +334,7 @@ class StreamServer:
                 )
                 definition.clients.append(client)
             self._send_json(sock, {"ok": True, "stream": name, "type": definition.type})
+            sock.settimeout(None)
             client.thread = threading.Thread(
                 target=self._sender_loop,
                 args=(client,),
@@ -403,13 +433,20 @@ class StreamServer:
 
 class StreamPublisher:
     def __init__(
-        self, pipeline: str, exports: list[dict[str, Any]], *, host: str = "0.0.0.0", port: int = 0,
+        self, pipeline: str, exports: list[dict[str, Any]], *, host: str = "127.0.0.1", port: int = 0,
         max_handshake_bytes: int = 64 * 1024, max_message_bytes: int = 256 * 1024 * 1024,
+        handshake_timeout: float = 5.0, max_handshakes: int = 32, max_clients: int = 128,
     ) -> None:
         self.pipeline = pipeline
         self.exports = exports
         self.server = StreamServer(
-            host=host, port=port, max_handshake_bytes=max_handshake_bytes, max_message_bytes=max_message_bytes
+            host=host,
+            port=port,
+            max_handshake_bytes=max_handshake_bytes,
+            max_message_bytes=max_message_bytes,
+            handshake_timeout=handshake_timeout,
+            max_handshakes=max_handshakes,
+            max_clients=max_clients,
         )
         self._by_source: dict[str, list[str]] = {}
         for export in exports:
@@ -478,7 +515,9 @@ class StreamClient:
         self.capacity = int(capacity)
         self.policy = policy
         query = parse_qs(parsed.query)
-        self.token = token or (query.get("token", [None])[0]) or os.environ.get("NODRIX_STREAM_TOKEN")
+        if query.get("token"):
+            raise ValueError("Stream tokens in URI query strings are forbidden; use --token or NODRIX_STREAM_TOKEN")
+        self.token = token or os.environ.get("NODRIX_STREAM_TOKEN")
         self.max_message_bytes = int(max_message_bytes)
         self.receive_buffer_bytes = max(16384, int(receive_buffer_bytes))
         self.socket: socket.socket | None = None

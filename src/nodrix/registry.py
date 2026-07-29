@@ -13,6 +13,13 @@ from .packages import resolve_package_node
 
 
 BUILTINS: dict[str, type[Node]] = {}
+_CORE_LOADED = False
+_LOADED_PROVIDERS: set[str] = set()
+_BUILTIN_PROVIDERS = {
+    "vision.": "nodrix.vision.nodes",
+    "media.": "nodrix.media",
+    "record.": "nodrix.recording",
+}
 
 
 def register_builtin(name: str):
@@ -20,6 +27,35 @@ def register_builtin(name: str):
         BUILTINS[name] = cls
         return cls
     return decorator
+
+
+def _load_core_builtins() -> None:
+    global _CORE_LOADED
+    if _CORE_LOADED:
+        return
+    importlib.import_module("nodrix.builtin_nodes")
+    _CORE_LOADED = True
+
+
+def _load_provider(prefix: str) -> None:
+    if prefix in _LOADED_PROVIDERS:
+        return
+    module = importlib.import_module(_BUILTIN_PROVIDERS[prefix])
+    if prefix == "record.":
+        register_builtin("record.ndrx_source")(module.NdrxSourceNode)
+        register_builtin("record.ndrx_writer")(module.NdrxWriterNode)
+    _LOADED_PROVIDERS.add(prefix)
+
+
+def load_builtin_providers() -> None:
+    """Load every optional built-in pack for discovery-oriented CLI commands."""
+    _load_core_builtins()
+    for prefix in _BUILTIN_PROVIDERS:
+        try:
+            _load_provider(prefix)
+        except ModuleNotFoundError:
+            # Listing Core nodes must remain available in a minimal installation.
+            continue
 
 
 def _load_file_module(path: Path) -> ModuleType:
@@ -42,8 +78,17 @@ def _load_file_module(path: Path) -> ModuleType:
 
 def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
     reference = resolve_package_node(reference)
-    # Import built-ins lazily so registry decorators have run.
-    from . import builtin_nodes  # noqa: F401
+    _load_core_builtins()
+    for prefix in _BUILTIN_PROVIDERS:
+        if reference.startswith(prefix):
+            try:
+                _load_provider(prefix)
+            except ModuleNotFoundError as exc:
+                extra = prefix.removesuffix(".")
+                raise PluginError(
+                    f"Node pack {extra!r} is unavailable; install Nodrix with the appropriate extra"
+                ) from exc
+            break
 
     if reference in BUILTINS:
         return BUILTINS[reference]

@@ -108,7 +108,14 @@ def write_lock(manifest_path: str | Path = "pipeline.yaml", output: str | Path |
     return target
 
 
-def verify_lock(manifest_path: str | Path = "pipeline.yaml", lock_path: str | Path | None = None) -> dict[str, Any]:
+def verify_lock(
+    manifest_path: str | Path = "pipeline.yaml",
+    lock_path: str | Path | None = None,
+    *,
+    mode: str = "compatible",
+) -> dict[str, Any]:
+    if mode not in {"compatible", "exact"}:
+        raise ValueError("lock verification mode must be compatible or exact")
     manifest_path = Path(manifest_path).expanduser().resolve()
     path = Path(lock_path).expanduser().resolve() if lock_path else manifest_path.parent / "nodrix.lock"
     expected = json.loads(path.read_text(encoding="utf-8"))
@@ -119,6 +126,42 @@ def verify_lock(manifest_path: str | Path = "pipeline.yaml", lock_path: str | Pa
     expected_runtime = expected.get("runtime", {})
     if expected_runtime.get("version") != __version__:
         issues.append(f"runtime version changed: expected {expected_runtime.get('version')}, actual {__version__}")
+    if expected_runtime.get("plugin_abi") != actual.get("runtime", {}).get("plugin_abi"):
+        issues.append(
+            "plugin ABI changed: "
+            f"expected {expected_runtime.get('plugin_abi')}, actual {actual.get('runtime', {}).get('plugin_abi')}"
+        )
+    expected_dependencies = dict(expected.get("dependencies") or {})
+    actual_dependencies = dict(actual.get("dependencies") or {})
+    for name, version in expected_dependencies.items():
+        if name not in actual_dependencies:
+            issues.append(f"missing locked dependency: {name}=={version}")
+        elif actual_dependencies[name] != version:
+            issues.append(
+                f"dependency changed: {name} expected {version}, actual {actual_dependencies[name]}"
+            )
+    for name, version in actual_dependencies.items():
+        if name not in expected_dependencies:
+            issues.append(f"new unlocked dependency: {name}=={version}")
+    expected_environment = dict(expected.get("environment") or {})
+    actual_environment = dict(actual.get("environment") or {})
+    for name in ("implementation", "machine"):
+        if expected_environment.get(name) != actual_environment.get(name):
+            issues.append(
+                f"environment changed: {name} expected {expected_environment.get(name)}, "
+                f"actual {actual_environment.get(name)}"
+            )
+    expected_python = str(expected_environment.get("python", ""))
+    actual_python = str(actual_environment.get("python", ""))
+    if expected_python.split(".")[:2] != actual_python.split(".")[:2]:
+        issues.append(f"Python ABI changed: expected {expected_python}, actual {actual_python}")
+    if mode == "exact":
+        for name in ("python", "platform", "executable"):
+            if expected_environment.get(name) != actual_environment.get(name):
+                issues.append(
+                    f"exact environment changed: {name} expected {expected_environment.get(name)}, "
+                    f"actual {actual_environment.get(name)}"
+                )
     expected_files = expected.get("files", {})
     actual_files = actual.get("files", {})
     for name, spec in expected_files.items():

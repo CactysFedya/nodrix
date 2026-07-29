@@ -74,7 +74,7 @@ def test_production_run_artifacts_and_lifecycle(tmp_path: Path) -> None:
     run_dir = Path(report["run_dir"])
     for name in (
         "manifest.yaml", "resolved-manifest.yaml", "nodrix.lock", "runtime.json",
-        "environment.json", "run.json", "summary.json",
+        "environment.json", "resolved-plan.json", "events.jsonl", "run.json", "summary.json",
     ):
         assert (run_dir / name).is_file(), name
     assert (run_dir / "logs").is_dir()

@@ -34,12 +34,16 @@ def _expand_env(value: Any) -> Any:
     return value
 
 
-class QueueConfig(BaseModel):
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class QueueConfig(StrictModel):
     capacity: int = Field(default=8, ge=1)
     policy: Literal["block", "latest", "drop_oldest", "drop_newest"] = "block"
 
 
-class SharedPoolConfig(BaseModel):
+class SharedPoolConfig(StrictModel):
     block_size: int = Field(default=8 * 1024 * 1024, ge=4096)
     capacity: int = Field(default=8, ge=1, le=4096)
     threshold: int = Field(default=64 * 1024, ge=0)
@@ -51,19 +55,19 @@ MemoryDomain = Literal[
 ]
 
 
-class RuntimeMemoryConfig(BaseModel):
+class RuntimeMemoryConfig(StrictModel):
     shared_pool: SharedPoolConfig = Field(default_factory=SharedPoolConfig)
     process_output_pool: SharedPoolConfig = Field(default_factory=SharedPoolConfig)
     default_domain: MemoryDomain = "auto"
     forbid_implicit_copies: bool = False
 
 
-class ShutdownConfig(BaseModel):
+class ShutdownConfig(StrictModel):
     mode: Literal["graceful", "immediate"] = "graceful"
     timeout_ms: int = Field(default=10_000, ge=0, le=600_000)
 
 
-class MetricsConfig(BaseModel):
+class MetricsConfig(StrictModel):
     enabled: bool = True
     interval_ms: int = Field(default=1000, ge=100, le=60_000)
     listen: str | None = None
@@ -77,7 +81,7 @@ class MetricsConfig(BaseModel):
         return self
 
 
-class RuntimeConfig(BaseModel):
+class RuntimeConfig(StrictModel):
     profile: str | None = None
     mode: Literal["offline", "realtime"] = "offline"
     engine: Literal["auto", "unified", "native"] = "auto"
@@ -88,13 +92,14 @@ class RuntimeConfig(BaseModel):
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
 
 
-class SynchronizationConfig(BaseModel):
+class SynchronizationConfig(StrictModel):
     policy: Literal["exact_sequence", "approximate_timestamp", "latest_available", "zip"] = "exact_sequence"
     tolerance_ms: float = Field(default=20.0, ge=0.0)
     trigger_port: str | None = None
+    optional_inputs: list[str] = Field(default_factory=list)
 
 
-class StreamAccessConfig(BaseModel):
+class StreamAccessConfig(StrictModel):
     mode: Literal["open", "token"] = "open"
     token: str | None = None
     token_env: str | None = None
@@ -107,9 +112,7 @@ class StreamAccessConfig(BaseModel):
         return self
 
 
-class StreamExportConfig(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class StreamExportConfig(StrictModel):
     name: str = Field(min_length=1)
     source: str = Field(alias="from")
     queue: QueueConfig = Field(default_factory=lambda: QueueConfig(capacity=2, policy="latest"))
@@ -124,48 +127,51 @@ class StreamExportConfig(BaseModel):
         return self
 
 
-class StreamsConfig(BaseModel):
+class StreamsConfig(StrictModel):
     exports: list[StreamExportConfig] = Field(default_factory=list)
-    bind_host: str = "0.0.0.0"
+    bind_host: str = "127.0.0.1"
     listen_port: int = Field(default=0, ge=0, le=65535)
     max_message_bytes: int = Field(default=256 * 1024 * 1024, ge=1024)
     max_handshake_bytes: int = Field(default=64 * 1024, ge=1024, le=16 * 1024 * 1024)
+    handshake_timeout_ms: int = Field(default=5000, ge=100, le=60_000)
+    max_handshakes: int = Field(default=32, ge=1, le=4096)
+    max_clients: int = Field(default=128, ge=1, le=65_536)
 
 
-class MetadataConfig(BaseModel):
+class MetadataConfig(StrictModel):
     name: str = Field(min_length=1)
     description: str | None = None
 
 
-class ExecutionConfig(BaseModel):
+class ExecutionConfig(StrictModel):
     isolation: Literal["in_process", "process"] = "in_process"
     cpu_affinity: list[int] = Field(default_factory=list)
     device: str = "auto"
 
 
-class FailureConfig(BaseModel):
+class FailureConfig(StrictModel):
     policy: Literal["stop_pipeline", "restart", "skip_message", "disable_branch"] = "stop_pipeline"
     max_restarts: int = Field(default=3, ge=0, le=1000)
     backoff_ms: int = Field(default=250, ge=0, le=600_000)
 
 
-class HealthConfig(BaseModel):
+class HealthConfig(StrictModel):
     timeout_ms: int = Field(default=0, ge=0, le=86_400_000)
     on_timeout: Literal["report", "restart", "stop_pipeline"] = "report"
 
 
-class ResourceConfig(BaseModel):
+class ResourceConfig(StrictModel):
     memory_limit_mb: int | None = Field(default=None, ge=16)
     cpu_limit: float | None = Field(default=None, gt=0)
     max_message_bytes: int = Field(default=256 * 1024 * 1024, ge=1024)
 
 
-class NodeMemoryConfig(BaseModel):
+class NodeMemoryConfig(StrictModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     outputs: dict[str, Any] = Field(default_factory=dict)
 
 
-class NodeConfig(BaseModel):
+class NodeConfig(StrictModel):
     uses: str = Field(min_length=1)
     parameters: dict[str, Any] = Field(default_factory=dict)
     inputs: dict[str, str] = Field(default_factory=dict)
@@ -178,14 +184,12 @@ class NodeConfig(BaseModel):
     memory: NodeMemoryConfig = Field(default_factory=NodeMemoryConfig)
 
 
-class EdgeMemoryConfig(BaseModel):
+class EdgeMemoryConfig(StrictModel):
     domain: MemoryDomain = "auto"
     allow_copy: bool = True
 
 
-class EdgeConfig(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
+class EdgeConfig(StrictModel):
     source: str = Field(alias="from")
     target: str = Field(alias="to")
     queue: QueueConfig = Field(default_factory=QueueConfig)
@@ -199,10 +203,8 @@ class EdgeConfig(BaseModel):
         return self
 
 
-class PipelineManifest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
-
-    api_version: str = Field(default="nodrix.dev/v1", alias="apiVersion")
+class PipelineManifest(StrictModel):
+    api_version: Literal["nodrix.dev/v1"] = Field(default="nodrix.dev/v1", alias="apiVersion")
     kind: Literal["Pipeline"] = "Pipeline"
     metadata: MetadataConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)

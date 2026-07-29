@@ -38,7 +38,7 @@ PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
         },
         "edge_defaults": {"queue": {"capacity": 1, "policy": "latest"}},
         "stream_defaults": {
-            "bind_host": "0.0.0.0",
+            "bind_host": "127.0.0.1",
             "listen_port": 7420,
             "max_message_bytes": 64 * 1024 * 1024,
             "max_handshake_bytes": 64 * 1024,

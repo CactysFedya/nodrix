@@ -372,14 +372,3 @@ class StreamSource(SourceNode):
 
     def close(self):
         self.client.close()
-
-# Register Vision Pack nodes.
-from .vision import nodes as _vision_nodes  # noqa: E402,F401
-
-# Register FFmpeg-backed Media Pack nodes.
-from . import media as _media  # noqa: E402,F401
-
-# Universal recording nodes are registered here to keep built-in discovery lazy.
-from .recording import NdrxSourceNode, NdrxWriterNode
-register_builtin("record.ndrx_source")(NdrxSourceNode)
-register_builtin("record.ndrx_writer")(NdrxWriterNode)
