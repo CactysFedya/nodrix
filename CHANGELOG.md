@@ -1,5 +1,17 @@
 # Changelog
 
+## 2.0.0 — Stable Universal Runtime
+- Added strict Manifest v2, reusable nested Fragments, explicit engine selection, and safe non-destructive migration from 1.x.
+- Stabilized the Python SDK exports, Plugin C ABI 2, lifecycle states, health reasons/timestamps, and message correlation metadata for the 2.x line.
+- Added bounded `restart_node`, `fallback_node`, and `isolate_branch` policies with a fault-injected fallback integration test.
+- Added manifest-driven crash-safe recording that preserves pipeline, run, source, sequence, timestamp, and trace identity.
+- Added Ed25519 package signatures, checksum verification before extraction, retained verification records, and offline `nodrix plugin` commands.
+- Added `nodrix run --production` checks for schemas, health, stream security, hardware fallback, model paths, plugin signatures, and planned memory copies.
+- Added optional OpenTelemetry lifecycle traces without adding work to the per-message dataplane.
+- Added optional lazy ROS 2 source/sink adapters with QoS, timestamps, common message classes, and custom mapping hooks.
+- Added Linux ARM64, macOS, and Windows CI coverage, platform capabilities, and benchmark specifications for Raspberry Pi, Jetson, and GPU workstations.
+- Kept Manifest v1 and legacy Node lifecycle adapters readable while new templates produce v2.
+
 ## 1.9.0 — Planner, Diagnose, Explain and Measured Tuning
 - Added `nodrix plan` with declared-rate propagation, memory/copy analysis, real encoder probes and explicit unknown estimates.
 - Added `nodrix diagnose` for completed runs and opt-in executions, with evidence-backed bottleneck, queue, copy, synchronization, fallback and thermal findings.

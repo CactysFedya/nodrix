@@ -1,0 +1,15 @@
+version: 1
+pipeline: ../../examples/vision_production/pipeline.yaml
+warmup: 3
+repeat: 5
+variants:
+  jetson_hardware:
+    profile: realtime-low-latency
+    set:
+      - encoder.acceleration=required
+      - encoder.encoder=h264_nvmpi
+  nvenc_reference:
+    profile: maximum-throughput
+    set:
+      - encoder.acceleration=required
+      - encoder.encoder=h264_nvenc

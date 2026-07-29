@@ -19,6 +19,7 @@ _BUILTIN_PROVIDERS = {
     "vision.": "nodrix.vision.nodes",
     "media.": "nodrix.media",
     "record.": "nodrix.recording",
+    "ros2.": "nodrix.ros2_adapter",
 }
 
 

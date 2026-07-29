@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,6 +82,24 @@ class MetricsConfig(StrictModel):
         return self
 
 
+class TracingConfig(StrictModel):
+    enabled: bool = False
+    exporter: Literal["none", "console", "otlp"] = "none"
+    endpoint: str | None = None
+    service_name: str = "nodrix"
+
+    @model_validator(mode="after")
+    def validate_exporter(self) -> "TracingConfig":
+        if self.enabled and self.exporter == "otlp" and not self.endpoint:
+            raise ValueError("OTLP tracing requires runtime.tracing.endpoint")
+        return self
+
+
+class LoggingConfig(StrictModel):
+    level: Literal["debug", "info", "warning", "error"] = "info"
+    structured: bool = True
+
+
 class RuntimeConfig(StrictModel):
     profile: str | None = None
     mode: Literal["offline", "realtime"] = "offline"
@@ -90,6 +109,8 @@ class RuntimeConfig(StrictModel):
     memory: RuntimeMemoryConfig = Field(default_factory=RuntimeMemoryConfig)
     shutdown: ShutdownConfig = Field(default_factory=ShutdownConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    tracing: TracingConfig = Field(default_factory=TracingConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
 
 class SynchronizationConfig(StrictModel):
@@ -173,9 +194,24 @@ class ExecutionConfig(StrictModel):
 
 
 class FailureConfig(StrictModel):
-    policy: Literal["stop_pipeline", "restart", "skip_message", "disable_branch"] = "stop_pipeline"
+    policy: Literal[
+        "stop_pipeline",
+        "restart",
+        "restart_node",
+        "skip_message",
+        "disable_branch",
+        "isolate_branch",
+        "fallback_node",
+    ] = "stop_pipeline"
     max_restarts: int = Field(default=3, ge=0, le=1000)
     backoff_ms: int = Field(default=250, ge=0, le=600_000)
+    fallback_uses: str | None = None
+
+    @model_validator(mode="after")
+    def validate_fallback(self) -> "FailureConfig":
+        if self.policy == "fallback_node" and not self.fallback_uses:
+            raise ValueError("fallback_node requires failure.fallback_uses")
+        return self
 
 
 class HealthConfig(StrictModel):
@@ -205,6 +241,7 @@ class NodeConfig(StrictModel):
     health: HealthConfig = Field(default_factory=HealthConfig)
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
     memory: NodeMemoryConfig = Field(default_factory=NodeMemoryConfig)
+    placement: str | None = None
 
 
 class EdgeMemoryConfig(StrictModel):
@@ -226,17 +263,102 @@ class EdgeConfig(StrictModel):
         return self
 
 
+class FragmentConfig(StrictModel):
+    version: str = "1.0.0"
+    description: str | None = None
+    documentation: str | None = None
+    tests: list[str] = Field(default_factory=list)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+    inputs: dict[str, str] = Field(default_factory=dict)
+    outputs: dict[str, str] = Field(default_factory=dict)
+    nodes: dict[str, NodeConfig]
+    blocks: dict[str, str] = Field(default_factory=dict)
+    edges: list[EdgeConfig] = Field(default_factory=list)
+    fragments: dict[str, "FragmentConfig"] = Field(default_factory=dict)
+    hardware_requirements: list[str] = Field(default_factory=list)
+
+
+class RecordingConfig(StrictModel):
+    enabled: bool = False
+    streams: list[str] = Field(default_factory=list)
+    directory: str = "recordings"
+    checkpoint_records: int = Field(default=1024, ge=1, le=1_000_000)
+    durable: bool = True
+
+
+class SecurityConfig(StrictModel):
+    require_signed_plugins: bool = False
+    allow_unsigned_local_plugins: bool = True
+    secret_providers: list[str] = Field(default_factory=lambda: ["environment"])
+
+
+class PlacementConfig(StrictModel):
+    default: str = "local"
+    nodes: dict[str, str] = Field(default_factory=dict)
+
+
 class PipelineManifest(StrictModel):
-    api_version: Literal["nodrix.dev/v1"] = Field(default="nodrix.dev/v1", alias="apiVersion")
+    api_version: Literal["nodrix.dev/v1", "nodrix.dev/v2"] = Field(
+        default="nodrix.dev/v1",
+        alias="apiVersion",
+    )
     kind: Literal["Pipeline"] = "Pipeline"
     metadata: MetadataConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
     nodes: dict[str, NodeConfig]
     edges: list[EdgeConfig]
     streams: StreamsConfig = Field(default_factory=StreamsConfig)
+    fragments: dict[str, FragmentConfig] = Field(default_factory=dict)
+    recording: RecordingConfig = Field(default_factory=RecordingConfig)
+    security: SecurityConfig = Field(default_factory=SecurityConfig)
+    placement: PlacementConfig = Field(default_factory=PlacementConfig)
 
     @model_validator(mode="after")
     def validate_node_names(self) -> "PipelineManifest":
+        if self.api_version == "nodrix.dev/v2":
+            required = {
+                "metadata",
+                "runtime",
+                "nodes",
+                "fragments",
+                "edges",
+                "streams",
+                "recording",
+                "security",
+                "placement",
+            }
+            missing = sorted(required - self.model_fields_set)
+            if missing:
+                raise ValueError(
+                    "Manifest v2 requires explicit sections: " + ", ".join(missing)
+                )
+            if self.runtime.engine == "auto":
+                raise ValueError(
+                    "Manifest v2 requires runtime.engine: unified or native"
+                )
+            legacy_policies = sorted(
+                name
+                for name, node in self.nodes.items()
+                if node.failure.policy in {"restart", "disable_branch"}
+            )
+            if legacy_policies:
+                raise ValueError(
+                    "Manifest v2 requires restart_node/isolate_branch; legacy "
+                    "failure policy used by: " + ", ".join(legacy_policies)
+                )
+        else:
+            for name, node in self.nodes.items():
+                if node.failure.policy in {"restart", "disable_branch"}:
+                    replacement = {
+                        "restart": "restart_node",
+                        "disable_branch": "isolate_branch",
+                    }[node.failure.policy]
+                    warnings.warn(
+                        f"nodes.{name}.failure.policy={node.failure.policy!r} "
+                        f"is deprecated; migrate to {replacement!r}",
+                        DeprecationWarning,
+                        stacklevel=2,
+                    )
         if not self.nodes:
             raise ValueError("At least one node is required")
         for name in self.nodes:
@@ -252,7 +374,7 @@ class PipelineManifest(StrictModel):
 
 _NODE_RESERVED = {
     "use", "uses", "parameters", "inputs", "outputs", "synchronization",
-    "execution", "failure", "health", "resources", "memory",
+    "execution", "failure", "health", "resources", "memory", "placement",
 }
 
 
@@ -362,6 +484,19 @@ def load_block(path: str | Path, *, name: str | None = None) -> NodeConfig:
         raise ManifestError(f"Cannot load block {block_path}: {exc}") from exc
 
 
+def load_fragment(path: str | Path, *, name: str | None = None) -> FragmentConfig:
+    fragment_path = Path(path).expanduser().resolve()
+    normalized = _load_fragment_value(
+        name or fragment_path.stem,
+        {"uses": str(fragment_path)},
+        base_dir=fragment_path.parent,
+    )
+    try:
+        return FragmentConfig.model_validate(_expand_env(normalized))
+    except (ValidationError, TypeError, ValueError) as exc:
+        raise ManifestError(f"Cannot load fragment {fragment_path}: {exc}") from exc
+
+
 def _normalize_compact(
     raw: dict[str, Any], *, base_dir: Path
 ) -> tuple[dict[str, Any], dict[str, str], dict[str, Path]]:
@@ -387,7 +522,13 @@ def _normalize_compact(
         "nodes": {},
         "edges": [],
         "streams": deepcopy(raw.get("streams") or {}),
+        "fragments": deepcopy(raw.get("fragments") or {}),
+        "recording": deepcopy(raw.get("recording") or {}),
+        "security": deepcopy(raw.get("security") or {}),
+        "placement": deepcopy(raw.get("placement") or {}),
     }
+    if canonical["apiVersion"] == "nodrix.dev/v2":
+        canonical["runtime"].setdefault("engine", "unified")
     description = raw.get("description") or dict(raw.get("metadata") or {}).get("description")
     if description:
         canonical["metadata"]["description"] = description
@@ -512,6 +653,245 @@ def _apply_profile(
     return result, sources
 
 
+def _load_fragment_value(
+    name: str,
+    value: Any,
+    *,
+    base_dir: Path,
+    stack: tuple[Path, ...] = (),
+) -> dict[str, Any]:
+    if isinstance(value, (str, Path)):
+        reference: dict[str, Any] = {"uses": str(value)}
+    elif isinstance(value, dict):
+        reference = deepcopy(value)
+    else:
+        raise ManifestError(f"Fragment {name!r} must be a mapping or YAML path")
+    uses = reference.pop("uses", None)
+    if uses is not None:
+        path = Path(str(uses)).expanduser()
+        if not path.is_absolute():
+            path = base_dir / path
+        path = path.resolve()
+        if path in stack:
+            chain = " -> ".join(str(item) for item in (*stack, path))
+            raise ManifestError(f"Recursive fragment import: {chain}")
+        try:
+            loaded = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError) as exc:
+            raise ManifestError(f"Cannot load fragment {name!r} from {path}: {exc}") from exc
+        if not isinstance(loaded, dict):
+            raise ManifestError(f"Fragment file must contain a mapping: {path}")
+        if "fragment" in loaded:
+            loaded = loaded["fragment"]
+        if not isinstance(loaded, dict):
+            raise ManifestError(f"Fragment document is invalid: {path}")
+        raw = _deep_merge(loaded, reference)
+        fragment_base = path.parent
+        next_stack = (*stack, path)
+    else:
+        raw = reference
+        fragment_base = base_dir
+        next_stack = stack
+    raw_nodes = raw.get("nodes") or {}
+    raw_blocks = raw.get("blocks") or {}
+    if not isinstance(raw_nodes, dict) or not isinstance(raw_blocks, dict):
+        raise ManifestError(f"Fragment {name!r} nodes/blocks must be mappings")
+    if not raw_nodes and not raw_blocks:
+        raise ManifestError(f"Fragment {name!r} requires nodes or blocks")
+    nodes: dict[str, Any] = {}
+    for node_name, node_value in raw_nodes.items():
+        node, _ = _normalize_node(
+            str(node_name),
+            node_value,
+            source=f"fragment:{name}",
+        )
+        nodes[str(node_name)] = node
+    normalized_blocks: dict[str, str] = {}
+    for block_name, block_value in raw_blocks.items():
+        block_path = _block_path(
+            block_value,
+            name=str(block_name),
+            base_dir=fragment_base,
+        )
+        try:
+            raw_block = yaml.safe_load(block_path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError) as exc:
+            raise ManifestError(
+                f"Cannot read fragment block {block_name!r}: {exc}"
+            ) from exc
+        node, _ = _normalize_node(
+            str(block_name),
+            raw_block,
+            source=f"fragment-block:{block_path}",
+        )
+        nodes[str(block_name)] = node
+        normalized_blocks[str(block_name)] = str(block_path)
+    nested = {
+        str(nested_name): _load_fragment_value(
+            f"{name}.{nested_name}",
+            nested_value,
+            base_dir=fragment_base,
+            stack=next_stack,
+        )
+        for nested_name, nested_value in dict(raw.get("fragments") or {}).items()
+    }
+    parameters = deepcopy(raw.get("parameters") or {})
+    def set_fragment_parameter(
+        target_nodes: dict[str, Any],
+        target_fragments: dict[str, Any],
+        parts: list[str],
+        parameter_value: Any,
+    ) -> bool:
+        if len(parts) < 2:
+            return False
+        if parts[0] in target_fragments:
+            child = target_fragments[parts[0]]
+            return set_fragment_parameter(
+                child["nodes"],
+                child.get("fragments") or {},
+                parts[1:],
+                parameter_value,
+            )
+        if parts[0] not in target_nodes:
+            return False
+        cursor = target_nodes[parts[0]].setdefault("parameters", {})
+        for part in parts[1:-1]:
+            child = cursor.get(part)
+            if not isinstance(child, dict):
+                child = {}
+                cursor[part] = child
+            cursor = child
+        cursor[parts[-1]] = deepcopy(parameter_value)
+        return True
+
+    for dotted, parameter_value in parameters.items():
+        set_fragment_parameter(
+            nodes,
+            nested,
+            str(dotted).split("."),
+            parameter_value,
+        )
+    return {
+        "version": str(raw.get("version", "1.0.0")),
+        "description": raw.get("description"),
+        "documentation": raw.get("documentation"),
+        "tests": list(raw.get("tests") or []),
+        "parameters": parameters,
+        "inputs": deepcopy(raw.get("inputs") or {}),
+        "outputs": deepcopy(raw.get("outputs") or {}),
+        "nodes": nodes,
+        "blocks": normalized_blocks,
+        "edges": [_parse_flow_item(item) for item in raw.get("flow", raw.get("edges", []))],
+        "fragments": nested,
+        "hardware_requirements": list(raw.get("hardware_requirements") or []),
+    }
+
+
+def _expand_fragment(
+    instance: str,
+    fragment: dict[str, Any],
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, Any]],
+    dict[str, str],
+    dict[str, str],
+]:
+    nodes = {
+        f"{instance}__{name}": deepcopy(config)
+        for name, config in dict(fragment["nodes"]).items()
+    }
+    nested_inputs: dict[str, dict[str, str]] = {}
+    nested_outputs: dict[str, dict[str, str]] = {}
+    edges: list[dict[str, Any]] = []
+    for nested_name, nested in dict(fragment.get("fragments") or {}).items():
+        child_instance = f"{instance}__{nested_name}"
+        child_nodes, child_edges, child_inputs, child_outputs = _expand_fragment(
+            child_instance,
+            nested,
+        )
+        nodes.update(child_nodes)
+        edges.extend(child_edges)
+        nested_inputs[nested_name] = child_inputs
+        nested_outputs[nested_name] = child_outputs
+
+    def resolve(reference: str, *, source: bool) -> str:
+        name, separator, port = str(reference).partition(".")
+        if not separator:
+            raise ManifestError(
+                f"Fragment {instance!r} port reference must use node.port: {reference!r}"
+            )
+        if name in fragment["nodes"]:
+            return f"{instance}__{name}.{port}"
+        mappings = nested_outputs if source else nested_inputs
+        if name in mappings and port in mappings[name]:
+            return mappings[name][port]
+        raise ManifestError(
+            f"Fragment {instance!r} references unknown {'output' if source else 'input'}: {reference}"
+        )
+
+    for edge in fragment.get("edges") or []:
+        resolved = deepcopy(edge)
+        resolved["from"] = resolve(str(edge["from"]), source=True)
+        resolved["to"] = resolve(str(edge["to"]), source=False)
+        edges.append(resolved)
+    inputs = {
+        str(port): resolve(str(reference), source=False)
+        for port, reference in dict(fragment.get("inputs") or {}).items()
+    }
+    outputs = {
+        str(port): resolve(str(reference), source=True)
+        for port, reference in dict(fragment.get("outputs") or {}).items()
+    }
+    return nodes, edges, inputs, outputs
+
+
+def _normalize_and_expand_fragments(
+    canonical: dict[str, Any],
+    *,
+    base_dir: Path,
+) -> dict[str, Any]:
+    result = deepcopy(canonical)
+    raw_fragments = result.get("fragments") or {}
+    if not isinstance(raw_fragments, dict):
+        raise ManifestError("fragments must be a mapping")
+    fragments = {
+        str(name): _load_fragment_value(str(name), value, base_dir=base_dir)
+        for name, value in raw_fragments.items()
+    }
+    result["fragments"] = fragments
+    fragment_inputs: dict[str, dict[str, str]] = {}
+    fragment_outputs: dict[str, dict[str, str]] = {}
+    for name, fragment in fragments.items():
+        nodes, edges, inputs, outputs = _expand_fragment(name, fragment)
+        duplicated = sorted(set(result.get("nodes") or {}) & set(nodes))
+        if duplicated:
+            raise ManifestError(
+                f"Fragment {name!r} expands to duplicate nodes: {', '.join(duplicated)}"
+            )
+        result.setdefault("nodes", {}).update(nodes)
+        result.setdefault("edges", []).extend(edges)
+        fragment_inputs[name] = inputs
+        fragment_outputs[name] = outputs
+
+    def resolve_outer(reference: str, *, source: bool) -> str:
+        name, separator, port = str(reference).partition(".")
+        if not separator:
+            return reference
+        mappings = fragment_outputs if source else fragment_inputs
+        if name not in mappings:
+            return reference
+        if port not in mappings[name]:
+            raise ManifestError(
+                f"Fragment {name!r} has no public {'output' if source else 'input'} {port!r}"
+            )
+        return mappings[name][port]
+
+    for edge in result.get("edges") or []:
+        edge["from"] = resolve_outer(str(edge["from"]), source=True)
+        edge["to"] = resolve_outer(str(edge["to"]), source=False)
+    return result
+
+
 @dataclass(slots=True)
 class ManifestLoadResult:
     manifest: PipelineManifest
@@ -538,6 +918,10 @@ def load_manifest_details(
             raise ManifestError("Pipeline document must be a mapping")
         loaded = _apply_block_overrides(loaded, block_overrides)
         canonical, sources, block_files = _normalize_compact(loaded, base_dir=manifest_path.parent)
+        canonical = _normalize_and_expand_fragments(
+            canonical,
+            base_dir=manifest_path.parent,
+        )
         canonical, sources = _apply_profile(canonical, sources, profile)
         for expression in overrides or []:
             if "=" not in expression:

@@ -52,6 +52,9 @@ timestamp_ns
 created_ns
 trace_id
 stream_id
+pipeline_id
+run_id
+source_id
 metadata
 ```
 

@@ -8,7 +8,6 @@ import inspect
 import json
 import os
 import platform
-import shutil
 import sys
 from pathlib import Path
 import queue as pyqueue
@@ -26,9 +25,10 @@ from .node import Node, NodeContext, SourceNode
 from .node_docs import validate_parameters
 from .process_host import ProcessNodeProxy, ProcessSourceProxy
 from .provenance import write_run_provenance
+from .observability import EventTracer
 from .registry import load_node_class
 from .telemetry import LatencyWindow
-from .memory import MemoryPlan, MemoryRequirement, plan_memory, requirement_for_port, memory_summary
+from .memory import MemoryPlan, MemoryRequirement, plan_memory, requirement_for_port
 from .cv_types import EncodedFrame, Frame, ManagedBuffer, Tensor
 from .streams import StreamPublisher
 from .metrics import MetricsRecorder
@@ -289,6 +289,7 @@ class LoadedNode:
     ready: threading.Event = field(default_factory=threading.Event)
     latest_inputs: dict[str, Received] = field(default_factory=dict)
     watchdog_triggered: bool = False
+    fallback_active: bool = False
 
 
 class _AsyncBridge:
@@ -309,7 +310,7 @@ class _AsyncBridge:
 
 
 class HybridPipelineRuntime:
-    """Nodrix 0.5 unified executor.
+    """Nodrix 2.x unified executor.
 
     Python nodes and C++ processor/sink plugins share the same native bounded
     queues, typed messages, lifecycle, synchronization, telemetry, and zero-copy
@@ -342,6 +343,11 @@ class HybridPipelineRuntime:
         self._event_lock = threading.Lock()
         self._events_path: Path | None = None
         self._run_started_ns: int | None = None
+        self._run_id = ""
+        self._tracer: EventTracer | None = None
+        self._recording_writer: Any | None = None
+        self._recording_lock = threading.Lock()
+        self._recording_streams = set(self.manifest.recording.streams)
 
     def _emit_event(self, kind: str, **payload: Any) -> None:
         event = {"kind": kind, "time_ns": time.time_ns(), **payload}
@@ -356,6 +362,11 @@ class HybridPipelineRuntime:
         if self._event_callback is not None:
             try:
                 self._event_callback(event)
+            except Exception:
+                pass
+        if self._tracer is not None:
+            try:
+                self._tracer.emit(kind, event)
             except Exception:
                 pass
 
@@ -392,6 +403,27 @@ class HybridPipelineRuntime:
         for name, config in self.manifest.nodes.items():
             validate_parameters(config.uses, config.parameters)
             node = self._load_node(config.uses, config.parameters)
+            if config.failure.policy == "fallback_node":
+                if config.execution.isolation != "in_process":
+                    raise RuntimeGraphError(
+                        f"Node {name!r}: fallback_node currently requires in_process isolation"
+                    )
+                assert config.failure.fallback_uses is not None
+                validate_parameters(
+                    config.failure.fallback_uses,
+                    config.parameters,
+                )
+                fallback = self._load_node(
+                    config.failure.fallback_uses,
+                    config.parameters,
+                )
+                if (
+                    dict(fallback.input_types) != dict(node.input_types)
+                    or dict(fallback.output_types) != dict(node.output_types)
+                ):
+                    raise RuntimeGraphError(
+                        f"Node {name!r}: fallback node ports must exactly match the primary node"
+                    )
             if config.execution.isolation == "process":
                 original_is_source = isinstance(node, SourceNode)
                 shared = self.manifest.runtime.memory.shared_pool
@@ -528,6 +560,16 @@ class HybridPipelineRuntime:
                 "token_env": export.access.token_env,
                 "allow_ips": list(export.access.allow_ips),
             })
+        for reference in self._recording_streams:
+            source_name, separator, source_port = reference.partition(".")
+            if (
+                not separator
+                or source_name not in self.nodes
+                or source_port not in self.nodes[source_name].node.output_types
+            ):
+                raise RuntimeGraphError(
+                    f"Recording references unknown output: {reference!r}"
+                )
 
         for name, loaded in self.nodes.items():
             optional = set(getattr(loaded.node, "optional_inputs", ()))
@@ -600,7 +642,15 @@ class HybridPipelineRuntime:
     @staticmethod
     def _safe_runtime_info(loaded: LoadedNode) -> dict[str, Any]:
         try:
-            return dict(loaded.node.runtime_info() or {})
+            info = dict(loaded.node.runtime_info() or {})
+            if loaded.fallback_active:
+                info.update(
+                    {
+                        "fallback": loaded.config.failure.fallback_uses,
+                        "primary": loaded.config.uses,
+                    }
+                )
+            return info
         except Exception as exc:
             return {"diagnostic_error": f"{type(exc).__name__}: {exc}"}
 
@@ -678,9 +728,36 @@ class HybridPipelineRuntime:
         if not self.nodes:
             self.build()
         run_dir = self._create_run_dir()
+        self._run_id = run_dir.name
+        tracing = self.manifest.runtime.tracing
+        self._tracer = EventTracer(
+            enabled=tracing.enabled,
+            exporter=tracing.exporter,
+            endpoint=tracing.endpoint,
+            service_name=tracing.service_name,
+        )
         (run_dir / "logs").mkdir(exist_ok=True)
         (run_dir / "outputs").mkdir(exist_ok=True)
         self._events_path = run_dir / "events.jsonl"
+        recording_path: Path | None = None
+        if self.manifest.recording.enabled:
+            from .recording import NdrxWriter
+
+            recording_dir = Path(self.manifest.recording.directory)
+            if not recording_dir.is_absolute():
+                recording_dir = run_dir / recording_dir
+            recording_dir.mkdir(parents=True, exist_ok=True)
+            recording_path = recording_dir / f"{self.manifest.metadata.name}.ndrx"
+            self._recording_writer = NdrxWriter(
+                recording_path,
+                metadata={
+                    "pipeline": self.manifest.metadata.name,
+                    "apiVersion": self.manifest.api_version,
+                    "streams": sorted(self._recording_streams),
+                },
+                checkpoint_records=self.manifest.recording.checkpoint_records,
+                durable=self.manifest.recording.durable,
+            )
         dump_source_manifest_redacted(self.manifest_path, run_dir / "manifest.yaml")
         dump_manifest_redacted(self.manifest, run_dir / "resolved-manifest.yaml")
         (run_dir / "runtime.json").write_text(
@@ -831,6 +908,13 @@ class HybridPipelineRuntime:
         # Capture process RSS/CPU before isolated children and shared pools close.
         self.snapshot(max((time.perf_counter_ns() - started_ns) / 1e9, 1e-9))
         self._close_nodes()
+        if self._recording_writer is not None:
+            try:
+                self._recording_writer.close()
+            except BaseException as exc:
+                self._record_error("recording", exc)
+            finally:
+                self._recording_writer = None
         if metrics_recorder is not None:
             metrics_recorder.close()
         finished_ns = time.perf_counter_ns()
@@ -859,6 +943,11 @@ class HybridPipelineRuntime:
             },
             "edges": [edge.report() for edge in self.edges],
             "streams": stream_report,
+            "recording": {
+                "enabled": self.manifest.recording.enabled,
+                "path": None if recording_path is None else str(recording_path),
+                "streams": sorted(self._recording_streams),
+            },
             "system": system_snapshot(),
         }
         encoded_report = json.dumps(report, indent=2, ensure_ascii=False, default=str)
@@ -870,6 +959,9 @@ class HybridPipelineRuntime:
                 encoding="utf-8",
             )
         self._emit_event("pipeline_stopped", pipeline=self.manifest.metadata.name, status=report["status"])
+        if self._tracer is not None:
+            self._tracer.close()
+            self._tracer = None
         self._events_path = None
         self._run_started_ns = None
         if error is not None:
@@ -887,8 +979,9 @@ class HybridPipelineRuntime:
                 engine="unified",
                 device=loaded.config.execution.device,
             )
-            loaded.node._lifecycle.transition(LifecycleState.STARTING)
             bridge.resolve(loaded.node.configure(context))
+            loaded.node._lifecycle.transition(LifecycleState.READY)
+            loaded.node._lifecycle.transition(LifecycleState.STARTING)
             bridge.resolve(loaded.node.start())
             self._emit_event(
                 "node_ready",
@@ -918,7 +1011,7 @@ class HybridPipelineRuntime:
             loaded.stats.errors += 1  # type: ignore[union-attr]
             loaded.node._lifecycle.error(exc)
             loaded.node._lifecycle.transition(LifecycleState.FAILED, status=HealthStatus.UNHEALTHY)
-            if loaded.config.failure.policy == "disable_branch":
+            if loaded.config.failure.policy in {"disable_branch", "isolate_branch"}:
                 self._publish_eos(loaded)
             else:
                 self._record_error(loaded.name, exc)
@@ -991,18 +1084,32 @@ class HybridPipelineRuntime:
             try:
                 result = bridge.resolve(process(process_inputs)) if async_process else process(process_inputs)
             except BaseException as exc:
-                if loaded.config.failure.policy == "skip_message":
+                if (
+                    loaded.config.failure.policy == "fallback_node"
+                    and not loaded.fallback_active
+                ):
+                    self._activate_fallback(loaded, bridge, exc)
+                    process = loaded.node.process
+                    async_process = inspect.iscoroutinefunction(process)
+                    result = (
+                        bridge.resolve(process(process_inputs))
+                        if async_process
+                        else process(process_inputs)
+                    )
+                    loaded.stats.errors += 1  # type: ignore[union-attr]
+                elif loaded.config.failure.policy == "skip_message":
                     loaded.stats.errors += 1  # type: ignore[union-attr]
                     loaded.node._lifecycle.error(exc)
                     loaded.node._lifecycle.transition(LifecycleState.RUNNING, status=HealthStatus.DEGRADED)
                     continue
-                if loaded.config.failure.policy == "disable_branch":
+                elif loaded.config.failure.policy in {"disable_branch", "isolate_branch"}:
                     loaded.stats.errors += 1  # type: ignore[union-attr]
                     loaded.node._lifecycle.error(exc)
                     loaded.node._lifecycle.transition(LifecycleState.FAILED, status=HealthStatus.UNHEALTHY)
                     self._publish_eos(loaded)
                     return
-                raise
+                else:
+                    raise
             loaded.stats.observe(time.perf_counter_ns() - start, received)  # type: ignore[union-attr]
             loaded.node._lifecycle.message_completed()
             if result:
@@ -1011,6 +1118,50 @@ class HybridPipelineRuntime:
         if flushed:
             self._publish(loaded, flushed)
         self._publish_eos(loaded)
+
+    def _activate_fallback(
+        self,
+        loaded: LoadedNode,
+        bridge: _AsyncBridge,
+        primary_error: BaseException,
+    ) -> None:
+        fallback_uses = loaded.config.failure.fallback_uses
+        if not fallback_uses:
+            raise RuntimeGraphError(
+                f"Node {loaded.name!r} has no configured fallback"
+            )
+        old_node = loaded.node
+        context = old_node.context
+        if context is None:
+            raise RuntimeGraphError(
+                f"Node {loaded.name!r} failed before a fallback could be configured"
+            )
+        bridge.resolve(old_node.stop())
+        fallback = self._load_node(fallback_uses, loaded.config.parameters)
+        if (
+            dict(fallback.input_types) != dict(old_node.input_types)
+            or dict(fallback.output_types) != dict(old_node.output_types)
+        ):
+            raise RuntimeGraphError(
+                f"Node {loaded.name!r} fallback contracts changed after validation"
+            )
+        bridge.resolve(fallback.configure(context))
+        fallback._lifecycle.transition(LifecycleState.READY)
+        fallback._lifecycle.transition(LifecycleState.STARTING)
+        bridge.resolve(fallback.start())
+        fallback._lifecycle.transition(
+            LifecycleState.DEGRADED,
+            status=HealthStatus.DEGRADED,
+            reason=f"fallback after {type(primary_error).__name__}: {primary_error}",
+        )
+        loaded.node = fallback
+        loaded.fallback_active = True
+        self._emit_event(
+            "node_fallback",
+            node=loaded.name,
+            uses=fallback_uses,
+            primary_error=f"{type(primary_error).__name__}: {primary_error}",
+        )
 
     def _blocking_received(self, edge: EdgeQueue) -> Received | None:
         item = edge.get()
@@ -1121,7 +1272,21 @@ class HybridPipelineRuntime:
                 raise RuntimeGraphError(f"Node {loaded.name!r} emitted metadata larger than 1 MiB")
             self._validate_payload(loaded, port, message)
             source_name = f"{loaded.name}.{port}"
-            outgoing = message.with_updates(stream_id=source_name)
+            outgoing = message.with_updates(
+                stream_id=source_name,
+                source_id=message.source_id or source_name,
+                pipeline_id=message.pipeline_id or self.manifest.metadata.name,
+                run_id=message.run_id or self._run_id,
+            )
+            if (
+                self._recording_writer is not None
+                and (
+                    not self._recording_streams
+                    or source_name in self._recording_streams
+                )
+            ):
+                with self._recording_lock:
+                    self._recording_writer.write(outgoing)
             for edge in loaded.outputs.get(port, ()):
                 edge.put(outgoing)
             if self._stream_publisher is not None:

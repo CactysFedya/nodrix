@@ -274,6 +274,9 @@ def encode_message(message: Message) -> WirePacket:
     definition = TYPE_REGISTRY.definition(message.type)
     metadata = {
         "stream_id": message.stream_id,
+        "pipeline_id": message.pipeline_id,
+        "run_id": message.run_id,
+        "source_id": message.source_id,
         "message_metadata": message.metadata,
         "codec": codec_meta,
         "schema_version": definition.version if definition is not None else 1,
@@ -475,6 +478,9 @@ def decode_packet_parts(
         type=type_name, payload=decoded, sequence=sequence, timestamp_ns=timestamp_ns,
         stream_id=metadata.get("stream_id", ""),
         trace_id=metadata.get("trace_text", trace_id),
+        pipeline_id=metadata.get("pipeline_id", ""),
+        run_id=metadata.get("run_id", ""),
+        source_id=metadata.get("source_id", ""),
         metadata=dict(metadata.get("message_metadata") or {}), created_ns=created_ns,
     )
 
@@ -538,6 +544,9 @@ def recv_message(sock: socket.socket, *, max_message_bytes: int = 256 * 1024 * 1
         timestamp_ns=timestamp_ns,
         stream_id=metadata.get("stream_id", ""),
         trace_id=metadata.get("trace_text", trace_id),
+        pipeline_id=metadata.get("pipeline_id", ""),
+        run_id=metadata.get("run_id", ""),
+        source_id=metadata.get("source_id", ""),
         metadata=dict(metadata.get("message_metadata") or {}),
         created_ns=created_ns,
     )

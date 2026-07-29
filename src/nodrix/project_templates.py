@@ -7,6 +7,21 @@ from typing import Callable
 import yaml
 
 
+def _manifest_v2(document: dict) -> dict:
+    result = dict(document)
+    result["apiVersion"] = "nodrix.dev/v2"
+    runtime = dict(result.get("runtime") or {})
+    runtime.setdefault("engine", "unified")
+    result["runtime"] = runtime
+    result.setdefault("fragments", {})
+    result.setdefault("recording", {})
+    result.setdefault("security", {})
+    result.setdefault("placement", {})
+    result.setdefault("streams", {})
+    result.setdefault("edges", [])
+    return result
+
+
 SKELETON_FILES: dict[str, str] = {
     "nodrix.toml": dedent(
         '''
@@ -20,11 +35,11 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "nodrix==1.9.0\n",
+    "requirements.txt": "nodrix==2.0.0\n",
     ".gitignore": ".nodrix/\n/outputs/*\n!/outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
-        apiVersion: nodrix.dev/v1
+        apiVersion: nodrix.dev/v2
         kind: Pipeline
         metadata:
           name: {project_name}
@@ -37,6 +52,10 @@ SKELETON_FILES: dict[str, str] = {
         edges: []
         streams:
           exports: []
+        fragments: {}
+        recording: {}
+        security: {}
+        placement: {}
         '''
     ).lstrip(),
     "nodes/__init__.py": '"""User Nodrix nodes."""\n',
@@ -160,7 +179,7 @@ def _core_files(project_name: str) -> dict[str, str]:
         ]},
     }
     return _with_native({
-        "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
+        "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
         "nodes/source.py": dedent(
             '''
             from nodrix import Message, SourceNode
@@ -218,10 +237,13 @@ def _core_files(project_name: str) -> dict[str, str]:
 def _vision_files(project_name: str) -> dict[str, str]:
     pipeline = dedent(
         f"""
+        apiVersion: nodrix.dev/v2
+        kind: Pipeline
         name: {project_name}
         profile: realtime-low-latency
 
         runtime:
+          engine: unified
           metrics:
             enabled: true
             interval_ms: 1000
@@ -294,6 +316,10 @@ def _vision_files(project_name: str) -> dict[str, str]:
             queue:
               capacity: 2
               policy: latest
+        fragments: {{}}
+        recording: {{}}
+        security: {{}}
+        placement: {{}}
         """
     ).lstrip()
 
@@ -480,7 +506,7 @@ def _vision_files(project_name: str) -> dict[str, str]:
 
     return {
         "pipeline.yaml": pipeline,
-        "requirements.txt": "nodrix[vision-ncnn,media,viewer]==1.9.0\n",
+        "requirements.txt": "nodrix[vision-ncnn,media,viewer]==2.0.0\n",
         "blocks/sources/ffmpeg.yaml": source,
         "blocks/preprocess/letterbox-320.yaml": preprocess,
         "blocks/detectors/yolo26n-ncnn.yaml": detector,
@@ -560,8 +586,8 @@ def _media_files(project_name: str) -> dict[str, str]:
         "publish": {f"/{project_name}/h264": "encoder.encoded"},
     }
     return _with_native({
-        "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[media,viewer]==1.9.0\n",
+        "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
+        "requirements.txt": "nodrix[media,viewer]==2.0.0\n",
         "README.md": dedent(
             f"""
             # {project_name}
@@ -603,8 +629,8 @@ def _network_files(project_name: str) -> dict[str, str]:
         "streams": {"exports": []},
     }
     return _with_native({
-        "pipeline.yaml": yaml.safe_dump(publisher, sort_keys=False),
-        "subscriber.yaml": yaml.safe_dump(subscriber, sort_keys=False),
+        "pipeline.yaml": yaml.safe_dump(_manifest_v2(publisher), sort_keys=False),
+        "subscriber.yaml": yaml.safe_dump(_manifest_v2(subscriber), sort_keys=False),
         "README.md": f"# {project_name}\n\nDevice A: `nodrix run`\n\nDevice B: `nodrix stream list && nodrix run subscriber.yaml`\n",
     })
 
@@ -619,7 +645,7 @@ def _data_plane_files(project_name: str) -> dict[str, str]:
             "source": {"uses": "./nodes/shared_source.py:SharedSource", "parameters": {"count": 100, "bytes": 262144}},
             "worker": {
                 "uses": "./nodes/checksum.py:Checksum", "execution": {"isolation": "process", "cpu_affinity": []},
-                "failure": {"policy": "restart", "max_restarts": 3, "backoff_ms": 100},
+                "failure": {"policy": "restart_node", "max_restarts": 3, "backoff_ms": 100},
             },
             "sink": {"uses": "sink.console"},
         },
@@ -630,7 +656,7 @@ def _data_plane_files(project_name: str) -> dict[str, str]:
         "streams": {"exports": []},
     }
     return _with_native({
-        "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
+        "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
         "nodes/shared_source.py": dedent(
             '''
             from nodrix import Message, SharedBufferPool, SourceNode
@@ -698,7 +724,7 @@ def _device_files(project_name: str) -> dict[str, str]:
         "streams": {"exports": []},
     }
     return _with_native({
-        "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
+        "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
         "nodes/device_source.py": dedent(
             '''
             from nodrix import Message, SourceNode
@@ -756,7 +782,11 @@ def _package_files(project_name: str) -> dict[str, str]:
             "format": "nodrix-package/1",
             "name": package_name,
             "version": "1.0.0",
-            "nodrix": ">=1.0,<2.0",
+            "nodrix": ">=2.0,<3.0",
+            "abi": 2,
+            "platforms": ["any"],
+            "hardware": [],
+            "sandbox": "in_process",
             "nodes": {"passthrough": {"python": "python/passthrough.py:Passthrough"}},
         }, sort_keys=False),
         "python/passthrough.py": dedent(

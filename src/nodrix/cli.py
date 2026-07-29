@@ -19,7 +19,14 @@ import yaml
 from .errors import NodrixError
 from .cv_types import TYPE_REGISTRY
 from .execution_plan import compile_execution_plan, write_execution_plan
-from .manifest import canonical_config_path, load_block, load_manifest, load_manifest_details
+from .manifest import (
+    canonical_config_path,
+    load_block,
+    load_fragment,
+    load_manifest,
+    load_manifest_details,
+)
+from .migration import migrate_manifest
 from .hybrid_runtime import HybridPipelineRuntime
 from .native_runtime import NATIVE_BUILTINS, NativePipelineRuntime, NativeToolchain
 from .registry import BUILTINS, load_builtin_providers, load_node_class
@@ -37,7 +44,14 @@ from .recording import (
     repair_recording,
 )
 from .lockfile import write_lock, verify_lock
-from .packages import build_package, install_package, list_packages, package_info, remove_package
+from .packages import (
+    build_package,
+    install_package,
+    list_packages,
+    package_info,
+    remove_package,
+    verify_package,
+)
 from .runs import list_runs, load_run, compare_runs, resolve_run
 from .benchmarking import direct_benchmark_plan, load_benchmark_plan, replay_plan, run_benchmark_suite
 from .planning import (
@@ -74,9 +88,11 @@ recording_app = typer.Typer(help="Inspect universal .ndrx recordings.")
 data_app = typer.Typer(help="Inspect shared-memory and process data-plane capabilities.")
 device_app = typer.Typer(help="Inspect DLPack, DMA-BUF, V4L2, CUDA and native device-I/O capabilities.")
 package_app = typer.Typer(help="Build and manage local Nodrix packages.")
+plugin_app = typer.Typer(help="Search, verify, install, inspect, and remove offline plugins.")
 runs_app = typer.Typer(help="Inspect reproducible run artifacts.")
 config_app = typer.Typer(help="Inspect resolved profiles and configuration values.")
 block_app = typer.Typer(help="List and inspect reusable YAML node blocks.")
+fragment_app = typer.Typer(help="Create and validate reusable typed subgraphs.")
 app.add_typer(node_app, name="node")
 app.add_typer(stream_app, name="stream")
 app.add_typer(native_app, name="native")
@@ -86,9 +102,11 @@ app.add_typer(recording_app, name="recording")
 app.add_typer(data_app, name="data-plane")
 app.add_typer(device_app, name="device")
 app.add_typer(package_app, name="package")
+app.add_typer(plugin_app, name="plugin")
 app.add_typer(runs_app, name="runs")
 app.add_typer(config_app, name="config")
 app.add_typer(block_app, name="block")
+app.add_typer(fragment_app, name="fragment")
 console = Console()
 
 
@@ -154,10 +172,10 @@ def _runtime(
         manifest.runtime.engine == "auto" and native_only
     )
     if use_native:
-        if manifest.streams.exports:
+        if manifest.streams.exports or manifest.recording.enabled:
             raise NodrixError(
-                "Named LAN stream exports require engine: unified; "
-                "the fully native executor does not yet expose network streams."
+                "Named LAN streams and automatic recording require engine: unified; "
+                "the standalone native executor does not expose those control-plane services."
             )
         runtime = NativePipelineRuntime(manifest, path, run_root=run_root)
     else:
@@ -200,6 +218,7 @@ def init(
 def validate(
     pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
     strict: Annotated[bool, typer.Option("--strict", help="Treat production safety warnings as errors where applicable")] = False,
+    production: Annotated[bool, typer.Option("--production", help="Apply the complete Manifest v2 production gate")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
     profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
@@ -214,7 +233,12 @@ def validate(
             block_overrides=block_values,
         )
         desc = runtime.describe()
-        issues = validate_production(runtime.manifest, desc, strict=strict)
+        issues = validate_production(
+            runtime.manifest,
+            desc,
+            strict=strict or production,
+            production=production,
+        )
     except Exception as exc:
         if json_output:
             console.print_json(json.dumps({"valid": False, "error": str(exc), "issues": []}))
@@ -380,6 +404,7 @@ def run(
     profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
     block_values: Annotated[list[str] | None, typer.Option("--block", help="Replace a reusable block: name=path.yaml")] = None,
+    production: Annotated[bool, typer.Option("--production", help="Enforce the Manifest v2 production safety gate")] = False,
 ) -> None:
     """Execute a pipeline with reproducibility and optional Prometheus metrics."""
     if locked and (profile is not None or set_values or block_values):
@@ -403,6 +428,28 @@ def run(
             overrides=set_values,
             block_overrides=block_values,
         )
+        if production:
+            validation_runtime = _runtime(
+                pipeline,
+                profile=profile,
+                overrides=set_values,
+                block_overrides=block_values,
+            )
+            production_issues = validate_production(
+                details.manifest,
+                validation_runtime.describe(),
+                strict=True,
+                production=True,
+            )
+            failures = [
+                item for item in production_issues if item.severity == "error"
+            ]
+            if failures:
+                rendered = "; ".join(
+                    f"{item.code} {item.location}: {item.message}"
+                    for item in failures
+                )
+                raise NodrixError(f"Production validation failed: {rendered}")
         console.print(render_startup_summary(details.manifest, __version__))
         for instance, config in details.manifest.nodes.items():
             if config.uses != "media.ffmpeg_encoder":
@@ -554,6 +601,52 @@ def replay(
     completed = subprocess.run([str(item) for item in plan["command"]], check=False)
     if completed.returncode:
         raise typer.Exit(completed.returncode)
+
+
+@app.command("migrate")
+def migrate_command(
+    pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    target_version: Annotated[str, typer.Option("--to")] = "v2",
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    in_place: Annotated[bool, typer.Option("--in-place", help="Replace source after creating a backup")] = False,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Show changes without writing")] = False,
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Migrate a 1.x manifest to stable v2 without overwriting it by default."""
+    if target_version != "v2":
+        console.print(f"[red]Unsupported migration target:[/red] {target_version}")
+        raise typer.Exit(2)
+    try:
+        result = migrate_manifest(
+            pipeline,
+            output=output,
+            in_place=in_place,
+            write=not dry_run,
+        )
+    except Exception as exc:
+        console.print(f"[red]Migration failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(result, ensure_ascii=False, default=str))
+        return
+    table = Table("Path", "Before", "After", "Reason")
+    for change in result["changes"]:
+        table.add_row(
+            change["path"],
+            change["from"],
+            change["to"],
+            change["reason"],
+        )
+    console.print(table)
+    if result["incompatibilities"]:
+        for incompatibility in result["incompatibilities"]:
+            console.print(f"[red]- {incompatibility}[/red]")
+    if dry_run:
+        console.print("[yellow]Dry run: no files were written.[/yellow]")
+    else:
+        console.print(f"[green]Written[/green] {result['destination']}")
+        if result.get("backup"):
+            console.print(f"Backup: {result['backup']}")
 
 
 @recording_app.command("info")
@@ -1481,6 +1574,82 @@ def stream_list(
         console.print("[yellow]No Nodrix streams discovered during the selected window.[/yellow]")
 
 
+@fragment_app.command("validate")
+def fragment_validate_command(
+    fragment: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """Validate a Fragment SDK manifest and show its public contracts."""
+    try:
+        config = load_fragment(fragment)
+    except Exception as exc:
+        console.print(f"[red]Invalid fragment:[/red] {exc}")
+        raise typer.Exit(1)
+    result = {
+        "valid": True,
+        "version": config.version,
+        "inputs": config.inputs,
+        "outputs": config.outputs,
+        "nodes": sorted(config.nodes),
+        "nested_fragments": sorted(config.fragments),
+        "hardware_requirements": config.hardware_requirements,
+    }
+    if json_output:
+        console.print_json(json.dumps(result))
+        return
+    console.print(f"[green]Valid fragment[/green] {fragment} v{config.version}")
+    console.print(f"Inputs: {json.dumps(config.inputs)}")
+    console.print(f"Outputs: {json.dumps(config.outputs)}")
+    console.print(f"Nodes: {', '.join(sorted(config.nodes))}")
+
+
+@fragment_app.command("init")
+def fragment_init_command(
+    name: Annotated[str, typer.Argument()],
+    output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+) -> None:
+    """Create a minimal documented Fragment SDK package."""
+    target = (output or Path(name)).expanduser().resolve()
+    if target.exists() and any(target.iterdir()):
+        console.print(f"[red]Directory is not empty:[/red] {target}")
+        raise typer.Exit(1)
+    target.mkdir(parents=True, exist_ok=True)
+    fragment = {
+        "version": "1.0.0",
+        "description": f"Reusable {name} subgraph",
+        "documentation": "README.md",
+        "tests": ["tests/test_contract.py"],
+        "inputs": {"input": "processor.input"},
+        "outputs": {"output": "processor.output"},
+        "nodes": {
+            "processor": {
+                "uses": "core.delay",
+                "parameters": {"milliseconds": 0},
+            }
+        },
+        "edges": [],
+        "hardware_requirements": [],
+    }
+    (target / "fragment.yaml").write_text(
+        yaml.safe_dump(fragment, sort_keys=False),
+        encoding="utf-8",
+    )
+    (target / "README.md").write_text(
+        f"# {name}\n\nValidate with `nodrix fragment validate fragment.yaml`.\n",
+        encoding="utf-8",
+    )
+    tests_dir = target / "tests"
+    tests_dir.mkdir(exist_ok=True)
+    (tests_dir / "test_contract.py").write_text(
+        "from nodrix import load_fragment\n\n"
+        "def test_contract():\n"
+        "    fragment = load_fragment('fragment.yaml')\n"
+        "    assert fragment.inputs and fragment.outputs\n",
+        encoding="utf-8",
+    )
+    console.print(f"[green]Created fragment SDK[/green] {target}")
+
+
 @stream_app.command("info")
 def stream_info(
     name: Annotated[str, typer.Argument(help="Named stream, for example /camera/front")],
@@ -1908,10 +2077,11 @@ def top_command(
 def package_build_command(
     directory: Annotated[Path, typer.Argument(exists=True, file_okay=False)] = Path.cwd(),
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
+    signing_key: Annotated[Path | None, typer.Option("--sign-key", help="Ed25519 private PEM key")] = None,
 ) -> None:
     """Build a checksummed .ndpkg archive."""
     try:
-        target = build_package(directory, output)
+        target = build_package(directory, output, signing_key=signing_key)
     except Exception as exc:
         console.print(f"[red]Package build failed:[/red] {exc}")
         raise typer.Exit(1)
@@ -1919,14 +2089,41 @@ def package_build_command(
 
 
 @package_app.command("install")
-def package_install_command(package: Annotated[Path, typer.Argument(exists=True, readable=True)]) -> None:
+def package_install_command(
+    package: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    public_key: Annotated[Path | None, typer.Option("--public-key", help="Trusted Ed25519 public PEM key")] = None,
+    require_signature: Annotated[bool, typer.Option("--require-signature")] = False,
+) -> None:
     """Install a local .ndpkg after path and checksum verification."""
     try:
-        info = install_package(package)
+        info = install_package(
+            package,
+            public_key=public_key,
+            require_signature=require_signature,
+        )
     except Exception as exc:
         console.print(f"[red]Package installation failed:[/red] {exc}")
         raise typer.Exit(1)
     console.print(f"[green]Installed[/green] {info['name']} {info['version']} -> {info['path']}")
+
+
+@package_app.command("verify")
+def package_verify_command(
+    package: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    public_key: Annotated[Path | None, typer.Option("--public-key")] = None,
+    require_signature: Annotated[bool, typer.Option("--require-signature")] = False,
+) -> None:
+    """Verify archive checksums and an optional trusted Ed25519 signature."""
+    try:
+        result = verify_package(
+            package,
+            public_key=public_key,
+            require_signature=require_signature,
+        )
+    except Exception as exc:
+        console.print(f"[red]Package verification failed:[/red] {exc}")
+        raise typer.Exit(1)
+    console.print_json(json.dumps(result))
 
 
 @package_app.command("list")
@@ -1953,6 +2150,46 @@ def package_remove_command(name: str) -> None:
         console.print(f"[yellow]Package not installed:[/yellow] {name}")
         raise typer.Exit(1)
     console.print(f"[green]Removed[/green] {name}")
+
+
+@plugin_app.command("search")
+def plugin_search_command(query: str = "") -> None:
+    """Search the installed offline plugin registry."""
+    items = [
+        item
+        for item in list_packages()
+        if not query or query.lower() in item["name"].lower()
+    ]
+    console.print_json(json.dumps(items))
+
+
+@plugin_app.command("install")
+def plugin_install_command(
+    package: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    public_key: Annotated[Path | None, typer.Option("--public-key")] = None,
+    require_signature: Annotated[bool, typer.Option("--require-signature")] = False,
+) -> None:
+    """Install an offline plugin after checksum/signature verification."""
+    package_install_command(package, public_key, require_signature)
+
+
+@plugin_app.command("info")
+def plugin_info_command(name: str) -> None:
+    package_info_command(name)
+
+
+@plugin_app.command("verify")
+def plugin_verify_command(
+    package: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    public_key: Annotated[Path | None, typer.Option("--public-key")] = None,
+    require_signature: Annotated[bool, typer.Option("--require-signature")] = False,
+) -> None:
+    package_verify_command(package, public_key, require_signature)
+
+
+@plugin_app.command("remove")
+def plugin_remove_command(name: str) -> None:
+    package_remove_command(name)
 
 
 @runs_app.command("list")

@@ -81,7 +81,7 @@ def _write_v1(path: Path, messages: list[Message]) -> None:
 
 
 def test_v170_version() -> None:
-    assert nodrix.__version__ == "1.9.0"
+    assert nodrix.__version__ == "2.0.0"
 
 
 def test_ndrx2_uses_bounded_checkpoints_and_checksums(tmp_path: Path) -> None:

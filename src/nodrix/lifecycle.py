@@ -9,9 +9,12 @@ from typing import Any
 
 class LifecycleState(StrEnum):
     CREATED = "created"
+    CONFIGURING = "configuring"
+    READY = "ready"
     CONFIGURED = "configured"
     STARTING = "starting"
     RUNNING = "running"
+    DEGRADED = "degraded"
     DRAINING = "draining"
     STOPPING = "stopping"
     STOPPED = "stopped"
@@ -38,6 +41,8 @@ class HealthSnapshot:
     restart_count: int
     deadline_misses: int
     queue_pressure: float
+    state_reason: str | None
+    state_timestamp_ns: int
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -58,16 +63,32 @@ class LifecycleTracker:
         self.restart_count = 0
         self.deadline_misses = 0
         self.queue_pressure = 0.0
+        self.state_reason: str | None = None
+        self.state_timestamp_ns = time.monotonic_ns()
 
-    def transition(self, state: LifecycleState, *, status: HealthStatus | None = None) -> None:
+    def transition(
+        self,
+        state: LifecycleState,
+        *,
+        status: HealthStatus | None = None,
+        reason: str | None = None,
+    ) -> None:
         with self._lock:
             self.state = state
+            self.state_reason = reason
+            self.state_timestamp_ns = time.monotonic_ns()
             if status is not None:
                 self.status = status
-            if state in {LifecycleState.STARTING, LifecycleState.RUNNING, LifecycleState.DRAINING}:
+            if state in {
+                LifecycleState.STARTING,
+                LifecycleState.RUNNING,
+                LifecycleState.DEGRADED,
+                LifecycleState.DRAINING,
+            }:
                 self.alive = True
-            if state == LifecycleState.RUNNING:
+            if state in {LifecycleState.READY, LifecycleState.RUNNING}:
                 self.ready = True
+            if state == LifecycleState.RUNNING:
                 if self.status == HealthStatus.UNKNOWN:
                     self.status = HealthStatus.HEALTHY
             if state in {LifecycleState.STOPPING, LifecycleState.STOPPED, LifecycleState.FAILED}:
@@ -82,13 +103,18 @@ class LifecycleTracker:
     def message_completed(self) -> None:
         with self._lock:
             self.last_completion_ns = time.monotonic_ns()
-            if self.status != HealthStatus.UNHEALTHY:
+            if (
+                self.status != HealthStatus.UNHEALTHY
+                and self.state
+                not in {LifecycleState.DEGRADED, LifecycleState.RESTARTING}
+            ):
                 self.status = HealthStatus.HEALTHY
 
     def error(self, exc: BaseException | str) -> None:
         with self._lock:
             self.last_error = str(exc)
             self.status = HealthStatus.UNHEALTHY
+            self.state_reason = str(exc)
 
     def mark_restart(self) -> None:
         with self._lock:
@@ -96,6 +122,8 @@ class LifecycleTracker:
             self.state = LifecycleState.RESTARTING
             self.status = HealthStatus.DEGRADED
             self.ready = False
+            self.state_reason = "restart requested"
+            self.state_timestamp_ns = time.monotonic_ns()
 
     def set_queue_pressure(self, value: float) -> None:
         with self._lock:
@@ -116,4 +144,6 @@ class LifecycleTracker:
                 restart_count=self.restart_count,
                 deadline_misses=self.deadline_misses,
                 queue_pressure=self.queue_pressure,
+                state_reason=self.state_reason,
+                state_timestamp_ns=self.state_timestamp_ns,
             )

@@ -1,4 +1,4 @@
-# Nodrix 1.5.0
+# Nodrix 2.0.0
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -8,9 +8,21 @@
 Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
 
 
-## Nodrix 1.5 highlights
+## Nodrix 2.0 highlights
 
-Run detection and tracking at different rates without duplicating stale work:
+Nodrix 2.0 establishes stable Manifest v2, Python SDK and Plugin C ABI 2
+contracts while keeping existing Manifest v1 pipelines readable. It adds
+reusable Fragments, signed offline plugins, production validation, automatic
+recording, OpenTelemetry lifecycle traces, and optional ROS 2 adapters.
+
+```bash
+nodrix migrate pipeline.yaml --to v2
+nodrix validate pipeline.v2.yaml --production
+nodrix run pipeline.v2.yaml --production
+```
+
+Multi-rate detection and tracking remain available without duplicating stale
+work:
 
 ```text
 source 30 FPS ─┬─ latest frame → detector ~10 FPS ─┐
@@ -70,7 +82,7 @@ pip install "nodrix[vision-ncnn,media,viewer]"
 
 ### Raspberry Pi and offline source installation
 
-Nodrix 1.5.0 can be built without PyPI build isolation when the runtime dependencies are already present:
+Nodrix 2.0.0 can be built without PyPI build isolation when the runtime dependencies are already present:
 
 ```bash
 python3 -m pip install . --no-build-isolation --no-deps
@@ -145,15 +157,19 @@ class Multiply(Node):
         }
 ```
 
-Nodrix 1.x preserves the public `Node`, `SourceNode`, `SinkNode`, `Message`, `NodeContext`, buffer, memory, and lifecycle contracts. Existing 0.x nodes that override `open`, `flush`, and `close` continue to work through lifecycle adapters.
+Nodrix 2.x preserves the public `Node`, `SourceNode`, `SinkNode`, `Message`,
+`NodeContext`, manifest models, buffer, memory, error, and lifecycle contracts.
+Existing nodes that override `open`, `flush`, and `close` continue to work
+through lifecycle adapters.
 
 ## Lifecycle and health
 
 Lifecycle states:
 
 ```text
-created → configured → starting → running → draining → stopping → stopped
-                                      └→ failed / restarting
+created → configuring → ready → starting → running → stopping → stopped
+                                      ├→ degraded / restarting
+                                      └→ failed
 ```
 
 ```bash
@@ -171,7 +187,7 @@ nodes:
     execution:
       isolation: process
     failure:
-      policy: restart
+      policy: restart_node
       max_restarts: 5
     health:
       timeout_ms: 2000
@@ -195,7 +211,9 @@ nodes:
     uses: my-nodes/passthrough
 ```
 
-`.ndpkg` installation checks archive paths and SHA-256 checksums. No public marketplace or remote-code installation is enabled in 1.0.
+`.ndpkg` installation checks archive paths and SHA-256 checksums. Packages may
+be signed and verified with an Ed25519 key. The local registry is offline by
+design; Nodrix does not silently download or execute marketplace code.
 
 ## Secure named streams
 
@@ -235,6 +253,7 @@ mandatory; mutual TLS is available with `client_ca` and
 
 ```bash
 nodrix validate --strict
+nodrix run --production
 nodrix inspect --memory
 nodrix plan pipeline.yaml
 nodrix diagnose runs/RUN-ID
@@ -242,6 +261,11 @@ nodrix explain edge source.output:sink.input --pipeline pipeline.yaml
 ```
 
 The validator checks graph cycles, port/type compatibility, memory transfers, unsupported copies, open LAN streams, stream backpressure, watchdog/isolation conflicts, resource configuration, and native plugin loading.
+
+The production gate additionally requires Manifest v2 and explicit health
+timeouts, rejects fallback-permitting acceleration, relative model paths,
+unverified required plugins, unencrypted/open LAN exports, and planned payload
+copies.
 
 `nodrix optimize` writes separate benchmark variants and a decision report. It
 never edits or applies the production pipeline.

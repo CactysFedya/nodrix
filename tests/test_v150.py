@@ -19,7 +19,7 @@ from nodrix.vision.tracking import (
 
 
 def test_v150_version() -> None:
-    assert nodrix.__version__ == "1.9.0"
+    assert nodrix.__version__ == "2.0.0"
 
 
 def test_v150_template_is_multirate_hardware_first_and_self_contained(tmp_path: Path) -> None:

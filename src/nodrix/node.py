@@ -70,7 +70,7 @@ class Node(ABC):
     # Nodrix 1.x lifecycle. Existing 0.x nodes that only override open/flush/close
     # remain source-compatible through these default adapters.
     def configure(self, context: NodeContext) -> Any:
-        self._lifecycle.transition(LifecycleState.CONFIGURED)
+        self._lifecycle.transition(LifecycleState.CONFIGURING)
         return self.open(context)
 
     def start(self) -> Any:

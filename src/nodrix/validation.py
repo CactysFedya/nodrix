@@ -52,7 +52,13 @@ def _find_cycles(manifest: PipelineManifest) -> list[list[str]]:
     return cycles
 
 
-def validate_production(manifest: PipelineManifest, description: dict[str, Any], *, strict: bool = False) -> list[ValidationIssue]:
+def validate_production(
+    manifest: PipelineManifest,
+    description: dict[str, Any],
+    *,
+    strict: bool = False,
+    production: bool = False,
+) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     loopback_hosts = {"127.0.0.1", "::1", "localhost"}
     for cycle in _find_cycles(manifest):
@@ -62,7 +68,8 @@ def validate_production(manifest: PipelineManifest, description: dict[str, Any],
         if not memory.get("runtime_supported", True):
             issues.append(ValidationIssue("error", "E204", memory.get("reason", "Unsupported memory path"), f"{edge['from']} -> {edge['to']}"))
         if int(memory.get("planned_copies", 0)) > 0:
-            issues.append(ValidationIssue("warning", "W205", f"Edge requires {memory.get('planned_copies')} payload copy/copies", f"{edge['from']} -> {edge['to']}"))
+            severity = "error" if production else "warning"
+            issues.append(ValidationIssue(severity, "W205", f"Edge requires {memory.get('planned_copies')} payload copy/copies", f"{edge['from']} -> {edge['to']}"))
     for export in manifest.streams.exports:
         access = export.access
         if access.mode == "open" and manifest.streams.bind_host not in loopback_hosts:
@@ -96,13 +103,106 @@ def validate_production(manifest: PipelineManifest, description: dict[str, Any],
                     "runtime.metrics.listen",
                 )
             )
+    if production and manifest.runtime.logging.level == "debug":
+        issues.append(
+            ValidationIssue(
+                "error",
+                "P505",
+                "Production mode rejects debug logging",
+                "runtime.logging.level",
+            )
+        )
     for name, config in manifest.nodes.items():
         if config.health.timeout_ms > 0 and config.execution.isolation == "in_process" and config.health.on_timeout == "restart":
             issues.append(ValidationIssue("warning", "W501", "An in-process Python thread cannot be force-restarted safely; use process isolation", name))
         if config.resources.memory_limit_mb and config.execution.isolation != "process":
             issues.append(ValidationIssue("warning", "W502", "Memory limits are enforceable only for process-isolated nodes", name))
-        if config.failure.policy == "restart" and config.execution.isolation != "process":
+        if config.failure.policy in {"restart", "restart_node"} and config.execution.isolation != "process":
             issues.append(ValidationIssue("warning", "W503", "Safe restart requires process isolation", name))
+        if production and config.health.timeout_ms <= 0:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "P501",
+                    "Production nodes require an explicit health timeout",
+                    f"nodes.{name}.health.timeout_ms",
+                )
+            )
+        if production:
+            acceleration = str(config.parameters.get("acceleration", ""))
+            if acceleration == "preferred":
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        "P502",
+                        "Production hardware policy must be required or explicitly disabled; preferred permits fallback",
+                        f"nodes.{name}.parameters.acceleration",
+                    )
+                )
+            for key, value in config.parameters.items():
+                if (
+                    isinstance(value, str)
+                    and any(token in key.lower() for token in ("model", "weights", "engine"))
+                    and "://" not in value
+                    and not Path(value).expanduser().is_absolute()
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            "error",
+                            "P503",
+                            "Production model/engine paths must be absolute or content-addressed",
+                            f"nodes.{name}.parameters.{key}",
+                        )
+                    )
+            is_external = (
+                config.uses.startswith("native:")
+                or ":" in config.uses
+                or "/" in config.uses
+            )
+            signature_verified = False
+            if config.uses.count("/") == 1 and not config.uses.startswith(("./", "../")):
+                try:
+                    from .packages import package_verification
+
+                    signature_verified = bool(
+                        package_verification(config.uses.split("/", 1)[0]).get(
+                            "signature_verified"
+                        )
+                    )
+                except Exception:
+                    signature_verified = False
+            if (
+                is_external
+                and manifest.security.require_signed_plugins
+                and not signature_verified
+                and not config.uses.startswith(("ros2.",))
+            ):
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        "P504",
+                        "External plugin signature is not represented in this manifest; use a verified installed package",
+                        f"nodes.{name}.uses",
+                    )
+                )
     if manifest.runtime.shutdown.timeout_ms < 100:
         issues.append(ValidationIssue("warning", "W601", "Graceful shutdown timeout is extremely short", "runtime.shutdown"))
+    if production and manifest.api_version != "nodrix.dev/v2":
+        issues.append(
+            ValidationIssue(
+                "error",
+                "P200",
+                "Production mode requires apiVersion: nodrix.dev/v2",
+                "apiVersion",
+            )
+        )
+    if production and manifest.runtime.engine == "auto":
+        issues.append(
+            ValidationIssue(
+                "error",
+                "P201",
+                "Production mode requires an explicit runtime engine",
+                "runtime.engine",
+            )
+        )
     return issues

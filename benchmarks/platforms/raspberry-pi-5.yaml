@@ -1,0 +1,15 @@
+version: 1
+pipeline: ../../examples/vision_production/pipeline.yaml
+warmup: 2
+repeat: 5
+variants:
+  realtime_v4l2:
+    profile: realtime-low-latency
+    set:
+      - encoder.acceleration=required
+      - encoder.encoder=h264_v4l2m2m
+  software_reference:
+    profile: realtime-balanced
+    set:
+      - encoder.acceleration=disabled
+      - encoder.encoder=libx264

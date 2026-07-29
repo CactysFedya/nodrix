@@ -20,6 +20,9 @@ class Message:
     timestamp_ns: int = field(default_factory=time.time_ns)
     stream_id: str = ""
     trace_id: int | str = 0
+    pipeline_id: str = ""
+    run_id: str = ""
+    source_id: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
     created_ns: int = field(default_factory=time.perf_counter_ns)
     lease: Any | None = field(default=None, repr=False, compare=False)

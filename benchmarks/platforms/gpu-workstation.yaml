@@ -1,0 +1,20 @@
+version: 1
+pipeline: ../../examples/vision_production/pipeline.yaml
+warmup: 3
+repeat: 7
+variants:
+  nvidia:
+    profile: maximum-throughput
+    set:
+      - encoder.acceleration=required
+      - encoder.encoder=h264_nvenc
+  intel:
+    profile: maximum-throughput
+    set:
+      - encoder.acceleration=required
+      - encoder.encoder=h264_qsv
+  amd:
+    profile: maximum-throughput
+    set:
+      - encoder.acceleration=required
+      - encoder.encoder=h264_amf

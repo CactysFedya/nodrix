@@ -565,7 +565,11 @@ class ProcessNodeProxy(Node):
                     return None
                 if self._generation != call_generation and self._process is not None and self._process.is_alive():
                     continue
-                if attempts <= self.max_restarts + 1 and self._restart():
+                if (
+                    self.failure_policy in {"restart", "restart_node"}
+                    and attempts <= self.max_restarts + 1
+                    and self._restart()
+                ):
                     continue
                 raise ProcessNodeError(f"Isolated node {self.name!r} failed: {exc}") from exc
             finally:

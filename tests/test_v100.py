@@ -112,7 +112,7 @@ def test_local_package_build_install_and_resolve(tmp_path: Path, monkeypatch: py
     (package / "nodrix.package.yaml").write_text(yaml.safe_dump({
         "name": "demo-pack",
         "version": "1.0.0",
-        "nodrix": ">=1.0,<2.0",
+        "nodrix": ">=2.0,<3.0",
         "nodes": {"demo": {"python": "python/node.py:Demo"}},
     }), encoding="utf-8")
     archive = build_package(package, tmp_path / "demo.ndpkg")

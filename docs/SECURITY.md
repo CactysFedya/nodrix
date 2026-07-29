@@ -33,4 +33,18 @@ through `token_env`. Client trust and mTLS credentials may be supplied through
 
 ## Plugins
 
-Native plugins execute trusted machine code. Use process isolation for untrusted Python/native components. Nodrix 1.0 has no remote-code installation or marketplace.
+`.ndpkg` archives are SHA-256 checked before extraction and may be signed with
+Ed25519. `nodrix plugin verify --public-key ... --require-signature` verifies
+publisher identity, and installation retains the verification record.
+Production mode can require signed plugins.
+
+Native plugins execute trusted machine code. Use process isolation for
+components outside the deployment trust boundary. The local registry is
+offline: no package is downloaded or executed as a side effect of search.
+
+## Production gate
+
+`nodrix run --production` requires Manifest v2, explicit health timeouts and
+deployment-safe hardware choices. It rejects implicit memory copies, relative
+model/engine paths, unprotected non-loopback streams and unverified plugins
+when signed plugins are required.

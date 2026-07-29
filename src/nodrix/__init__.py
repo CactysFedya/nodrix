@@ -13,6 +13,16 @@ from .memory import (
     plan_memory,
 )
 from .messages import Message
+from .errors import ManifestError, NodrixError, PluginError, RuntimeGraphError
+from .manifest import (
+    EdgeConfig,
+    NodeConfig,
+    PipelineManifest,
+    QueueConfig,
+    load_manifest,
+    load_manifest_details,
+    load_fragment,
+)
 from .shared_memory import SharedBufferDescriptor, SharedBufferPool
 from .node import Node, NodeContext, SinkNode, SourceNode
 from .lifecycle import HealthStatus, LifecycleState
@@ -42,6 +52,17 @@ __all__ = [
     "register_wire_codec",
     "LifecycleState",
     "HealthStatus",
+    "PipelineManifest",
+    "NodeConfig",
+    "EdgeConfig",
+    "QueueConfig",
+    "load_manifest",
+    "load_manifest_details",
+    "load_fragment",
+    "NodrixError",
+    "ManifestError",
+    "PluginError",
+    "RuntimeGraphError",
 ]
 
-__version__ = "1.9.0"
+__version__ = "2.0.0"
