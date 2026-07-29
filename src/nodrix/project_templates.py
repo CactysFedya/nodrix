@@ -20,7 +20,7 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "nodrix==1.5.1\n",
+    "requirements.txt": "nodrix==1.6.0\n",
     ".gitignore": ".nodrix/\n/outputs/*\n!/outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
@@ -80,27 +80,41 @@ NATIVE_EXAMPLE: dict[str, str] = {
     ).lstrip(),
     "native/passthrough.cpp": dedent(
         '''
-        #include <span>
+        #include <array>
+        #include <cstring>
         #include <string_view>
-        #include <vector>
-        #include "nodrix/plugin.hpp"
+        #include "nodrix/cpp_plugin.hpp"
 
-        class Passthrough final : public nodrix::Node {
+        class Passthrough final : public nodrix::c_api::Node {
          public:
-          const std::vector<nodrix::PortSpec>& input_ports() const noexcept override { return inputs_; }
-          const std::vector<nodrix::PortSpec>& output_ports() const noexcept override { return outputs_; }
-          void process(std::span<const nodrix::Message> inputs, nodrix::Emitter& emitter) override {
+          std::span<const nodrix_port_v2> input_ports() const noexcept override { return inputs_; }
+          std::span<const nodrix_port_v2> output_ports() const noexcept override { return outputs_; }
+          nodrix_status_v2 process(
+              std::span<const nodrix_message_v2> inputs,
+              const nodrix::c_api::Emitter& emitter) override {
             if (!inputs.empty()) emitter.emit(0, inputs.front());
+            return NODRIX_STATUS_OK;
           }
          private:
-          const std::vector<nodrix::PortSpec> inputs_{{"input", "core.any"}};
-          const std::vector<nodrix::PortSpec> outputs_{{"output", "core.any"}};
+          const std::array<nodrix_port_v2, 1> inputs_{{{sizeof(nodrix_port_v2), "input", "core.any", "any"}}};
+          const std::array<nodrix_port_v2, 1> outputs_{{{sizeof(nodrix_port_v2), "output", "core.any", "any"}}};
         };
 
-        NODRIX_DECLARE_PLUGIN(
-          if (std::string_view(node_type ? node_type : "") == "example.passthrough") return new Passthrough();
-          return nullptr;
-        )
+        extern "C" NODRIX_C_EXPORT uint32_t nodrix_plugin_abi_version_v2() {
+          return NODRIX_C_ABI_VERSION;
+        }
+        extern "C" NODRIX_C_EXPORT uint64_t nodrix_plugin_features_v2() {
+          return NODRIX_C_FEATURE_TYPED_PORTS | NODRIX_C_FEATURE_MEMORY_DOMAINS |
+                 NODRIX_C_FEATURE_ZERO_COPY_BUFFERS;
+        }
+        extern "C" NODRIX_C_EXPORT nodrix_status_v2 nodrix_plugin_create_v2(
+            uint32_t host_abi, const char* node_type, const char*,
+            nodrix_node_api_v2* output) {
+          if (host_abi != NODRIX_C_ABI_VERSION) return NODRIX_STATUS_ABI_MISMATCH;
+          if (!node_type || std::strcmp(node_type, "example.passthrough") != 0)
+            return NODRIX_STATUS_UNSUPPORTED;
+          return nodrix::c_api::export_node(new Passthrough(), output);
+        }
         '''
     ).lstrip(),
     "native/CMakeLists.txt": dedent(
@@ -466,7 +480,7 @@ def _vision_files(project_name: str) -> dict[str, str]:
 
     return {
         "pipeline.yaml": pipeline,
-        "requirements.txt": "nodrix[vision-ncnn,media,viewer]==1.5.1\n",
+        "requirements.txt": "nodrix[vision-ncnn,media,viewer]==1.6.0\n",
         "blocks/sources/ffmpeg.yaml": source,
         "blocks/preprocess/letterbox-320.yaml": preprocess,
         "blocks/detectors/yolo26n-ncnn.yaml": detector,
@@ -547,7 +561,7 @@ def _media_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(pipeline, sort_keys=False),
-        "requirements.txt": "nodrix[media,viewer]==1.5.1\n",
+        "requirements.txt": "nodrix[media,viewer]==1.6.0\n",
         "README.md": dedent(
             f"""
             # {project_name}

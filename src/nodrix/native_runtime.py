@@ -140,11 +140,10 @@ class NativePipelineRuntime:
             if resolved_uses in NATIVE_BUILTINS:
                 spec = NATIVE_BUILTINS[resolved_uses]
             elif resolved_uses.startswith("native:"):
-                if not config.inputs and not config.outputs:
-                    raise RuntimeGraphError(
-                        f"Native plugin node {name!r} must declare inputs/outputs in the manifest"
-                    )
-                spec = NativeNodeSpec(dict(config.inputs), dict(config.outputs))
+                raise RuntimeGraphError(
+                    f"External Plugin C ABI 2.0 node {name!r} must use engine: unified; "
+                    "the standalone native runner is retained only for built-in native.* nodes"
+                )
             else:
                 raise RuntimeGraphError(
                     f"Native engine accepts only native.* or native:/library#type nodes; "

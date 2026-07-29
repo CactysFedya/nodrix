@@ -54,6 +54,7 @@ This fixes the 0.8.0 output path:
 0.9: parent output slot → child writes directly → descriptor → parent
 ```
 
-## C++ ABI
+## Plugin C ABI
 
-Plugin ABI 1.0 includes a memory string to `PortSpec` and a device field to `NodeContext`.
+Plugin C ABI 2.0 includes a memory string in `nodrix_port_v2` and a device
+field in `nodrix_node_context_v2`.

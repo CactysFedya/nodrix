@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 from .cv_types import TYPE_REGISTRY, normalize_payload
 from .errors import RuntimeGraphError
+from .execution_plan import compile_execution_plan, write_execution_plan
 from .manifest import EdgeConfig, NodeConfig, PipelineManifest, dump_manifest_redacted, dump_source_manifest_redacted
 from .messages import Message
 from .native_plugin import NativePluginNode
@@ -752,21 +753,12 @@ class HybridPipelineRuntime:
         while not all(node.ready.wait(0.01) for node in self.nodes.values()):
             if self._errors:
                 break
-        (run_dir / "resolved-plan.json").write_text(
-            json.dumps(
-                {
-                    **self.describe(),
-                    "runtime_info": {
-                        name: self._safe_runtime_info(loaded)
-                        for name, loaded in self.nodes.items()
-                    },
-                },
-                indent=2,
-                ensure_ascii=False,
-                default=str,
-            ),
-            encoding="utf-8",
-        )
+        execution_plan = compile_execution_plan(self.manifest, self.describe())
+        execution_plan["runtime_info"] = {
+            name: self._safe_runtime_info(loaded)
+            for name, loaded in self.nodes.items()
+        }
+        write_execution_plan(execution_plan, run_dir / "resolved-plan.json")
         if not self._errors:
             self._emit_event("pipeline_running", pipeline=self.manifest.metadata.name)
         self._start.set()

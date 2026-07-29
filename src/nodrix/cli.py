@@ -18,6 +18,7 @@ import yaml
 
 from .errors import NodrixError
 from .cv_types import TYPE_REGISTRY
+from .execution_plan import compile_execution_plan, write_execution_plan
 from .manifest import canonical_config_path, load_block, load_manifest, load_manifest_details
 from .hybrid_runtime import HybridPipelineRuntime
 from .native_runtime import NATIVE_BUILTINS, NativePipelineRuntime, NativeToolchain
@@ -272,6 +273,7 @@ def inspect(
     live: Annotated[bool, typer.Option("--live", help="Run the graph and display live node/data-plane telemetry")] = False,
     memory: Annotated[bool, typer.Option("--memory", help="Show the static memory-domain and copy plan")] = False,
     resolved: Annotated[bool, typer.Option("--resolved", help="Print the canonical manifest after profiles and overrides")] = False,
+    plan: Annotated[bool, typer.Option("--plan", help="Print the deterministic resolved execution plan as JSON")] = False,
     node_name: Annotated[str | None, typer.Option("--node", help="Inspect one node instance")] = None,
     details_view: Annotated[bool, typer.Option("--details", help="Include resolved block parameters in the graph")] = False,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Write resolved YAML to a file")] = None,
@@ -295,6 +297,20 @@ def inspect(
                 console.print(f"[green]Written[/green] {output.resolve()}")
             else:
                 console.print(rendered, markup=False, end="")
+            return
+        if plan:
+            runtime = _runtime(
+                pipeline,
+                profile=profile,
+                overrides=set_values,
+                block_overrides=block_values,
+            )
+            execution_plan = compile_execution_plan(details.manifest, runtime.describe())
+            if output is not None:
+                write_execution_plan(execution_plan, output)
+                console.print(f"[green]Written[/green] {output.resolve()}")
+            else:
+                console.print_json(json.dumps(execution_plan, ensure_ascii=False))
             return
         if node_name is not None:
             console.print(
@@ -934,38 +950,54 @@ def node_create(
     if project.exists() and any(project.iterdir()) and not force:
         raise typer.BadParameter(f"Directory is not empty: {project}; use --force")
     project.mkdir(parents=True, exist_ok=True)
-    cpp_inputs = ", ".join(f'{{"{port}", "{type_name}"}}' for port, type_name in input_ports.items())
-    cpp_outputs = ", ".join(f'{{"{port}", "{type_name}"}}' for port, type_name in output_ports.items())
+    cpp_inputs = ", ".join(
+        f'{{sizeof(nodrix_port_v2), "{port}", "{type_name}", "any"}}'
+        for port, type_name in input_ports.items()
+    )
+    cpp_outputs = ", ".join(
+        f'{{sizeof(nodrix_port_v2), "{port}", "{type_name}", "any"}}'
+        for port, type_name in output_ports.items()
+    )
     node_type = name.replace("_", ".").replace("-", ".")
     source_lines = [
-        "#include <span>",
-        "#include <string_view>",
-        "#include <vector>",
+        "#include <array>",
+        "#include <cstring>",
         "",
-        '#include "nodrix/plugin.hpp"',
+        '#include "nodrix/cpp_plugin.hpp"',
         "",
-        f"class {class_name} final : public nodrix::Node {{",
+        f"class {class_name} final : public nodrix::c_api::Node {{",
         " public:",
-        "  const std::vector<nodrix::PortSpec>& input_ports() const noexcept override { return inputs_; }",
-        "  const std::vector<nodrix::PortSpec>& output_ports() const noexcept override { return outputs_; }",
+        "  std::span<const nodrix_port_v2> input_ports() const noexcept override { return inputs_; }",
+        "  std::span<const nodrix_port_v2> output_ports() const noexcept override { return outputs_; }",
         "",
-        "  void process(std::span<const nodrix::Message> inputs, nodrix::Emitter& emitter) override {",
+        "  nodrix_status_v2 process(std::span<const nodrix_message_v2> inputs,",
+        "                           const nodrix::c_api::Emitter& emitter) override {",
         "    // Replace with the detector/filter/tracker implementation.",
-        "    // Message payloads are intrusive zero-copy Buffer handles.",
+        "    // The host retains owned payloads emitted synchronously here.",
         "    if (!outputs_.empty() && !inputs.empty()) emitter.emit(0, inputs.front());",
+        "    return NODRIX_STATUS_OK;",
         "  }",
         "",
         " private:",
-        f"  const std::vector<nodrix::PortSpec> inputs_{{{cpp_inputs}}};",
-        f"  const std::vector<nodrix::PortSpec> outputs_{{{cpp_outputs}}};",
+        f"  const std::array<nodrix_port_v2, {len(input_ports)}> inputs_{{{{{cpp_inputs}}}}};",
+        f"  const std::array<nodrix_port_v2, {len(output_ports)}> outputs_{{{{{cpp_outputs}}}}};",
         "};",
         "",
-        "NODRIX_DECLARE_PLUGIN(",
-        f'  if (std::string_view(node_type ? node_type : "") == "{node_type}") {{',
-        f"    return new {class_name}();",
-        "  }",
-        "  return nullptr;",
-        ")",
+        'extern "C" NODRIX_C_EXPORT uint32_t nodrix_plugin_abi_version_v2() {',
+        "  return NODRIX_C_ABI_VERSION;",
+        "}",
+        'extern "C" NODRIX_C_EXPORT uint64_t nodrix_plugin_features_v2() {',
+        "  return NODRIX_C_FEATURE_TYPED_PORTS | NODRIX_C_FEATURE_MEMORY_DOMAINS |",
+        "         NODRIX_C_FEATURE_ZERO_COPY_BUFFERS;",
+        "}",
+        'extern "C" NODRIX_C_EXPORT nodrix_status_v2 nodrix_plugin_create_v2(',
+        "    uint32_t host_abi, const char* node_type, const char*,",
+        "    nodrix_node_api_v2* output) {",
+        "  if (host_abi != NODRIX_C_ABI_VERSION) return NODRIX_STATUS_ABI_MISMATCH;",
+        f'  if (!node_type || std::strcmp(node_type, "{node_type}") != 0)',
+        "    return NODRIX_STATUS_UNSUPPORTED;",
+        f"  return nodrix::c_api::export_node(new {class_name}(), output);",
+        "}",
         "",
     ]
     target = name.replace("-", "_")
@@ -1689,27 +1721,26 @@ def native_inspect_command(library: Annotated[Path, typer.Argument(exists=True, 
     """Inspect plugin ABI and mandatory exported symbols without creating a node."""
     try:
         lib = ctypes.CDLL(str(library.resolve()))
-        abi_fn = lib.nodrix_plugin_abi_version
+        abi_fn = lib.nodrix_plugin_abi_version_v2
         abi_fn.restype = ctypes.c_uint32
         abi = int(abi_fn())
         features = 0
-        if hasattr(lib, "nodrix_plugin_features"):
-            features_fn = lib.nodrix_plugin_features
+        if hasattr(lib, "nodrix_plugin_features_v2"):
+            features_fn = lib.nodrix_plugin_features_v2
             features_fn.restype = ctypes.c_uint64
             features = int(features_fn())
         symbols = {
-            "nodrix_plugin_abi_version": True,
-            "nodrix_plugin_features": hasattr(lib, "nodrix_plugin_features"),
-            "nodrix_create_node": hasattr(lib, "nodrix_create_node"),
-            "nodrix_destroy_node": hasattr(lib, "nodrix_destroy_node"),
+            "nodrix_plugin_abi_version_v2": True,
+            "nodrix_plugin_features_v2": hasattr(lib, "nodrix_plugin_features_v2"),
+            "nodrix_plugin_create_v2": hasattr(lib, "nodrix_plugin_create_v2"),
         }
     except Exception as exc:
         console.print(f"[red]Cannot inspect plugin:[/red] {exc}")
         raise typer.Exit(1)
-    runtime_abi = 0x00010000
+    runtime_abi = 0x00020000
     table = Table("Field", "Value")
     table.add_row("Plugin ABI", f"{abi >> 16}.{abi & 0xffff} ({abi})")
-    table.add_row("Runtime ABI", "1.0 (65536)")
+    table.add_row("Runtime ABI", "2.0 (131072)")
     table.add_row("Compatible", "yes" if abi == runtime_abi and all(symbols.values()) else "no")
     table.add_row("Features", f"0x{features:016x}")
     table.add_row("Symbols", json.dumps(symbols))

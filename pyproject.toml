@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodrix"
-version = "1.5.1"
+version = "1.6.0"
 description = "High-performance typed runtime for local and distributed streaming graphs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -79,6 +79,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 nodrix = [
   "native/CMakeLists.txt",
+  "native/include/nodrix/*.h",
   "native/include/nodrix/*.hpp",
   "native/src/*.cpp",
   "native/examples/*.cpp",

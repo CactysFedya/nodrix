@@ -88,7 +88,7 @@ def build_lock(manifest_path: str | Path = "pipeline.yaml") -> dict[str, Any]:
         files[rel] = {"sha256": sha256_file(path), "size": path.stat().st_size}
     return {
         "format": LOCK_FORMAT,
-        "runtime": {"name": "nodrix", "version": __version__, "plugin_abi": 1},
+        "runtime": {"name": "nodrix", "version": __version__, "plugin_abi": 2},
         "environment": {
             "python": platform.python_version(),
             "implementation": platform.python_implementation(),

@@ -244,13 +244,15 @@ nodrix runs show <run-id>
 nodrix runs compare <run-a> <run-b>
 ```
 
-## Native ABI 1.0
+## Plugin C ABI 2.0
 
 ```bash
 nodrix native inspect ./libdetector.so
 ```
 
-Nodrix Plugin ABI 1.0 uses numeric ABI `65536` and feature flags for typed ports and memory-domain contracts. Incompatible plugins are rejected before node creation.
+Plugin C ABI 2.0 uses numeric ABI `131072`, opaque handles and function
+tables. C++ standard-library objects and exceptions never cross the shared
+library boundary. Incompatible plugins are rejected before node creation.
 
 ## Main capabilities carried into 1.0
 

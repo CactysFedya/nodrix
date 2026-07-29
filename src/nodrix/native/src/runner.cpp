@@ -24,12 +24,6 @@
 #include <utility>
 #include <vector>
 
-#if defined(_WIN32)
-#include <windows.h>
-#else
-#include <dlfcn.h>
-#endif
-
 #include "nodrix/builtin_nodes.hpp"
 #include "nodrix/mpmc_queue.hpp"
 #include "nodrix/node.hpp"
@@ -158,44 +152,6 @@ Plan read_plan(const fs::path& path) {
   if (plan.run_dir.empty()) throw std::runtime_error("Native plan has no run directory");
   return plan;
 }
-
-class DynamicLibrary final {
- public:
-  explicit DynamicLibrary(const fs::path& path) : path_(path) {
-#if defined(_WIN32)
-    handle_ = LoadLibraryA(path.string().c_str());
-    if (!handle_) throw std::runtime_error("LoadLibrary failed: " + path.string());
-#else
-    handle_ = ::dlopen(path.string().c_str(), RTLD_NOW | RTLD_LOCAL);
-    if (!handle_) throw std::runtime_error("dlopen failed: " + std::string(::dlerror()));
-#endif
-  }
-  DynamicLibrary(const DynamicLibrary&) = delete;
-  DynamicLibrary& operator=(const DynamicLibrary&) = delete;
-  ~DynamicLibrary() {
-#if defined(_WIN32)
-    if (handle_) FreeLibrary(static_cast<HMODULE>(handle_));
-#else
-    if (handle_) ::dlclose(handle_);
-#endif
-  }
-
-  template <typename T>
-  T symbol(const char* name) const {
-#if defined(_WIN32)
-    auto result = reinterpret_cast<T>(GetProcAddress(static_cast<HMODULE>(handle_), name));
-#else
-    ::dlerror();
-    auto result = reinterpret_cast<T>(::dlsym(handle_, name));
-#endif
-    if (!result) throw std::runtime_error("Missing plugin symbol " + std::string(name) + " in " + path_.string());
-    return result;
-  }
-
- private:
-  fs::path path_;
-  void* handle_{nullptr};
-};
 
 struct NodeHolder {
   vp::Node* pointer{nullptr};
@@ -398,17 +354,6 @@ class NodeEmitter final : public vp::Emitter {
   LoadedNode& owner_;
 };
 
-std::pair<fs::path, std::string> parse_plugin_reference(std::string_view uses) {
-  constexpr std::string_view prefix = "native:";
-  if (!uses.starts_with(prefix)) throw std::runtime_error("Invalid native plugin reference");
-  const std::string_view body = uses.substr(prefix.size());
-  const std::size_t separator = body.rfind('#');
-  if (separator == std::string_view::npos) {
-    throw std::runtime_error("Native plugin must use native:/path/library#node-type syntax");
-  }
-  return {fs::path(std::string(body.substr(0, separator))), std::string(body.substr(separator + 1))};
-}
-
 class Runtime final {
  public:
   explicit Runtime(Plan plan) : plan_(std::move(plan)) {}
@@ -422,16 +367,8 @@ class Runtime final {
         vp::Node* raw = builtin.release();
         holder = NodeHolder(raw, [](vp::Node* node) { delete node; });
       } else if (definition.uses.starts_with("native:")) {
-        auto [path, node_type] = parse_plugin_reference(definition.uses);
-        auto library = std::make_unique<DynamicLibrary>(path);
-        const auto abi = library->symbol<vp::PluginAbiVersionFn>("nodrix_plugin_abi_version");
-        if (abi() != vp::kPluginAbiVersion) throw std::runtime_error("Nodrix plugin ABI version mismatch");
-        const auto create = library->symbol<vp::CreateNodeFn>("nodrix_create_node");
-        const auto destroy = library->symbol<vp::DestroyNodeFn>("nodrix_destroy_node");
-        vp::Node* raw = create(node_type.c_str(), definition.parameters_json.c_str());
-        if (!raw) throw std::runtime_error("Plugin refused node type: " + node_type);
-        holder = NodeHolder(raw, [destroy](vp::Node* node) { destroy(node); });
-        libraries_.push_back(std::move(library));
+        throw std::runtime_error(
+            "External Plugin C ABI 2.0 nodes execute in engine: unified");
       } else {
         throw std::runtime_error("Native engine cannot load node: " + definition.uses);
       }
@@ -635,7 +572,6 @@ class Runtime final {
 
   Plan plan_;
   std::atomic<bool> stop_{false};
-  std::vector<std::unique_ptr<DynamicLibrary>> libraries_;
   std::vector<LoadedNode> nodes_;
   std::vector<std::unique_ptr<Edge>> edges_;
   std::unordered_map<std::string, std::size_t> node_index_;

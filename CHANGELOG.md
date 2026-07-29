@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.0 — Deterministic Planning and Plugin C ABI 2.0
+- Added deterministic, secret-free `nodrix.execution-plan/v1` documents with graph hashes, resolved order, resources, memory/copy decisions and reproducibility warnings.
+- Added `nodrix inspect --plan` and persisted the same validated plan with every run.
+- Replaced the C++ object boundary with Plugin C ABI 2.0: fixed-width values, opaque handles, sized structures and function tables.
+- Added explicit buffer ownership callbacks for zero-copy native pass-through without allocator coupling.
+- Added a C++20 convenience adapter that remains entirely inside the plugin.
+- Updated native scaffolding, examples and inspection for ABI 2.0.
+- Restricted the standalone native runner to built-in `native.*` nodes; external ABI 2.0 plugins use the unified executor.
+- Removed the old `nodrix::Node*` plugin header and loader path.
+
 ## 1.5.1 — Safety and Reproducibility Hardening
 - Made optional Vision, Media and Recording providers lazy so Core remains usable without NumPy or OpenCV.
 - Made every manifest model reject unknown fields and unsupported API versions.

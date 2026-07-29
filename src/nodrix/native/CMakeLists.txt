@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(nodrix_native VERSION 1.5.1 LANGUAGES CXX)
+project(nodrix_native VERSION 1.6.0 LANGUAGES CXX)
 
 option(NODRIX_NATIVE_LTO "Enable link-time optimization" ON)
 option(NODRIX_NATIVE_MARCH_NATIVE "Tune for the build machine" OFF)
@@ -32,7 +32,7 @@ add_executable(nodrix-native-runner
   src/runner.cpp
   src/builtin_nodes.cpp
 )
-target_link_libraries(nodrix-native-runner PRIVATE nodrix_native_sdk ${CMAKE_DL_LIBS})
+target_link_libraries(nodrix-native-runner PRIVATE nodrix_native_sdk)
 target_compile_definitions(nodrix-native-runner PRIVATE NODRIX_NATIVE_VERSION="${PROJECT_VERSION}")
 nodrix_enable_sanitizers(nodrix-native-runner)
 target_compile_options(nodrix-native-runner PRIVATE

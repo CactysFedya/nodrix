@@ -17,7 +17,7 @@ except Exception:  # pragma: no cover
 
 
 class NativePluginNode(Node):
-    """Python SDK adapter for a C++ plugin in the unified executor."""
+    """Adapter for a stable Plugin C ABI 2.0 node in the unified executor."""
 
     def __init__(
         self,
