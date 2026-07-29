@@ -1,0 +1,10 @@
+use: vision.bytetrack
+track_thresh: 0.25
+low_thresh: 0.10
+new_track_thresh: 0.25
+match_iou: 0.30
+second_match_iou: 0.20
+track_buffer: 30
+min_hits: 1
+max_lost_visible: 0
+class_agnostic: false

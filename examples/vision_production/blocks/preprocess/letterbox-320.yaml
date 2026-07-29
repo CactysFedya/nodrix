@@ -1,0 +1,4 @@
+use: vision.letterbox
+imgsz: 320
+scale_up: true
+color: [114, 114, 114]

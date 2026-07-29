@@ -1,0 +1,33 @@
+name: vision-production
+profile: realtime-low-latency
+
+blocks:
+  source: blocks/sources/ffmpeg.yaml
+  preprocess: blocks/preprocess/letterbox-320.yaml
+  detector: blocks/detectors/yolo26n-ncnn.yaml
+  tracker: blocks/trackers/bytetrack.yaml
+  overlay: blocks/outputs/overlay.yaml
+  encoder: blocks/outputs/h264.yaml
+
+flow:
+  - source.frame -> preprocess.frame
+  - preprocess.frame -> detector.frame
+  - detector.detections -> tracker.detections
+  - source.frame -> overlay.frame
+  - tracker.tracks -> overlay.tracks
+  - overlay.frame -> encoder.frame
+
+streams:
+  bind_host: 0.0.0.0
+
+publish:
+  /vision/preview/h264:
+    from: encoder.encoded
+    queue:
+      capacity: 2
+      policy: latest
+  /vision/tracks:
+    from: tracker.tracks
+    queue:
+      capacity: 2
+      policy: latest

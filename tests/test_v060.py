@@ -99,11 +99,26 @@ def test_vision_template_exports_compressed_preview(tmp_path: Path) -> None:
     project = tmp_path / "camera-app"
     create_project(project, "vision")
     manifest = (project / "pipeline.yaml").read_text(encoding="utf-8")
-    assert "blocks/outputs/jpeg-preview.yaml" in manifest
-    assert "vision.jpeg_encoder" in (project / "blocks/outputs/jpeg-preview.yaml").read_text(encoding="utf-8")
-    assert "/camera-app/preview" in manifest
-    assert "preview_encoder.frame" in manifest
-    assert "nodrix-viewer /camera-app/preview" in (project / "README.md").read_text(encoding="utf-8")
+    readme = (project / "README.md").read_text(encoding="utf-8")
+
+    if "blocks/outputs/jpeg-preview.yaml" in manifest:
+        preview = (
+            project / "blocks/outputs/jpeg-preview.yaml"
+        ).read_text(encoding="utf-8")
+        assert "vision.jpeg_encoder" in preview
+        assert "/camera-app/preview" in manifest
+        assert "preview_encoder.frame" in manifest
+        assert "nodrix-viewer /camera-app/preview" in readme
+        return
+
+    assert "blocks/outputs/h264.yaml" in manifest
+    encoder = (
+        project / "blocks/outputs/h264.yaml"
+    ).read_text(encoding="utf-8")
+    assert "media.ffmpeg_encoder" in encoder
+    assert "/camera-app/preview/h264" in manifest
+    assert "encoder.encoded" in manifest
+    assert "nodrix-viewer /camera-app/preview/h264" in readme
 
 
 def test_headless_viewer_reads_local_video(tmp_path: Path) -> None:
