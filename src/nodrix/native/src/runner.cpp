@@ -35,6 +35,10 @@
 #include "nodrix/node.hpp"
 #include "nodrix/spsc_queue.hpp"
 
+#ifndef NODRIX_NATIVE_VERSION
+#define NODRIX_NATIVE_VERSION "unknown"
+#endif
+
 namespace vp = nodrix;
 namespace fs = std::filesystem;
 
@@ -649,7 +653,7 @@ int main(int argc, char** argv) {
       if (argument == "--plan" && i + 1 < argc) {
         plan_path = argv[++i];
       } else if (argument == "--version") {
-        std::cout << "nodrix-native-runner 0.6.0\n";
+        std::cout << "nodrix-native-runner " << NODRIX_NATIVE_VERSION << '\n';
         return 0;
       } else {
         throw std::runtime_error("Usage: nodrix-native-runner --plan PLAN");
