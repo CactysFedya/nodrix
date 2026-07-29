@@ -1,0 +1,76 @@
+name: vision_production
+profile: realtime-low-latency
+
+runtime:
+  metrics:
+    enabled: true
+    interval_ms: 1000
+    listen: 0.0.0.0:9464
+
+blocks:
+  source: blocks/sources/ffmpeg.yaml
+  preprocess: blocks/preprocess/letterbox-320.yaml
+  detector: blocks/detectors/yolo26n-ncnn.yaml
+  tracker: blocks/trackers/realtime-bytetrack.yaml
+  overlay: blocks/outputs/overlay.yaml
+  encoder: blocks/outputs/h264.yaml
+
+flow:
+  # Detector branch: bounded latest-frame processing.
+  - from: source.frame
+    to: preprocess.frame
+    queue:
+      capacity: 1
+      policy: latest
+  - from: preprocess.frame
+    to: detector.frame
+    queue:
+      capacity: 1
+      policy: latest
+
+  # Tracker clock: every fresh source frame, with detections as a
+  # slower side input. The tracker predicts between measurements.
+  - from: source.frame
+    to: tracker.frame
+    queue:
+      capacity: 2
+      policy: drop_oldest
+  - from: detector.detections
+    to: tracker.detections
+    queue:
+      capacity: 1
+      policy: latest
+
+  # Exact-sequence overlay keeps a small bounded frame history.
+  - from: source.frame
+    to: overlay.frame
+    queue:
+      capacity: 4
+      policy: drop_oldest
+  - from: tracker.tracks
+    to: overlay.tracks
+    queue:
+      capacity: 2
+      policy: drop_oldest
+
+  - from: overlay.frame
+    to: encoder.frame
+    queue:
+      capacity: 1
+      policy: latest
+
+streams:
+  bind_host: 0.0.0.0
+  listen_port: 7420
+
+publish:
+  /vision_production/preview/h264:
+    from: encoder.encoded
+    queue:
+      capacity: 2
+      policy: latest
+  /vision_production/tracks:
+    from: tracker.tracks
+    queue:
+      capacity: 2
+      policy: latest

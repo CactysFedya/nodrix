@@ -1,0 +1,10 @@
+use: vision.bytetrack
+
+# Compatibility tracker: emits only when detections arrive.
+backend: native
+track_thresh: 0.25
+low_thresh: 0.10
+match_iou: 0.30
+second_match_iou: 0.20
+track_buffer: 30
+min_hits: 1

@@ -1,0 +1,7 @@
+name: demo.Telemetry
+version: 1
+description: Fixed-layout telemetry passed between Python and C++
+fields:
+  sequence: uint64
+  temperature: float32
+  position: float32[3]

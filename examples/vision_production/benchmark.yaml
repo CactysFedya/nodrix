@@ -1,0 +1,19 @@
+version: 1
+pipeline: pipeline.yaml
+warmup: 1
+repeat: 3
+variants:
+  native-tracker:
+    profile: realtime-low-latency
+    set:
+      - detector.threads=3
+      - tracker.backend=native
+  python-tracker:
+    profile: realtime-low-latency
+    set:
+      - detector.threads=3
+      - tracker.backend=python
+  strict-hardware-encoder:
+    profile: realtime-low-latency
+    set:
+      - encoder.acceleration=required

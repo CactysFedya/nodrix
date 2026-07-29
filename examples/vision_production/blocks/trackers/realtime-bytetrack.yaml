@@ -1,0 +1,43 @@
+use: vision.realtime_bytetrack
+
+# Source frames drive this node. The most recent detection is a
+# slower side input and is never applied twice.
+synchronization:
+  policy: latest_available
+  trigger_port: frame
+
+# Association backend: native, auto, or python. Production requires native.
+backend: native
+
+# Confidence threshold for primary association.
+track_thresh: 0.25
+
+# Minimum confidence used by the low-score recovery stage.
+low_thresh: 0.10
+
+# IoU threshold for primary matching.
+match_iou: 0.30
+
+# IoU threshold for low-score recovery matching.
+second_match_iou: 0.20
+
+# Frames retained before an unobserved track is deleted.
+track_buffer: 60
+
+# Measurement hits required before a track is published.
+min_hits: 1
+
+# Frames a track may remain visible using prediction only.
+max_prediction_frames: 15
+
+# Score multiplier applied for every prediction-only frame.
+prediction_score_decay: 0.97
+
+# Replay delayed measurements from their matching historical state.
+delayed_measurement_replay: true
+
+# Bounded history depth used by delayed-measurement replay.
+history_frames: 60
+
+# Measurement older than history: discard or current (approximate).
+too_old_policy: discard

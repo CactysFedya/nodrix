@@ -1,0 +1,19 @@
+use: media.ffmpeg_source
+
+# Video input. Replace this test generator with an RTSP URL or file.
+uri: lavfi:testsrc=size=640x360:rate=30
+
+# Decoded frame geometry and frame clock.
+width: 640
+height: 360
+fps: 30
+
+# RTSP: tcp is reliable; udp may reduce latency but can lose packets.
+rtsp_transport: tcp
+
+# Minimize FFmpeg buffering and pace generated/file input in real time.
+low_latency: true
+realtime: true
+
+# Stop after ten seconds at 30 FPS so benchmark variants terminate.
+max_frames: 300

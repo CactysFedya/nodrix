@@ -1,0 +1,19 @@
+apiVersion: nodrix.dev/v1
+kind: Pipeline
+metadata:
+  name: custom-type-native
+runtime:
+  engine: unified
+  type_validation: always
+nodes:
+  source:
+    uses: ./nodes.py:Source
+  increment:
+    uses: native:./build/libtelemetry_plugin.so#demo.increment_temperature
+  output:
+    uses: ./nodes.py:PrintSink
+edges:
+  - from: source.output
+    to: increment.input
+  - from: increment.output
+    to: output.input

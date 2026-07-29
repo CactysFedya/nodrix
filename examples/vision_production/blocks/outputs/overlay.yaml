@@ -1,0 +1,10 @@
+use: vision.overlay
+
+# Draw the persistent track identifier.
+show_track_id: true
+
+# Draw the object class name or numeric class ID.
+show_class: true
+
+# Draw the current measured or decayed prediction score.
+show_score: true

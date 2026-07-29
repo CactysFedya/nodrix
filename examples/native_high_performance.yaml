@@ -1,0 +1,36 @@
+apiVersion: nodrix.dev/v1
+kind: Pipeline
+metadata:
+  name: native-high-performance
+runtime:
+  mode: offline
+  engine: native
+nodes:
+  source:
+    uses: native.synthetic_source
+    parameters:
+      count: 1000000
+      payload_bytes: 691200   # 640x360x3 frame-sized buffer
+      reuse_buffer: true      # one zero-copy reference-counted payload
+  stage_a:
+    uses: native.identity
+  stage_b:
+    uses: native.identity
+  sink:
+    uses: native.counter_sink
+edges:
+  - from: source.output
+    to: stage_a.input
+    queue:
+      capacity: 1024
+      policy: block
+  - from: stage_a.output
+    to: stage_b.input
+    queue:
+      capacity: 1024
+      policy: block
+  - from: stage_b.output
+    to: sink.input
+    queue:
+      capacity: 1024
+      policy: block

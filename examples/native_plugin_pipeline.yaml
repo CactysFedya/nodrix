@@ -1,0 +1,35 @@
+apiVersion: nodrix.dev/v1
+kind: Pipeline
+metadata:
+  name: native-plugin-demo
+runtime:
+  mode: offline
+  engine: native
+nodes:
+  source:
+    uses: native.synthetic_source
+    parameters:
+      count: 100000
+      payload_bytes: 4096
+      reuse_buffer: true
+  filter:
+    uses: native:${NODRIX_DEMO_PLUGIN}#demo.every_nth
+    inputs:
+      input: core.any
+    outputs:
+      output: core.any
+    parameters:
+      every: 2
+  sink:
+    uses: native.counter_sink
+edges:
+  - from: source.output
+    to: filter.input
+    queue:
+      capacity: 1024
+      policy: block
+  - from: filter.output
+    to: sink.input
+    queue:
+      capacity: 1024
+      policy: block

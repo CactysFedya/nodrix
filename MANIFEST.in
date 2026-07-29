@@ -1,0 +1,11 @@
+include README.md LICENSE NOTICE CHANGELOG.md VERIFICATION.md
+include pyproject.toml setup.py setup.cfg
+include CONTRIBUTING.md SECURITY.md SUPPORT.md CODE_OF_CONDUCT.md CITATION.cff
+recursive-include docs *.md
+recursive-include examples *.py *.cpp *.yaml *.yml *.md
+recursive-include tests *.py
+recursive-include src/nodrix/native *.hpp *.cpp CMakeLists.txt
+recursive-include wiki *.md
+recursive-include scripts *.py *.sh
+prune examples/unified_native/.nodrix
+include offline-requirements.txt
