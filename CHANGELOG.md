@@ -1,4 +1,17 @@
 # Changelog
+
+## 1.4.1 — Runtime UX and Vision Hardening
+- Kept normal Vision parameters inside self-contained block YAML files.
+- Added comments to generated source, preprocessing, detector, tracker, overlay and encoder blocks.
+- Aligned generated source rate to 15 FPS and changed the NCNN default to three threads.
+- Added a bounded four-frame source history for exact-sequence overlay.
+- Added compact graph inspection, per-node inspection and parameter documentation.
+- Added startup and encoder-selection output to `nodrix run`.
+- Reworked `nodrix top` to update one Rich Live display and separated process resources from node busy time.
+- Treated normal publisher shutdown as viewer end-of-stream.
+- Hid unreliable exact latency for chunked H.264/H.265 transport.
+- Removed unused `configs/` and `native/` directories from the ordinary Vision template.
+
 ## 1.4.0 — Benchmark and Reproducibility
 - Added the versioned `nodrix.benchmark/v1` benchmark specification and named variants.
 - Separated warm-up runs from measured runs and retained every runtime artifact.
