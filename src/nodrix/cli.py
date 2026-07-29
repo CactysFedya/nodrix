@@ -29,7 +29,13 @@ from .project_templates import TEMPLATES, create_project
 from .streams import StreamClient
 from .type_codegen import generate_type
 from .media import MediaError, media_doctor, probe_media, run_ffmpeg_relay, select_encoder
-from .recording import NdrxReader, play_recording, record_streams
+from .recording import (
+    NdrxReader,
+    RecordingError,
+    play_recording,
+    record_streams,
+    repair_recording,
+)
 from .lockfile import write_lock, verify_lock
 from .packages import build_package, install_package, list_packages, package_info, remove_package
 from .runs import list_runs, load_run, compare_runs, resolve_run
@@ -499,7 +505,7 @@ def play(
             recording, speed=speed, as_fast_as_possible=as_fast_as_possible,
             stream_prefix=prefix, loop=loop, startup_delay=startup_delay,
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecordingError) as exc:
         console.print(f"[red]Playback failed:[/red] {exc}")
         raise typer.Exit(1)
     console.print(f"[green]Played[/green] {report['messages']} messages")
@@ -545,7 +551,7 @@ def recording_info(recording: Annotated[Path, typer.Argument(exists=True, readab
     try:
         with NdrxReader(recording) as reader:
             info = reader.info()
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, RecordingError) as exc:
         console.print(f"[red]Cannot read recording:[/red] {exc}")
         raise typer.Exit(1)
     console.print(f"[bold]{info['path']}[/bold]  messages={info['messages']} size={info['size_bytes']} bytes")
@@ -553,6 +559,27 @@ def recording_info(recording: Annotated[Path, typer.Argument(exists=True, readab
     for name, spec in info.get("streams", {}).items():
         table.add_row(name or "(unnamed)", str(spec.get("type", "core.any")), str(spec.get("messages", 0)))
     console.print(table)
+
+
+@recording_app.command("repair")
+def recording_repair(
+    recording: Annotated[Path, typer.Argument(exists=True, readable=True)],
+    output: Annotated[Path, typer.Option("--output", "-o")],
+    checkpoint_records: Annotated[int, typer.Option("--checkpoint-records", min=1)] = 1024,
+) -> None:
+    """Recover complete records and write a finalized NDRX2 file."""
+    try:
+        info = repair_recording(
+            recording,
+            output,
+            checkpoint_records=checkpoint_records,
+        )
+    except (OSError, ValueError, RecordingError) as exc:
+        console.print(f"[red]Cannot repair recording:[/red] {exc}")
+        raise typer.Exit(1)
+    console.print(
+        f"[green]Repaired[/green] {info['messages']} messages to {info['path']}"
+    )
 
 
 @data_app.command("doctor")

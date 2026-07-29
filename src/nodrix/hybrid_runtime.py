@@ -25,6 +25,7 @@ from .native_plugin import NativePluginNode
 from .node import Node, NodeContext, SourceNode
 from .node_docs import validate_parameters
 from .process_host import ProcessNodeProxy, ProcessSourceProxy
+from .provenance import write_run_provenance
 from .registry import load_node_class
 from .telemetry import LatencyWindow
 from .memory import MemoryPlan, MemoryRequirement, plan_memory, requirement_for_port, memory_summary
@@ -753,12 +754,19 @@ class HybridPipelineRuntime:
         while not all(node.ready.wait(0.01) for node in self.nodes.values()):
             if self._errors:
                 break
-        execution_plan = compile_execution_plan(self.manifest, self.describe())
+        description = self.describe()
+        execution_plan = compile_execution_plan(self.manifest, description)
         execution_plan["runtime_info"] = {
             name: self._safe_runtime_info(loaded)
             for name, loaded in self.nodes.items()
         }
         write_execution_plan(execution_plan, run_dir / "resolved-plan.json")
+        write_run_provenance(
+            run_dir,
+            self.manifest,
+            self.manifest_path,
+            description,
+        )
         if not self._errors:
             self._emit_event("pipeline_running", pipeline=self.manifest.metadata.name)
         self._start.set()

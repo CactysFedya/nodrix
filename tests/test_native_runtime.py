@@ -81,7 +81,7 @@ edges:
         capture_output=True,
         text=True,
     )
-    assert version.stdout.strip() == "nodrix-native-runner 1.6.0"
+    assert version.stdout.strip() == "nodrix-native-runner 1.7.0"
     assert report["engine"] == "native-cpp20"
     assert report["status"] == "completed"
     assert report["nodes"]["stage"]["messages"] == 4096

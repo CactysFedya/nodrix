@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.0 — Crash-safe NDRX2 and Run Provenance
+- Added NDRX2 checkpoint chunks with bounded in-memory indexes and per-chunk SHA-256 integrity.
+- Made finalized checkpoints readable independently of the final summary.
+- Added recovery of complete records from an interrupted active chunk while refusing checksum corruption.
+- Added `nodrix recording repair` to copy recovered data into a finalized file without overwriting the source.
+- Preserved read compatibility with NDRX1 recordings.
+- Added packet, metadata and index limits to recording readers.
+- Added `hardware.json`, `plugins.json` and `models.json` to every unified run.
+- Included local implementation and model file sizes and SHA-256 hashes in provenance artifacts.
+
 ## 1.6.0 — Deterministic Planning and Plugin C ABI 2.0
 - Added deterministic, secret-free `nodrix.execution-plan/v1` documents with graph hashes, resolved order, resources, memory/copy decisions and reproducibility warnings.
 - Added `nodrix inspect --plan` and persisted the same validated plan with every run.
