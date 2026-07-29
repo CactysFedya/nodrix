@@ -38,8 +38,16 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,all]"
 
-      - name: Build native extensions in place
-        run: python setup.py build_ext --inplace
+      - name: Verify native extensions
+        run: |
+          python - <<'PY'
+          import nodrix._native_queue
+          import nodrix._native_buffer
+          import nodrix._native_device
+          import nodrix._native_plugin
+
+          print("All Nodrix native extensions loaded")
+          PY
 
       - name: Run tests
         run: pytest -q

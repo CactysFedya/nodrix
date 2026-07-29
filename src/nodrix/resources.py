@@ -67,11 +67,44 @@ def process_snapshot(pid: int) -> dict[str, Any] | None:
     return _ps_process(pid)
 
 
+def _physical_memory_total_bytes() -> int | None:
+    """Return installed physical memory on Linux and macOS."""
+    try:
+        pages = int(os.sysconf("SC_PHYS_PAGES"))
+        page_size = int(os.sysconf("SC_PAGE_SIZE"))
+        if pages > 0 and page_size > 0:
+            return pages * page_size
+    except (OSError, TypeError, ValueError):
+        pass
+
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                ["sysctl", "-n", "hw.memsize"],
+                capture_output=True,
+                text=True,
+                timeout=0.25,
+                check=False,
+            )
+            if result.returncode == 0:
+                value = int(result.stdout.strip())
+                if value > 0:
+                    return value
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+
+    return None
+
+
 def system_snapshot() -> dict[str, Any]:
     result: dict[str, Any] = {
         "cpu_count": os.cpu_count() or 1,
         "load_average": list(os.getloadavg()) if hasattr(os, "getloadavg") else [],
     }
+
+    physical_memory = _physical_memory_total_bytes()
+    if physical_memory is not None:
+        result["memory_total_bytes"] = physical_memory
     if sys.platform.startswith("linux"):
         try:
             values: dict[str, int] = {}

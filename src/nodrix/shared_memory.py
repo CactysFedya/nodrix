@@ -2,12 +2,63 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import hashlib
 from multiprocessing.shared_memory import SharedMemory
+import sys
 import threading
 from typing import Any
 import uuid
 
 from .cv_types import ManagedBuffer, MemoryType
+
+
+_MAX_PORTABLE_SHM_NAME = 27
+
+
+def _portable_shared_memory_name(name: str | None) -> str | None:
+    """Return a shared-memory name portable across Linux and macOS."""
+    if name is None:
+        return None
+
+    cleaned = "".join(
+        character
+        if character.isalnum() or character in {"-", "_"}
+        else "-"
+        for character in str(name).lstrip("/")
+    )
+
+    if len(cleaned) <= _MAX_PORTABLE_SHM_NAME:
+        return cleaned
+
+    digest = hashlib.blake2s(
+        cleaned.encode("utf-8"),
+        digest_size=6,
+    ).hexdigest()
+
+    prefix_length = _MAX_PORTABLE_SHM_NAME - len(digest) - 1
+    return cleaned[:prefix_length] + "-" + digest
+
+
+def _open_shared_memory(
+    *,
+    name: str | None = None,
+    create: bool = False,
+    size: int = 0,
+) -> SharedMemory:
+    """Open shared memory on Python 3.11+.
+
+    The track parameter was added in Python 3.13. Nodrix manages the
+    lifetime of its shared-memory segments explicitly, so tracking is
+    disabled when the interpreter supports that option.
+    """
+    kwargs: dict[str, Any] = {
+        "name": _portable_shared_memory_name(name),
+        "create": create,
+        "size": size,
+    }
+    if sys.version_info >= (3, 13):
+        kwargs["track"] = False
+    return SharedMemory(**kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,8 +128,8 @@ class SharedBufferPool:
         self.block_size = int(block_size)
         self.capacity = int(capacity)
         self.alignment = int(alignment)
-        self.name = name or f"nodrix-{uuid.uuid4().hex}"
-        self._shm = SharedMemory(name=self.name, create=True, size=self.block_size * self.capacity, track=False)
+        self.name = _portable_shared_memory_name(name or ("nodrix-" + uuid.uuid4().hex))
+        self._shm = _open_shared_memory(name=self.name, create=True, size=self.block_size * self.capacity)
         self.name = self._shm.name
         self._condition = threading.Condition()
         self._free = deque(range(self.capacity))
@@ -180,7 +231,7 @@ class OneShotSharedBuffer:
     """One message-sized segment used for process outputs and oversized inputs."""
 
     def __init__(self, size: int, *, readonly: bool = False) -> None:
-        self.shm = SharedMemory(create=True, size=size, track=False)
+        self.shm = _open_shared_memory(create=True, size=size)
         self.descriptor = SharedBufferDescriptor(self.shm.name, size, 0, readonly, 1)
         self.lease = SharedMemoryLease(self.shm, self.descriptor)
 
@@ -217,7 +268,7 @@ def descriptor_for_buffer(buffer: ManagedBuffer) -> SharedBufferDescriptor | Non
 
 
 def open_shared_buffer(descriptor: SharedBufferDescriptor, *, unlink: bool = False) -> ManagedBuffer:
-    shm = SharedMemory(name=descriptor.name, create=False, track=False)
+    shm = _open_shared_memory(name=descriptor.name, create=False)
     if unlink:
         try:
             shm.unlink()
