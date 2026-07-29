@@ -351,7 +351,10 @@ class NodrixStreamReader:
                     self._decoder.write(message)
                 else:
                     self.slot.put(message)
-        except (EOFError, OSError, ConnectionError) as exc:
+        except EOFError:
+            # Publisher shutdown closes the stream socket normally.
+            pass
+        except (OSError, ConnectionError) as exc:
             if not self._stop.is_set():
                 self.slot.fail(exc)
         except BaseException as exc:  # pragma: no cover - defensive reader boundary
@@ -578,6 +581,11 @@ class RollingRate:
 
 
 def _latency_ms(message: Message) -> float | None:
+    # H.264/H.265 is transported as arbitrary ordered chunks.
+    # Until decoded frames are matched to timestamped access units,
+    # a precise latency value would be misleading.
+    if message.metadata.get("decoded_from") in {"h264", "h265"}:
+        return None
     if message.timestamp_ns <= 0:
         return None
     value = (time.time_ns() - int(message.timestamp_ns)) / 1e6
@@ -610,7 +618,7 @@ def _draw_overlay(
     lines = [
         f"RX {receive_fps:5.1f} FPS   VIEW {display_fps:5.1f} FPS",
         f"{width}x{height}   seq {message.sequence}   drop {overwritten}",
-        f"latency {latency_ms:.1f} ms" if latency_ms is not None else "latency n/a (clock sync required)",
+        f"latency {latency_ms:.1f} ms" if latency_ms is not None else "latency n/a (encoded timing unavailable)",
     ]
     if publisher:
         lines.append(

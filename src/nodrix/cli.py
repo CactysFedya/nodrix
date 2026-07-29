@@ -36,6 +36,13 @@ from .benchmarking import direct_benchmark_plan, load_benchmark_plan, replay_pla
 from .validation import validate_production
 from .metrics import MetricsServer, prometheus_text
 from .profiles import profile_names
+from .node_docs import parameter_schema
+from .ux import (
+    render_node_details,
+    render_pipeline_graph,
+    render_startup_summary,
+    render_top,
+)
 
 app = typer.Typer(
     name="nodrix",
@@ -258,6 +265,7 @@ def inspect(
     live: Annotated[bool, typer.Option("--live", help="Run the graph and display live node/data-plane telemetry")] = False,
     memory: Annotated[bool, typer.Option("--memory", help="Show the static memory-domain and copy plan")] = False,
     resolved: Annotated[bool, typer.Option("--resolved", help="Print the canonical manifest after profiles and overrides")] = False,
+    node_name: Annotated[str | None, typer.Option("--node", help="Inspect one node instance")] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Write resolved YAML to a file")] = None,
     profile: Annotated[str | None, typer.Option("--profile", help="Override the manifest performance profile")] = None,
     set_values: Annotated[list[str] | None, typer.Option("--set", help="Override a resolved value: path=value")] = None,
@@ -279,6 +287,14 @@ def inspect(
                 console.print(f"[green]Written[/green] {output.resolve()}")
             else:
                 console.print(rendered, markup=False, end="")
+            return
+        if node_name is not None:
+            console.print(
+                render_node_details(details.manifest, node_name)
+            )
+            return
+        if not live and not memory:
+            console.print(render_pipeline_graph(details.manifest))
             return
         runtime = _runtime(
             pipeline,
@@ -344,6 +360,25 @@ def run(
             raise typer.Exit(1)
     metrics_server = None
     try:
+        details = load_manifest_details(
+            pipeline,
+            profile=profile,
+            overrides=set_values,
+            block_overrides=block_values,
+        )
+        console.print(render_startup_summary(details.manifest))
+        for instance, config in details.manifest.nodes.items():
+            if config.uses != "media.ffmpeg_encoder":
+                continue
+            selection = select_encoder(
+                str(config.parameters.get("codec", "h264")),
+                str(config.parameters.get("encoder", "auto")),
+            )
+            console.print(
+                f"Encoder {instance}: "
+                f"[bold]{selection.get('selected')}[/bold] — "
+                f"{selection.get('reason')}"
+            )
         runtime = _runtime(
             pipeline,
             run_root=run_root,
@@ -359,9 +394,10 @@ def run(
             metrics_server.start()
             host, port = metrics_server.address
             console.print(f"Metrics: http://{host}:{port}/metrics")
+        console.print("[green]Pipeline is running.[/green] Press Ctrl+C to stop.")
         report = runtime.run_sync() if isinstance(runtime, HybridPipelineRuntime) else asyncio.run(runtime.run())
     except KeyboardInterrupt:
-        console.print("[yellow]Interrupted; Nodrix requested graceful shutdown.[/yellow]")
+        console.print("[yellow]Shutdown requested; stopping pipeline gracefully.[/yellow]")
         raise typer.Exit(130)
     except (NodrixError, Exception) as exc:
         console.print(f"[red]Run failed:[/red] {exc}")
@@ -938,6 +974,24 @@ def node_info(reference: str, base_dir: Path = Path.cwd()) -> None:
     console.print(f"[bold]{reference}[/bold]\nClass: {cls.__module__}.{cls.__name__}")
     console.print("Inputs:", cls.input_types)
     console.print("Outputs:", cls.output_types)
+    rows = parameter_schema(reference)
+    if rows:
+        table = Table(
+            "Parameter",
+            "Type",
+            "Default",
+            "Range / values",
+            "Description",
+        )
+        for row in rows:
+            table.add_row(
+                str(row.get("name", "")),
+                str(row.get("type", "")),
+                str(row.get("default", "")),
+                str(row.get("values", "")),
+                str(row.get("description", "")),
+            )
+        console.print(table)
 
 
 @block_app.command("list")
@@ -1434,37 +1488,8 @@ def metrics_command(
         raise typer.BadParameter("--format must be json or prometheus")
 
 
-def _top_table(data: dict[str, object]) -> Table:
-    table = Table("Node", "Scope", "CPU", "Memory", "Rate", "P95", "Queue", "Drops", "Health")
-    for name, raw in dict(data.get("nodes", {})).items():
-        node = dict(raw)
-        resources = dict(node.get("resources", {}))
-        health = dict(node.get("health", {}))
-        memory_value = resources.get("rss_bytes")
-        if not memory_value:
-            memory_value = resources.get("shared_buffer_bytes") or resources.get("executor_rss_bytes")
-        table.add_row(
-            str(name),
-            str(resources.get("scope", "-")),
-            f"{float(resources.get('cpu_percent', 0.0)):.1f}%",
-            _format_bytes(memory_value),
-            f"{float(node.get('rate_hz', 0.0)):.1f} Hz",
-            f"{float(node.get('p95_ms', 0.0)):.2f} ms",
-            _format_bytes(resources.get("estimated_queue_bytes", 0)),
-            str(resources.get("input_drops", 0)),
-            str(health.get("status", "unknown")),
-        )
-    system = dict(data.get("system", {}))
-    if system:
-        footer = []
-        if system.get("memory_available_bytes") is not None:
-            footer.append(f"free {_format_bytes(system.get('memory_available_bytes'))}")
-        if system.get("temperature_c") is not None:
-            footer.append(f"temp {float(system['temperature_c']):.1f}°C")
-        if system.get("load_average"):
-            footer.append("load " + "/".join(f"{float(item):.2f}" for item in list(system["load_average"])[:3]))
-        table.caption = " | ".join(footer)
-    return table
+def _top_table(data: dict[str, object]):
+    return render_top(data)
 
 
 @app.command("top")
@@ -1475,21 +1500,41 @@ def top_command(
     interval: Annotated[float, typer.Option("--interval", min=0.1)] = 1.0,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Show CPU, memory, queues, rates and latency for every node."""
+    """Show process resources and per-node busy time."""
     selected = run_id or _latest_run_id(project)
-    while True:
+
+    def snapshot() -> dict[str, object]:
         directory = resolve_run(selected, project)
         status_path = directory / "status.json"
-        data = json.loads(status_path.read_text(encoding="utf-8")) if status_path.is_file() else load_run(selected, project)
-        if json_output:
-            console.print_json(json.dumps(data))
-            return
-        if watch:
-            console.clear()
+        if status_path.is_file():
+            return json.loads(
+                status_path.read_text(encoding="utf-8")
+            )
+        return load_run(selected, project)
+
+    data = snapshot()
+    if json_output:
+        console.print_json(json.dumps(data))
+        return
+    if not watch:
         console.print(_top_table(data))
-        if not watch:
+        return
+
+    with Live(
+        _top_table(data),
+        console=console,
+        refresh_per_second=max(2, int(1.0 / interval)),
+        transient=False,
+    ) as live_view:
+        try:
+            while True:
+                time.sleep(interval)
+                live_view.update(
+                    _top_table(snapshot()),
+                    refresh=True,
+                )
+        except KeyboardInterrupt:
             return
-        time.sleep(interval)
 
 
 @package_app.command("build")

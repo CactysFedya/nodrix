@@ -43,7 +43,7 @@ def test_v130_vision_template_uses_h264_preview(tmp_path: Path) -> None:
     assert "/production-vision/preview/h264" in manifest
     assert "overlay.frame -> encoder.frame" in manifest
     assert "encoder.encoded" in manifest
-    assert "nodrix-viewer /production-vision/preview/h264" in readme
+    assert "nodrix-viewer nodrix://DEVICE_IP:7420/production-vision/preview/h264 --overlay" in readme
 
 def test_decode_modern_yolo_feature_major_and_nms() -> None:
     output = np.zeros((84, 3), dtype=np.float32)
