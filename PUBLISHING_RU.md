@@ -20,9 +20,13 @@ source .venv/bin/activate
 python -m pip install -e ".[dev,all]"
 pytest -q
 make native-test
-python -m build
+NODRIX_BUILD_NCNN_PLUGIN=1 NODRIX_FETCH_NCNN=1 python -m build
 python -m twine check dist/*
 ```
+
+Для полной локальной NCNN-проверки используйте закреплённый исходник и
+`scripts/ncnn_smoke.py`; точная команда и модель приведены в
+`docs/NATIVE_NCNN_QUALIFICATION.md`.
 
 ## 2. Создание GitHub-репозитория
 
@@ -66,32 +70,38 @@ Repository → Settings → Environments → New environment → pypi
 
 Рекомендуется включить Required reviewers. Секрет `PYPI_TOKEN` добавлять не нужно.
 
-## 4. Релиз 2.0.0
+## 4. Релиз 2.1.0
 
-После push основного репозитория:
+Версию 2.0.0 повторно публиковать нельзя. После merge ветки 2.1.0 в `main`
+и успешного CI:
 
 ```bash
-git tag -s v2.0.0 -m "Nodrix 2.0.0"
+git switch main
+git pull --ff-only
+python3 scripts/check_release.py
+git tag -s v2.1.0 -m "Nodrix 2.1.0"
 ```
 
 Если GPG-подпись не настроена:
 
 ```bash
-git tag -a v2.0.0 -m "Nodrix 2.0.0"
+git tag -a v2.1.0 -m "Nodrix 2.1.0"
 ```
 
 Затем:
 
 ```bash
-git push origin v2.0.0
+git push origin v2.1.0
 ```
 
 GitHub Actions автоматически:
 
 1. проверит соответствие тега версии;
-2. повторит lint, полный Python suite, million-message stress и CTest;
+2. повторит lint, полный Python suite, million-message stress, CTest и
+   реальную сборку/smoke-проверку NCNN;
 3. соберёт и проверит канонический sdist;
-4. соберёт все platform wheels именно из этого sdist;
+4. соберёт все platform wheels именно из этого sdist и проверит наличие
+   нативного NCNN provider в каждом wheel;
 5. загрузит дистрибутивы на PyPI;
 6. создаст GitHub Release и приложит файлы.
 
@@ -114,10 +124,10 @@ pip install "nodrix[media]"
 ## 5. Следующие релизы
 
 ```bash
-scripts/release.sh 2.0.0
+scripts/release.sh X.Y.Z
 ```
 
-Перед запуском добавь секцию `## 2.0.0` в `CHANGELOG.md`. Скрипт обновит
+Перед запуском добавь секцию `## X.Y.Z` в `CHANGELOG.md`. Скрипт обновит
 версии, создаст commit/tag и отправит их в GitHub.
 
 PyPI запрещает перезаписывать уже опубликованную версию. Любое исправление требует новой версии.
@@ -134,9 +144,9 @@ python -m twine upload dist/*
 
 Используй project-scoped PyPI API token и не сохраняй его в репозитории или `.pypirc` внутри проекта.
 
-## Матрица 2.0.0
+## Матрица 2.x
 
 Релиз собирает wheels для Linux x86-64, Linux ARM64, macOS Apple Silicon и
 Windows x86-64. Каждый wheel обязан содержать
 `nodrix/bin/nodrix-native-runner`; macOS Intel не входит в обязательную матрицу
-2.0.0.
+2.x.

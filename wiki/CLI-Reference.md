@@ -24,6 +24,7 @@ nodrix config explain PATH --pipeline pipeline.yaml
 ## Health and artifacts
 
 ```bash
+nodrix doctor [--deep] [--json] [--provider ID]
 nodrix status
 nodrix health [--watch]
 nodrix metrics [--format json|prometheus]
@@ -33,9 +34,12 @@ nodrix runs logs RUN
 nodrix runs compare RUN_A RUN_B
 ```
 
-## Packages and native plugins
+## Providers, packages and native plugins
 
 ```bash
+nodrix provider list [--json]
+nodrix provider info ID
+nodrix provider verify ID [--production] [--trust-store DIRECTORY] [--allow ID]
 nodrix package build DIRECTORY
 nodrix package install PACKAGE.ndpkg
 nodrix package list

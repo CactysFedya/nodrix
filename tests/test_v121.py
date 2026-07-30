@@ -75,7 +75,12 @@ def test_shared_buffer_pool_reuses_block_and_closes_cleanly() -> None:
 
 def test_physical_memory_uses_sysconf_when_available(monkeypatch) -> None:
     values = {"SC_PHYS_PAGES": 1024, "SC_PAGE_SIZE": 4096}
-    monkeypatch.setattr(resources.os, "sysconf", lambda key: values[key])
+    monkeypatch.setattr(
+        resources.os,
+        "sysconf",
+        lambda key: values[key],
+        raising=False,
+    )
 
     assert resources._physical_memory_total_bytes() == 1024 * 4096
 
@@ -84,7 +89,12 @@ def test_physical_memory_uses_macos_sysctl_fallback(monkeypatch) -> None:
     def failing_sysconf(_key):
         raise OSError("not available")
 
-    monkeypatch.setattr(resources.os, "sysconf", failing_sysconf)
+    monkeypatch.setattr(
+        resources.os,
+        "sysconf",
+        failing_sysconf,
+        raising=False,
+    )
     monkeypatch.setattr(resources, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(
         resources.subprocess,
@@ -98,9 +108,21 @@ def test_physical_memory_uses_macos_sysctl_fallback(monkeypatch) -> None:
     assert resources._physical_memory_total_bytes() == 17179869184
 
 
+def test_physical_memory_uses_windows_api_fallback(monkeypatch) -> None:
+    monkeypatch.delattr(resources.os, "sysconf", raising=False)
+    monkeypatch.setattr(resources.sys, "platform", "win32")
+    monkeypatch.setattr(
+        resources,
+        "_windows_physical_memory_total_bytes",
+        lambda: 8 * 1024**3,
+    )
+
+    assert resources._physical_memory_total_bytes() == 8 * 1024**3
+
+
 def test_system_snapshot_without_posix_resource(monkeypatch) -> None:
     monkeypatch.setattr(resources, "_resource", None)
-    monkeypatch.delattr(resources.os, "getloadavg")
+    monkeypatch.delattr(resources.os, "getloadavg", raising=False)
     monkeypatch.setattr(
         resources,
         "_physical_memory_total_bytes",
@@ -117,3 +139,47 @@ def test_system_snapshot_without_posix_resource(monkeypatch) -> None:
     assert snapshot["cpu_count"] >= 1
     assert snapshot["load_average"] == []
     assert "process_max_rss_bytes" not in snapshot
+
+
+def test_ps_process_rejects_zombie_and_zero_rss(monkeypatch) -> None:
+    monkeypatch.setattr(
+        resources.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="Z 0:00.01 0 0\n",
+        ),
+    )
+
+    assert resources._ps_process(123) is None
+
+
+def test_ps_process_parses_live_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(
+        resources.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="S+ 0:01.25 64 128\n",
+        ),
+    )
+
+    assert resources._ps_process(123) == {
+        "pid": 123,
+        "cpu_time_seconds": 1.25,
+        "rss_bytes": 64 * 1024,
+        "vms_bytes": 128 * 1024,
+        "threads": None,
+    }
+
+
+def test_process_snapshot_uses_windows_api(monkeypatch) -> None:
+    expected = {
+        "pid": 123,
+        "cpu_time_seconds": 0.5,
+        "rss_bytes": 4096,
+        "vms_bytes": 8192,
+        "threads": None,
+    }
+    monkeypatch.setattr(resources.sys, "platform", "win32")
+    monkeypatch.setattr(resources, "_windows_process", lambda pid: expected if pid == 123 else None)
+
+    assert resources.process_snapshot(123) == expected

@@ -95,6 +95,20 @@ def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
         return BUILTINS[reference]
 
     if ":" not in reference:
+        # Provider API discovery is metadata-only.  The selected provider is
+        # imported here, after compatibility and trust checks, only when a
+        # pipeline actually references one of its declared Node ids.
+        from .providers import load_provider_node
+
+        provider_class = load_provider_node(reference)
+        if provider_class is not None:
+            if not issubclass(provider_class, Node):
+                raise PluginError(
+                    f"Provider Node {reference!r} is not a Nodrix Node class"
+                )
+            return provider_class
+
+    if ":" not in reference:
         raise PluginError(
             f"Unknown node {reference!r}. Use a built-in id or module.py:Class"
         )

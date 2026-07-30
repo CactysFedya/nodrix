@@ -13,7 +13,13 @@ from .memory import (
     plan_memory,
 )
 from .messages import Message
-from .errors import ManifestError, NodrixError, PluginError, RuntimeGraphError
+from .errors import (
+    ManifestError,
+    NodrixError,
+    PluginError,
+    ProviderError,
+    RuntimeGraphError,
+)
 from .manifest import (
     EdgeConfig,
     NodeConfig,
@@ -27,6 +33,19 @@ from .shared_memory import SharedBufferDescriptor, SharedBufferPool
 from .node import Node, NodeContext, SinkNode, SourceNode
 from .lifecycle import HealthStatus, LifecycleState
 from .wire import register_wire_codec
+from .provider_api import (
+    PROVIDER_API_VERSION,
+    PROVIDER_ENTRY_POINT_GROUP,
+    PROVIDER_SCHEMA,
+    FeatureNegotiation,
+    NodeDescriptor,
+    ProbeDescriptor,
+    ProviderManifest,
+    ProviderMetadata,
+    ProviderRuntime,
+    TemplateDescriptor,
+    negotiate_features,
+)
 
 __all__ = [
     "Message",
@@ -62,7 +81,19 @@ __all__ = [
     "NodrixError",
     "ManifestError",
     "PluginError",
+    "ProviderError",
     "RuntimeGraphError",
+    "PROVIDER_API_VERSION",
+    "PROVIDER_ENTRY_POINT_GROUP",
+    "PROVIDER_SCHEMA",
+    "ProviderMetadata",
+    "NodeDescriptor",
+    "ProbeDescriptor",
+    "TemplateDescriptor",
+    "ProviderManifest",
+    "ProviderRuntime",
+    "FeatureNegotiation",
+    "negotiate_features",
 ]
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"

@@ -20,6 +20,8 @@ except ImportError:  # pragma: no cover - Windows
 DISCOVERY_GROUP = "239.255.77.77"
 DISCOVERY_PORT = 47777
 DISCOVERY_PROTOCOL = "nodrix-discovery/1"
+_LOCAL_ADVERTISEMENTS_LOCK = threading.Lock()
+_LOCAL_ADVERTISEMENTS: dict[str, dict[str, Any]] = {}
 
 
 def _local_ipv4_interfaces() -> list[str]:
@@ -74,13 +76,10 @@ def _local_ipv4_interfaces() -> list[str]:
                     addresses.add(address)
         except (OSError, subprocess.SubprocessError):
             pass
-    try:
-        for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM):
-            addresses.add(item[4][0])
-    except OSError:
-        pass
     # A route probe does not transmit traffic; it asks the kernel which local
     # address it would use and helps on platforms where ioctl is unavailable.
+    # Do not resolve the hostname here: getaddrinfo() may block indefinitely
+    # when a CI runner or an offline edge device has broken DNS.
     try:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
@@ -146,6 +145,56 @@ class DiscoveredStream:
     metadata: dict[str, Any] | None = None
 
 
+def _collect_advertisement(
+    message: Any,
+    *,
+    source_host: str,
+    name: str | None,
+    found: dict[tuple[str, str], DiscoveredStream],
+) -> None:
+    if (
+        not isinstance(message, dict)
+        or message.get("protocol") != DISCOVERY_PROTOCOL
+        or message.get("kind") != "advertisement"
+    ):
+        return
+    endpoint = message.get("endpoint") or {}
+    endpoint_host = endpoint.get("host") or source_host
+    if endpoint_host in {"0.0.0.0", "::", ""}:
+        endpoint_host = source_host
+    try:
+        endpoint_port = int(endpoint.get("port", 0))
+    except (TypeError, ValueError):
+        return
+    if not 0 < endpoint_port <= 65535:
+        return
+    endpoint_scheme = str(endpoint.get("scheme", "nodrix"))
+    if endpoint_scheme not in {"nodrix", "nodrix+tls"}:
+        return
+    for stream in message.get("streams") or []:
+        if not isinstance(stream, dict):
+            continue
+        stream_name = str(stream.get("name", ""))
+        if not stream_name or (
+            name is not None and stream_name != name
+        ):
+            continue
+        item = DiscoveredStream(
+            name=stream_name,
+            type=str(stream.get("type", "core.any")),
+            host=str(message.get("host", endpoint_host)),
+            pipeline=str(message.get("pipeline", "")),
+            instance_id=str(message.get("instance_id", "")),
+            endpoint=(
+                f"{endpoint_scheme}://{endpoint_host}:"
+                f"{endpoint_port}{stream_name}"
+            ),
+            codec=str(stream.get("codec", "nodrix-wire/1")),
+            metadata=dict(stream.get("metadata") or {}),
+        )
+        found[(item.instance_id, item.name)] = item
+
+
 class DiscoveryAdvertiser:
     """Zero-configuration LAN stream advertisement.
 
@@ -180,26 +229,31 @@ class DiscoveryAdvertiser:
             return
         self._sock, self._interfaces = _discovery_socket(bind=True)
         self._sock.setblocking(False)
+        with _LOCAL_ADVERTISEMENTS_LOCK:
+            _LOCAL_ADVERTISEMENTS[self.instance_id] = (
+                self._advertisement_data()
+            )
         self._thread = threading.Thread(target=self._run, name="nodrix-discovery", daemon=True)
         self._thread.start()
 
+    def _advertisement_data(self) -> dict[str, Any]:
+        return {
+            "protocol": DISCOVERY_PROTOCOL,
+            "kind": "advertisement",
+            "instance_id": self.instance_id,
+            "host": socket.gethostname(),
+            "pipeline": self.pipeline,
+            "endpoint": {
+                "host": "0.0.0.0",
+                "port": self.endpoint_port,
+                "scheme": self.endpoint_scheme,
+            },
+            "streams": self.streams(),
+            "expires_ms": int(self.interval * 3000),
+        }
+
     def _advertisement(self) -> bytes:
-        return _packet(
-            {
-                "protocol": DISCOVERY_PROTOCOL,
-                "kind": "advertisement",
-                "instance_id": self.instance_id,
-                "host": socket.gethostname(),
-                "pipeline": self.pipeline,
-                "endpoint": {
-                    "host": "0.0.0.0",
-                    "port": self.endpoint_port,
-                    "scheme": self.endpoint_scheme,
-                },
-                "streams": self.streams(),
-                "expires_ms": int(self.interval * 3000),
-            }
-        )
+        return _packet(self._advertisement_data())
 
     def _send(self) -> None:
         if self._sock is None:
@@ -234,6 +288,8 @@ class DiscoveryAdvertiser:
 
     def close(self) -> None:
         self._stop.set()
+        with _LOCAL_ADVERTISEMENTS_LOCK:
+            _LOCAL_ADVERTISEMENTS.pop(self.instance_id, None)
         if self._thread is not None:
             self._thread.join(timeout=1.5)
             self._thread = None
@@ -254,6 +310,17 @@ def discover_streams(timeout: float = 1.2, name: str | None = None) -> list[Disc
         pass
     deadline = time.monotonic() + max(0.05, timeout)
     found: dict[tuple[str, str], DiscoveredStream] = {}
+    with _LOCAL_ADVERTISEMENTS_LOCK:
+        local_advertisements = tuple(
+            _LOCAL_ADVERTISEMENTS.values()
+        )
+    for message in local_advertisements:
+        _collect_advertisement(
+            message,
+            source_host="127.0.0.1",
+            name=name,
+            found=found,
+        )
     try:
         while time.monotonic() < deadline:
             remaining = deadline - time.monotonic()
@@ -268,31 +335,12 @@ def discover_streams(timeout: float = 1.2, name: str | None = None) -> list[Disc
                 message = json.loads(raw.decode("utf-8"))
             except (OSError, ValueError, UnicodeDecodeError):
                 continue
-            if message.get("protocol") != DISCOVERY_PROTOCOL or message.get("kind") != "advertisement":
-                continue
-            endpoint = message.get("endpoint") or {}
-            endpoint_host = endpoint.get("host") or address[0]
-            if endpoint_host in {"0.0.0.0", "::", ""}:
-                endpoint_host = address[0]
-            endpoint_port = int(endpoint.get("port", 0))
-            endpoint_scheme = str(endpoint.get("scheme", "nodrix"))
-            if endpoint_scheme not in {"nodrix", "nodrix+tls"}:
-                continue
-            for stream in message.get("streams") or []:
-                stream_name = str(stream.get("name", ""))
-                if not stream_name or (name is not None and stream_name != name):
-                    continue
-                item = DiscoveredStream(
-                    name=stream_name,
-                    type=str(stream.get("type", "core.any")),
-                    host=str(message.get("host", endpoint_host)),
-                    pipeline=str(message.get("pipeline", "")),
-                    instance_id=str(message.get("instance_id", "")),
-                    endpoint=f"{endpoint_scheme}://{endpoint_host}:{endpoint_port}{stream_name}",
-                    codec=str(stream.get("codec", "nodrix-wire/1")),
-                    metadata=dict(stream.get("metadata") or {}),
-                )
-                found[(item.instance_id, item.name)] = item
+            _collect_advertisement(
+                message,
+                source_host=address[0],
+                name=name,
+                found=found,
+            )
     finally:
         sock.close()
     return sorted(found.values(), key=lambda item: (item.host, item.pipeline, item.name))

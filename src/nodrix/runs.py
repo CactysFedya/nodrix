@@ -49,11 +49,21 @@ def resolve_run(run_id: str, project: str | Path = ".") -> Path:
 
 def load_run(run_id: str, project: str | Path = ".") -> dict[str, Any]:
     directory = resolve_run(run_id, project)
-    for name in ("summary.json", "run.json"):
+    for name in ("status.json", "summary.json", "run.json"):
         path = directory / name
         if path.is_file():
-            return json.loads(path.read_text(encoding="utf-8"))
-    raise FileNotFoundError(f"Run report not found in {directory}")
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+    return {
+        "run_dir": str(directory),
+        "id": directory.name,
+        "status": "starting",
+        "nodes": {},
+        "edges": [],
+        "streams": {},
+    }
 
 
 def _metric(first: float, second: float) -> dict[str, float | None]:

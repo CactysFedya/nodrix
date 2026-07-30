@@ -118,6 +118,10 @@ def _byte_view(value: Any) -> memoryview:
     view = memoryview(value)
     if not view.contiguous:
         raise ValueError("Nodrix network payloads must be contiguous")
+    # Python rejects cast() for zero-sized dimensions. Empty detections,
+    # tracks and embeddings are valid messages and serialize as empty bytes.
+    if view.nbytes == 0:
+        return memoryview(b"")
     return view if view.format == "B" else view.cast("B")
 
 

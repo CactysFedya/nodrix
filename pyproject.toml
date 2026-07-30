@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodrix"
-version = "2.0.0"
+version = "2.1.0"
 description = "High-performance typed runtime for local and distributed streaming graphs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -67,6 +67,7 @@ dev = [
   "build>=1.2",
   "cibuildwheel>=3.4.1,<4",
   "pytest>=8.0",
+  "pytest-timeout>=2.4",
   "ruff>=0.12",
   "twine>=6.1",
 ]
@@ -92,17 +93,23 @@ where = ["src"]
 nodrix = [
   "bin/nodrix-native-runner",
   "bin/nodrix-native-runner.exe",
+  "bin/libnodrix_ncnn_detector.so",
+  "bin/libnodrix_ncnn_detector.dylib",
+  "bin/nodrix_ncnn_detector.dll",
   "native/CMakeLists.txt",
   "native/include/nodrix/*.h",
   "native/include/nodrix/*.hpp",
   "native/src/*.cpp",
   "native/examples/*.cpp",
   "native/tests/*.cpp",
+  "native/tests/fake_ncnn/*.h",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+timeout = 60
+timeout_method = "thread"
 
 [tool.ruff]
 target-version = "py311"
@@ -116,7 +123,8 @@ select = ["E4", "E7", "E9", "F"]
 build = "cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux*"
 build-verbosity = 1
-test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix; from nodrix.native_runtime import NativeToolchain; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == 'nodrix-native-runner 2.0.0'\" && nodrix --version"
+environment = { NODRIX_BUILD_NCNN_PLUGIN = "1", NODRIX_FETCH_NCNN = "1" }
+test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix; from nodrix.native_runtime import NativeToolchain; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == 'nodrix-native-runner 2.1.0'; root=Path(nodrix.__file__).resolve().parent/'bin'; assert any(root.glob('*ncnn_detector*')), root\" && nodrix --version"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"

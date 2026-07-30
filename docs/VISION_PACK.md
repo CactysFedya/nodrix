@@ -18,13 +18,18 @@ Parameters:
 - `color`: scalar or BGR triplet, default `[114, 114, 114]`;
 - `interpolation`: optional OpenCV interpolation constant.
 
-### `vision.ncnn_detector`
+### `vision.ncnn_detector_native`
 
 Loads one NCNN `.param`/`.bin` pair and emits `Detections` in source-frame pixel
 coordinates. `model` can name a directory, `.param`, `.bin`, or a common file
 prefix. Explicit `param` and `bin` are also supported.
 
-The decoder supports:
+This is the production backend. BGR8 validation, preprocessing, NCNN
+inference, output decode, class filtering, and NMS execute in C++ through
+Plugin C ABI 2. The adapter validates exact geometry, stride, shape, dtype,
+channels, and payload length before inference.
+
+The C++ decoder supports:
 
 - `N x 6` output: `x1, y1, x2, y2, score, class_id`;
 - `N x (4 + classes)` modern Ultralytics output;
@@ -34,14 +39,22 @@ The decoder supports:
 Important parameters:
 
 - `model`, or `param` + `bin`;
+- `imgsz` matching the preceding letterbox block;
 - `labels` or `labels_file`;
 - `conf`, `iou`, `max_det`;
-- `threads`, `use_vulkan`;
+- `threads`, `backend: cpu|auto`;
 - `input_blob`, `output_blob` when model names cannot be discovered;
 - `has_objectness`, `num_classes`, `classes`, `class_agnostic`.
 
-The initial backend uses the NCNN Python binding. It is a production functional
-baseline, not yet the future C ABI/native inference implementation.
+The official platform wheel contains the native library. No Python NCNN
+binding or separate Python process is used.
+
+### `vision.ncnn_detector`
+
+This compatible reference backend uses the Python NCNN binding and retains
+`auto|cpu|vulkan` selection. Use it for model comparison, Vulkan experiments,
+or platforms without the official native provider. Install it explicitly with
+`nodrix[vision-ncnn]`.
 
 ### `vision.bytetrack`
 
@@ -64,25 +77,25 @@ and emits a new immutable BGR8 frame.
 
 ## Memory behavior
 
-The 1.3.0 reference path is explicit host memory:
+The production path is explicit host memory:
 
 ```text
-FFmpeg pipe BGR8 -> OpenCV letterbox -> NCNN Python binding
-                 -> metadata detections/tracks
+FFmpeg BGR8 -> OpenCV letterbox -> NCNN C++ / decode / NMS
+             -> compact NDT2 -> typed detections/tracks
 original BGR8 -> OpenCV overlay -> FFmpeg encoder pipe
 ```
 
 Large buffers are not serialized between in-process nodes, but letterbox and
-overlay necessarily create new image buffers. The NCNN binding may perform its
-own layout/import conversion. Nodrix does not describe this path as end-to-end
-zero-copy.
+overlay necessarily create new image buffers. NCNN imports BGR8 pixels into
+its tensor storage, and compact detections cross the C ABI. Nodrix therefore
+does not describe this path as end-to-end zero-copy.
 
 ## Failure and overload behavior
 
 - every edge remains bounded by the normal Nodrix queue contract;
 - `latest` is recommended for live preview edges;
 - missing model files fail during node startup;
-- missing optional NCNN/OpenCV dependencies fail with actionable messages;
+- missing native provider/OpenCV dependencies fail with actionable messages;
 - malformed model output fails instead of silently producing wrong boxes;
 - tracker state is bounded by `track_buffer` and the incoming object count.
 

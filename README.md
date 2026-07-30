@@ -1,4 +1,4 @@
-# Nodrix 2.0.0
+# Nodrix 2.1.0
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -8,7 +8,35 @@
 Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
 
 
-## Nodrix 2.0 highlights
+## Nodrix 2.1 highlights
+
+Nodrix 2.1 adds Provider API 1: independently installed providers are
+discovered from signed metadata, checked for API/version/features and trust,
+then imported lazily only when selected. Existing Core, Media, Vision,
+Recording and ROS 2 Node ids continue through a compatibility adapter.
+
+```bash
+nodrix provider list
+nodrix provider verify example.echo
+nodrix doctor --provider ros2
+nodrix doctor --deep --json
+```
+
+Production pipelines verify provider signatures and explicit allowlist
+membership before executing provider import-time code.
+
+The official Vision provider adds a native NCNN production block:
+
+```yaml
+use: vision.ncnn_detector_native
+model: models/yolo26n_ncnn_model
+imgsz: 320
+threads: 4
+```
+
+Preprocessing, NCNN inference, YOLO decoding, filtering, and NMS execute in
+C++ through Plugin C ABI 2. The previous `vision.ncnn_detector` remains the
+Python reference backend.
 
 Nodrix 2.0 establishes stable Manifest v2, Python SDK and Plugin C ABI 2
 contracts while keeping existing Manifest v1 pipelines readable. It adds
@@ -78,13 +106,15 @@ Optional media and viewer dependencies:
 ```bash
 pip install "nodrix[viewer]"
 pip install "nodrix[media]"
-pip install "nodrix[vision-ncnn,media,viewer]"
+pip install "nodrix[vision,media,viewer]"
 ```
 
+Use `nodrix[vision-ncnn]` only when the Python NCNN reference backend is also
+required. Official wheels already contain the native NCNN provider.
 
 ### Raspberry Pi and offline source installation
 
-Nodrix 2.0.0 can be built without PyPI build isolation when the runtime dependencies are already present:
+Nodrix 2.1.0 can be built without PyPI build isolation when the runtime dependencies are already present:
 
 ```bash
 python3 -m pip install . --no-build-isolation --no-deps
@@ -100,9 +130,11 @@ pipx install nodrix
 
 Release wheels cover Linux x86-64, Linux ARM64, macOS Apple Silicon, and
 Windows x86-64. Each wheel contains the native extensions and
-`nodrix/bin/nodrix-native-runner`; production execution does not compile code
-on first use. When no compatible wheel exists, building the included source
-distribution requires CMake, a C++20 compiler, and Python development headers.
+`nodrix/bin/nodrix-native-runner` plus the native NCNN provider; production
+execution does not compile code on first use. When no compatible wheel exists,
+building the included source distribution requires CMake, a C++20 compiler,
+and Python development headers. Native NCNN source builds are opt-in as
+documented in [the 2.1 release notes](docs/RELEASE_2.1.0.md).
 
 ## Empty project and templates
 
@@ -343,6 +375,8 @@ See [docs/BLOCKS.md](docs/BLOCKS.md),
 [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md),
 [docs/BENCHMARKING.md](docs/BENCHMARKING.md),
 [docs/MULTI_RATE_VISION.md](docs/MULTI_RATE_VISION.md),
+[docs/PROVIDER_API.md](docs/PROVIDER_API.md),
+[docs/RELEASE_2.1.0.md](docs/RELEASE_2.1.0.md),
 [docs/RELEASE_2.0.0.md](docs/RELEASE_2.0.0.md),
 [CONTRIBUTING.md](CONTRIBUTING.md), and
 [PUBLISHING_RU.md](PUBLISHING_RU.md).

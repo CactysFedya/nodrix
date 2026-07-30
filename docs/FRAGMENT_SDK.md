@@ -15,7 +15,7 @@ outputs:
   tracks: tracker.tracks
 nodes:
   detector:
-    uses: vision.ncnn_detector
+    uses: vision.ncnn_detector_native
   tracker:
     uses: vision.realtime_bytetrack
 edges:

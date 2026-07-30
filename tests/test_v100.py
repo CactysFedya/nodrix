@@ -114,7 +114,7 @@ def test_local_package_build_install_and_resolve(tmp_path: Path, monkeypatch: py
     installed = install_package(archive)
     assert installed["name"] == "demo-pack"
     resolved = resolve_package_node("demo-pack/demo")
-    assert resolved.endswith("python/node.py:Demo")
+    assert resolved.replace("\\", "/").endswith("python/node.py:Demo")
     cls = load_node_class("demo-pack/demo")
     assert issubclass(cls, Node)
 

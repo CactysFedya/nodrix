@@ -105,6 +105,49 @@ def test_zero_configuration_discovery() -> None:
         publisher.close()
 
 
+def test_process_local_discovery_survives_blocked_multicast(
+    monkeypatch,
+) -> None:
+    import nodrix.discovery as discovery
+
+    monkeypatch.setattr(
+        discovery.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("discovery must not depend on hostname DNS")
+        ),
+    )
+    monkeypatch.setattr(
+        discovery,
+        "_send_multicast",
+        lambda _sock, _interfaces, _data: None,
+    )
+    publisher = StreamPublisher(
+        "local-discovery-test",
+        [{
+            "name": "/test/local-discovery",
+            "source": "source.output",
+            "type": "core.object",
+        }],
+    )
+    publisher.start()
+    try:
+        streams = discover_streams(
+            timeout=0.05,
+            name="/test/local-discovery",
+        )
+        assert len(streams) == 1
+        assert streams[0].endpoint.startswith(
+            "nodrix://127.0.0.1:"
+        )
+    finally:
+        publisher.close()
+    assert discover_streams(
+        timeout=0.05,
+        name="/test/local-discovery",
+    ) == []
+
+
 def test_custom_type_codegen_python_cpp_and_wire(tmp_path: Path) -> None:
     schema = tmp_path / "tracked.yaml"
     schema.write_text(

@@ -42,8 +42,8 @@ def main() -> int:
     text = re.sub(r"nodrix\[viewer\]==[0-9A-Za-z.-]+", f"nodrix[viewer]=={version}", text)
     text = re.sub(r"nodrix\[media,viewer\]==[0-9A-Za-z.-]+", f"nodrix[media,viewer]=={version}", text)
     text = re.sub(
-        r"nodrix\[vision-ncnn,media,viewer\]==[0-9A-Za-z.-]+",
-        f"nodrix[vision-ncnn,media,viewer]=={version}",
+        r"nodrix\[vision,media,viewer\]==[0-9A-Za-z.-]+",
+        f"nodrix[vision,media,viewer]=={version}",
         text,
     )
     templates.write_text(text, encoding="utf-8")

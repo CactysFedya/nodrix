@@ -10,6 +10,14 @@ import sysconfig
 from setuptools import Extension, setup
 from setuptools.command.build_py import build_py
 
+
+def _enabled(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 compile_args: list[str] = []
 link_args: list[str] = []
 if os.name == "nt":
@@ -47,6 +55,10 @@ class BuildPyWithNativeRunner(build_py):
             "-DCMAKE_BUILD_TYPE=Release",
             "-DNODRIX_BUILD_EXAMPLE_PLUGIN=OFF",
             "-DNODRIX_BUILD_TESTS=OFF",
+            "-DNODRIX_BUILD_NCNN_PLUGIN="
+            + ("ON" if _enabled("NODRIX_BUILD_NCNN_PLUGIN") else "OFF"),
+            "-DNODRIX_FETCH_NCNN="
+            + ("ON" if _enabled("NODRIX_FETCH_NCNN") else "OFF"),
             "-DNODRIX_NATIVE_LTO=ON",
             "-DNODRIX_NATIVE_MARCH_NATIVE=OFF",
         ]
@@ -67,6 +79,12 @@ class BuildPyWithNativeRunner(build_py):
         if sys.platform == "darwin" and architectures:
             configure.append(
                 "-DCMAKE_OSX_ARCHITECTURES=" + ";".join(architectures)
+            )
+        ncnn_source = os.environ.get("NODRIX_NCNN_SOURCE_DIR")
+        if ncnn_source:
+            configure.append(
+                "-DNODRIX_NCNN_SOURCE_DIR="
+                + str(Path(ncnn_source).expanduser().resolve())
             )
         subprocess.run(configure, check=True)
         subprocess.run(
@@ -100,6 +118,46 @@ class BuildPyWithNativeRunner(build_py):
         shutil.copy2(runner, destination)
         if os.name != "nt":
             destination.chmod(destination.stat().st_mode | 0o755)
+
+        if _enabled("NODRIX_BUILD_NCNN_PLUGIN"):
+            plugin_name = (
+                "nodrix_ncnn_detector.dll"
+                if os.name == "nt"
+                else (
+                    "libnodrix_ncnn_detector.dylib"
+                    if sys.platform == "darwin"
+                    else "libnodrix_ncnn_detector.so"
+                )
+            )
+            plugin_candidates = (
+                build / plugin_name,
+                build / "Release" / plugin_name,
+            )
+            plugin = next(
+                (
+                    path
+                    for path in plugin_candidates
+                    if path.is_file()
+                ),
+                None,
+            )
+            if plugin is None:
+                raise RuntimeError(
+                    "CMake did not produce the native NCNN provider: "
+                    f"{plugin_candidates}"
+                )
+            plugin_destination = (
+                Path(self.build_lib) / "nodrix" / "bin" / plugin.name
+            )
+            plugin_destination.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            shutil.copy2(plugin, plugin_destination)
+            if os.name != "nt":
+                plugin_destination.chmod(
+                    plugin_destination.stat().st_mode | 0o755
+                )
 
 
 setup(

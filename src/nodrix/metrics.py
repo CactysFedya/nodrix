@@ -119,7 +119,11 @@ class MetricsServer:
                 self.send_header("Content-Type", content_type)
                 self.send_header("Content-Length", str(len(payload)))
                 self.end_headers()
-                self.wfile.write(payload)
+                try:
+                    self.wfile.write(payload)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    # A client may disconnect after reading the headers.
+                    return
 
             def log_message(self, format: str, *args: Any) -> None:
                 return

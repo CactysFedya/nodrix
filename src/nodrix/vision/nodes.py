@@ -9,6 +9,7 @@ import yaml
 
 from ..cv_types import BoxFormat, CoordinateSpace, Detections, Frame, PixelFormat, Tracks
 from ..messages import Message
+from ..native_plugin import NativePluginNode
 from ..node import Node, NodeContext
 from ..registry import register_builtin
 from .geometry import decode_yolo_output, restore_letterbox_boxes
@@ -203,6 +204,128 @@ class LetterboxNode(Node):
                     "letterbox": letterbox,
                 },
             )
+        }
+
+
+def _packaged_ncnn_plugin() -> Path:
+    override = os.environ.get("NODRIX_NCNN_PLUGIN")
+    if override:
+        path = Path(override).expanduser().resolve()
+        if path.is_file():
+            return path
+        raise FileNotFoundError(
+            f"NODRIX_NCNN_PLUGIN does not exist: {path}"
+        )
+
+    package_root = Path(__file__).resolve().parents[1]
+    candidates = (
+        package_root / "bin" / "libnodrix_ncnn_detector.so",
+        package_root / "bin" / "libnodrix_ncnn_detector.dylib",
+        package_root / "bin" / "nodrix_ncnn_detector.dll",
+        package_root / "bin" / "nodrix_ncnn_detector.so",
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    raise RuntimeError(
+        "The packaged native NCNN detector is unavailable. Install a "
+        "platform wheel containing the native provider, build with "
+        "NODRIX_BUILD_NCNN_PLUGIN=1, or set NODRIX_NCNN_PLUGIN. "
+        "The compatible Python reference remains vision.ncnn_detector."
+    )
+
+
+@register_builtin("vision.ncnn_detector_native")
+class NativeNcnnDetectorNode(NativePluginNode):
+    """NCNN C++ inference, YOLO decoding and NMS through Plugin C ABI 2."""
+
+    input_types = {"frame": "vision.frame"}
+    output_types = {"detections": "vision.detections"}
+    input_memory = {"frame": ["cpu", "shared"]}
+    output_memory = {"detections": "cpu"}
+    optional_inputs = frozenset()
+
+    def __init__(self, parameters: dict[str, Any] | None = None) -> None:
+        values = dict(parameters or {})
+        values.setdefault("imgsz", 320)
+        values.setdefault("backend", "cpu")
+        values.setdefault(
+            "threads",
+            min(max(os.cpu_count() or 1, 1), 4),
+        )
+        super().__init__(
+            _packaged_ncnn_plugin(),
+            "vision.ncnn_detector",
+            values,
+            defer_host=True,
+        )
+        self.native_labels: tuple[str, ...] | None = None
+
+    def open(self, context: NodeContext) -> None:
+        param_path, bin_path = resolve_ncnn_model(
+            self.parameters,
+            context.project_dir,
+        )
+        self.parameters["param"] = str(param_path)
+        self.parameters["bin"] = str(bin_path)
+        self.native_labels = _load_labels(
+            self.parameters,
+            context.project_dir,
+        )
+        super().open(context)
+
+    def process(
+        self,
+        inputs: dict[str, Message],
+    ) -> dict[str, Message] | None:
+        source = inputs.get("frame")
+        frame = None if source is None else source.payload
+        if not isinstance(frame, Frame):
+            raise TypeError(
+                "vision.ncnn_detector_native expects a nodrix.Frame"
+            )
+        width, height = _target_size(self.parameters)
+        expected_stride = width * 3
+        stride = frame.stride or expected_stride
+        channels = frame.channels or 3
+        expected_shape = (height, width, 3)
+        if frame.width != width or frame.height != height:
+            raise ValueError(
+                "vision.ncnn_detector_native frame geometry "
+                f"{frame.width}x{frame.height} does not match "
+                f"configured {width}x{height}"
+            )
+        if frame.pixel_format != PixelFormat.BGR8:
+            raise ValueError(
+                "vision.ncnn_detector_native requires BGR8 input"
+            )
+        if frame.dtype != "uint8" or channels != 3:
+            raise ValueError(
+                "vision.ncnn_detector_native requires HxWx3 uint8 input"
+            )
+        if stride != expected_stride:
+            raise ValueError(
+                "vision.ncnn_detector_native requires tightly packed rows"
+            )
+        if frame.shape is not None and tuple(frame.shape) != expected_shape:
+            raise ValueError(
+                "vision.ncnn_detector_native frame shape does not match "
+                f"{expected_shape}"
+            )
+        expected_size = height * expected_stride
+        if frame.buffer.nbytes != expected_size:
+            raise ValueError(
+                "vision.ncnn_detector_native payload size "
+                f"{frame.buffer.nbytes} does not match {expected_size}"
+            )
+        return super().process(inputs)
+
+    def runtime_info(self) -> dict[str, Any]:
+        return {
+            "backend": "ncnn-cpp",
+            "native": True,
+            "threads": int(self.parameters["threads"]),
+            "model": str(self.parameters.get("model", "")),
         }
 
 

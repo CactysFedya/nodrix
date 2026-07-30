@@ -34,14 +34,6 @@ from .discovery import discover_streams, resolve_stream
 from .project_templates import TEMPLATES, create_project
 from .streams import StreamClient
 from .type_codegen import generate_type
-from .media import MediaError, media_doctor, probe_media, run_ffmpeg_relay, select_encoder
-from .recording import (
-    NdrxReader,
-    RecordingError,
-    play_recording,
-    record_streams,
-    repair_recording,
-)
 from .lockfile import write_lock, verify_lock
 from .packages import (
     build_package,
@@ -92,6 +84,7 @@ runs_app = typer.Typer(help="Inspect reproducible run artifacts.")
 config_app = typer.Typer(help="Inspect resolved profiles and configuration values.")
 block_app = typer.Typer(help="List and inspect reusable YAML node blocks.")
 fragment_app = typer.Typer(help="Create and validate reusable typed subgraphs.")
+provider_app = typer.Typer(help="Discover and verify installed Provider API 1 distributions.")
 app.add_typer(node_app, name="node")
 app.add_typer(stream_app, name="stream")
 app.add_typer(native_app, name="native")
@@ -106,6 +99,7 @@ app.add_typer(runs_app, name="runs")
 app.add_typer(config_app, name="config")
 app.add_typer(block_app, name="block")
 app.add_typer(fragment_app, name="fragment")
+app.add_typer(provider_app, name="provider")
 console = Console()
 
 
@@ -148,6 +142,204 @@ def root(
         console.print(ctx.get_help())
 
 
+def _provider_policy(
+    *,
+    production: bool,
+    trust_store: Path | None,
+    allow: list[str] | None,
+):
+    from .providers import ProviderPolicy
+
+    return ProviderPolicy.from_environment(
+        production=production,
+        trust_store=trust_store,
+        allowlist=allow,
+    )
+
+
+@provider_app.command("list")
+def provider_list_command(
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print machine-readable JSON"),
+    ] = False,
+    production: Annotated[
+        bool,
+        typer.Option("--production", help="Apply production trust policy"),
+    ] = False,
+    trust_store: Annotated[
+        Path | None,
+        typer.Option("--trust-store", help="Directory containing trusted Ed25519 public keys"),
+    ] = None,
+    allow: Annotated[
+        list[str] | None,
+        typer.Option("--allow", help="Production provider id; repeatable"),
+    ] = None,
+) -> None:
+    """List provider metadata without importing provider packages."""
+    from .providers import provider_records
+
+    try:
+        records = provider_records(
+            policy=_provider_policy(
+                production=production,
+                trust_store=trust_store,
+                allow=allow,
+            )
+        )
+    except Exception as exc:
+        console.print(f"[red]Provider discovery failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(records))
+        return
+    table = Table("Provider", "Version", "Source", "Status", "Features")
+    for item in records:
+        table.add_row(
+            item["id"],
+            str(item["version"]),
+            item["source"],
+            item["verification"]["status"],
+            ", ".join(item["features"]) or "-",
+        )
+    console.print(table)
+
+
+@provider_app.command("info")
+def provider_info_command(
+    provider_id: Annotated[str, typer.Argument(help="Provider id or unambiguous suffix")],
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+    production: Annotated[bool, typer.Option("--production")] = False,
+    trust_store: Annotated[Path | None, typer.Option("--trust-store")] = None,
+    allow: Annotated[list[str] | None, typer.Option("--allow")] = None,
+) -> None:
+    """Show one provider's metadata and trust state without importing it."""
+    from .providers import provider_record, resolve_provider
+
+    try:
+        candidate = resolve_provider(provider_id)
+        record = provider_record(
+            candidate,
+            policy=_provider_policy(
+                production=production,
+                trust_store=trust_store,
+                allow=allow,
+            ),
+        )
+    except Exception as exc:
+        console.print(f"[red]Provider info failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(record))
+        return
+    console.print(f"[bold]{record['id']}[/bold] {record['version']}")
+    console.print(f"Distribution: {record['distribution']} ({record['source']})")
+    console.print(f"Provider API: {record['provider_api']}")
+    console.print(f"Requires Nodrix: {record['requires_nodrix']}")
+    console.print(f"Trust status: {record['verification']['status']}")
+    if record["verification"]["errors"]:
+        for error in record["verification"]["errors"]:
+            console.print(f"[red]- {error}[/red]")
+    table = Table("Kind", "Id", "Implementation")
+    for node in record["nodes"]:
+        table.add_row("node", node["id"], node["factory"])
+    for probe in record["probes"]:
+        table.add_row("probe", probe["id"], probe["callable"])
+    for template in record["templates"]:
+        table.add_row("template", template["id"], template["source"])
+    console.print(table)
+
+
+@provider_app.command("verify")
+def provider_verify_command(
+    provider_id: Annotated[str, typer.Argument(help="Provider id or unambiguous suffix")],
+    production: Annotated[bool, typer.Option("--production")] = False,
+    trust_store: Annotated[Path | None, typer.Option("--trust-store")] = None,
+    allow: Annotated[list[str] | None, typer.Option("--allow")] = None,
+) -> None:
+    """Verify metadata, compatibility, features, signature, and trust policy."""
+    from .providers import verify_provider
+
+    try:
+        result = verify_provider(
+            provider_id,
+            policy=_provider_policy(
+                production=production,
+                trust_store=trust_store,
+                allow=allow,
+            ),
+        )
+    except Exception as exc:
+        console.print(f"[red]Provider verification failed:[/red] {exc}")
+        raise typer.Exit(1)
+    console.print_json(json.dumps(result.to_dict()))
+    if result.errors:
+        raise typer.Exit(1)
+
+
+@app.command("doctor")
+def doctor_command(
+    deep: Annotated[
+        bool,
+        typer.Option("--deep", help="Allow deep/device-acquiring provider probes"),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print machine-readable JSON"),
+    ] = False,
+    provider_id: Annotated[
+        str | None,
+        typer.Option("--provider", help="Limit diagnostics to one provider"),
+    ] = None,
+    production: Annotated[
+        bool,
+        typer.Option("--production", help="Apply production provider trust policy"),
+    ] = False,
+    trust_store: Annotated[Path | None, typer.Option("--trust-store")] = None,
+    allow: Annotated[list[str] | None, typer.Option("--allow")] = None,
+) -> None:
+    """Run unified Core and provider diagnostics."""
+    from .doctor import doctor_report
+
+    try:
+        report = doctor_report(
+            deep=deep,
+            provider_id=provider_id,
+            production=production,
+            trust_store=trust_store,
+            allowlist=allow,
+        )
+    except Exception as exc:
+        console.print(f"[red]Doctor failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if json_output:
+        console.print_json(json.dumps(report))
+    else:
+        console.print(
+            f"[bold]Nodrix {report['runtime']['nodrix']} doctor[/bold] "
+            f"mode={report['mode']} status={report['status']}"
+        )
+        core_table = Table("Core check", "Status")
+        for item in report["core"]:
+            core_table.add_row(item["id"], item["status"])
+        console.print(core_table)
+        provider_table = Table("Provider", "Source", "Trust", "Diagnostics")
+        for item in report["providers"]:
+            diagnostic_status = ", ".join(
+                f"{probe['id']}={probe['status']}"
+                for probe in item["diagnostics"]
+            ) or "-"
+            provider_table.add_row(
+                item["id"],
+                item["source"],
+                item["verification"]["status"],
+                diagnostic_status,
+            )
+        console.print(provider_table)
+    if report["status"] == "error":
+        raise typer.Exit(1)
+
+
 def _runtime(
     path: Path,
     run_root: Path | None = None,
@@ -183,6 +375,24 @@ def _runtime(
                 f"Production preflight failed before loading plugins: "
                 f"{rendered}"
             )
+        from .providers import (
+            ProviderPolicy,
+            verify_provider_nodes,
+        )
+
+        references = [
+            reference
+            for config in manifest.nodes.values()
+            for reference in (
+                config.uses,
+                config.failure.fallback_uses,
+            )
+            if reference is not None
+        ]
+        verify_provider_nodes(
+            references,
+            policy=ProviderPolicy.from_environment(production=True),
+        )
     native_only = all(
         config.uses.startswith("native.") or config.uses.startswith("native:")
         for config in manifest.nodes.values()
@@ -485,23 +695,30 @@ def run(
                 )
                 raise NodrixError(f"Production validation failed: {rendered}")
         console.print(render_startup_summary(details.manifest, __version__))
-        for instance, config in details.manifest.nodes.items():
-            if config.uses != "media.ffmpeg_encoder":
-                continue
-            selection = select_encoder(
-                str(config.parameters.get("codec", "h264")),
-                str(config.parameters.get("encoder", "auto")),
-                str(config.parameters.get("acceleration", "preferred")),
-            )
-            if not selection.get("ok"):
-                attempts = "; ".join(
-                    f"{item.get('encoder')}: {item.get('reason')}"
-                    for item in selection.get("attempts", [])
+        media_encoders = [
+            (instance, config)
+            for instance, config in details.manifest.nodes.items()
+            if config.uses == "media.ffmpeg_encoder"
+        ]
+        if media_encoders:
+            from .media import MediaError, select_encoder
+
+            for instance, config in media_encoders:
+                selection = select_encoder(
+                    str(config.parameters.get("codec", "h264")),
+                    str(config.parameters.get("encoder", "auto")),
+                    str(config.parameters.get("acceleration", "preferred")),
                 )
-                raise MediaError(
-                    f"Encoder {instance} cannot start: {selection.get('reason')}"
-                    + (f" ({attempts})" if attempts else "")
-                )
+                if not selection.get("ok"):
+                    attempts = "; ".join(
+                        f"{item.get('encoder')}: {item.get('reason')}"
+                        for item in selection.get("attempts", [])
+                    )
+                    raise MediaError(
+                        f"Encoder {instance} cannot start: "
+                        f"{selection.get('reason')}"
+                        + (f" ({attempts})" if attempts else "")
+                    )
 
         if runtime is None:
             runtime = _runtime(
@@ -565,6 +782,8 @@ def record(
     count: Annotated[int, typer.Option("--count", min=0, help="Stop after N total messages; 0 disables")] = 0,
 ) -> None:
     """Record any typed Nodrix streams into one indexed .ndrx file."""
+    from .recording import record_streams
+
     if duration <= 0 and count <= 0:
         console.print("[yellow]Recording until interrupted; use --duration or --count for an automatic stop.[/yellow]")
     try:
@@ -588,6 +807,8 @@ def play(
     fixed_fps: Annotated[float, typer.Option("--fixed-fps", min=0.0, help="Use a fixed replay rate; 0 preserves timing")] = 0.0,
 ) -> None:
     """Replay an .ndrx recording as discoverable Nodrix streams."""
+    from .recording import RecordingError, play_recording
+
     try:
         report = play_recording(
             recording, speed=speed, as_fast_as_possible=as_fast_as_possible,
@@ -683,6 +904,8 @@ def migrate_command(
 @recording_app.command("info")
 def recording_info(recording: Annotated[Path, typer.Argument(exists=True, readable=True)]) -> None:
     """Show streams, types, counts, and size of an .ndrx file."""
+    from .recording import NdrxReader, RecordingError
+
     try:
         with NdrxReader(recording) as reader:
             info = reader.info()
@@ -703,6 +926,8 @@ def recording_repair(
     checkpoint_records: Annotated[int, typer.Option("--checkpoint-records", min=1)] = 1024,
 ) -> None:
     """Recover complete records and write a finalized NDRX2 file."""
+    from .recording import RecordingError, repair_recording
+
     try:
         info = repair_recording(
             recording,
@@ -1155,6 +1380,8 @@ def media_doctor_command(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Check FFmpeg/FFprobe and available software/hardware encoders."""
+    from .media import MediaError, media_doctor
+
     try:
         report = media_doctor()
     except MediaError as exc:
@@ -1178,6 +1405,8 @@ def media_select_encoder_command(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Probe encoder backends using an explicit hardware policy."""
+    from .media import select_encoder
+
     try:
         result = select_encoder(codec, requested, acceleration)
     except Exception as exc:
@@ -1206,6 +1435,8 @@ def media_probe_command(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Inspect media streams with ffprobe."""
+    from .media import MediaError, probe_media
+
     try:
         report = probe_media(source, input_format=input_format)
     except MediaError as exc:
@@ -1235,6 +1466,8 @@ def media_record_command(
     rtsp_transport: Annotated[str, typer.Option("--rtsp-transport")] = "tcp",
 ) -> None:
     """Record a media source with stream copy or low-latency transcoding."""
+    from .media import run_ffmpeg_relay
+
     code = run_ffmpeg_relay(source, output, copy=copy, codec=codec, encoder=encoder, duration=duration, rtsp_transport=rtsp_transport)
     if code != 0:
         raise typer.Exit(code)
@@ -1251,6 +1484,8 @@ def media_relay_command(
     rtsp_transport: Annotated[str, typer.Option("--rtsp-transport")] = "tcp",
 ) -> None:
     """Relay media directly through FFmpeg without entering the Python frame path."""
+    from .media import run_ffmpeg_relay
+
     code = run_ffmpeg_relay(source, output, copy=copy, codec=codec, encoder=encoder, rtsp_transport=rtsp_transport)
     raise typer.Exit(code)
 
