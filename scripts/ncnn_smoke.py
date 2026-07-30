@@ -57,6 +57,7 @@ def main() -> int:
             runtime_mode="offline",
         )
     )
+    print("Native NCNN model opened", flush=True)
     try:
         frame = Frame.from_numpy(
             np.zeros(
@@ -82,8 +83,13 @@ def main() -> int:
                     "unexpected smoke output shape: "
                     f"{detections.boxes.shape}"
                 )
+        print(
+            f"Native NCNN inference passed ({max(1, args.iterations)} iterations)",
+            flush=True,
+        )
     finally:
         node.close()
+        print("Native NCNN node closed", flush=True)
 
     print("Native NCNN compile/link/load/inference smoke passed")
     return 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 import uuid
 
@@ -151,6 +152,27 @@ def test_ps_process_rejects_zombie_and_zero_rss(monkeypatch) -> None:
     )
 
     assert resources._ps_process(123) is None
+
+
+def test_linux_process_rejects_zero_statm_race(monkeypatch) -> None:
+    monkeypatch.setattr(
+        resources.os,
+        "sysconf",
+        lambda key: {"SC_CLK_TCK": 100, "SC_PAGE_SIZE": 4096}[key],
+        raising=False,
+    )
+    stat = ["123", "(python)", "R"] + ["0"] * 17
+
+    def read_text(path: Path, *args, **kwargs) -> str:
+        if path.name == "stat":
+            return " ".join(stat)
+        if path.name == "statm":
+            return "0 0 0 0 0 0 0"
+        raise AssertionError(path)
+
+    monkeypatch.setattr(resources.Path, "read_text", read_text)
+
+    assert resources._linux_process(123) is None
 
 
 def test_ps_process_parses_live_snapshot(monkeypatch) -> None:
