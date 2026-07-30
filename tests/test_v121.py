@@ -155,6 +155,12 @@ def test_ps_process_rejects_zombie_and_zero_rss(monkeypatch) -> None:
 
 
 def test_linux_process_rejects_zero_statm_race(monkeypatch) -> None:
+    monkeypatch.setattr(
+        resources.os,
+        "sysconf",
+        lambda key: {"SC_CLK_TCK": 100, "SC_PAGE_SIZE": 4096}[key],
+        raising=False,
+    )
     stat = ["123", "(python)", "R"] + ["0"] * 17
 
     def read_text(path: Path, *args, **kwargs) -> str:
