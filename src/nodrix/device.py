@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import ctypes.util
 import importlib.util
-from pathlib import Path
 import platform
 from typing import Any
 

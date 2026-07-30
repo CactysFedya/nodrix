@@ -79,7 +79,24 @@ def test_c_abi_header_is_valid_c11(tmp_path: Path) -> None:
     source.write_text(
         '#include "nodrix/c_api.h"\n'
         "_Static_assert(NODRIX_C_ABI_VERSION == 0x00020000u, \"ABI\");\n"
-        "int main(void) { nodrix_node_api_v2 api = {0}; return (int)api.struct_size; }\n",
+        "_Static_assert(NODRIX_STRING_VIEW_V2_REQUIRED_SIZE <= "
+        "sizeof(nodrix_string_view_v2), \"string view prefix\");\n"
+        "_Static_assert(NODRIX_CORRELATION_V2_REQUIRED_SIZE <= "
+        "sizeof(nodrix_correlation_v2), \"correlation prefix\");\n"
+        "_Static_assert(NODRIX_MEMORY_HANDLE_V2_REQUIRED_SIZE <= "
+        "sizeof(nodrix_memory_handle_v2), \"memory prefix\");\n"
+        "_Static_assert(NODRIX_BUFFER_V2_REQUIRED_SIZE <= "
+        "sizeof(nodrix_buffer_v2), \"buffer prefix\");\n"
+        "_Static_assert(NODRIX_MESSAGE_V2_REQUIRED_SIZE <= "
+        "sizeof(nodrix_message_v2), \"message prefix\");\n"
+        "_Static_assert(NODRIX_NODE_API_V2_REQUIRED_SIZE <= "
+        "sizeof(nodrix_node_api_v2), \"function table prefix\");\n"
+        "typedef struct future_message_v2 { nodrix_message_v2 base; "
+        "uint64_t future; } future_message_v2;\n"
+        "int main(void) { future_message_v2 message = {0}; "
+        "message.base.struct_size = sizeof(message); "
+        "return message.base.struct_size < "
+        "NODRIX_MESSAGE_V2_REQUIRED_SIZE; }\n",
         encoding="utf-8",
     )
     result = subprocess.run(
@@ -97,7 +114,9 @@ def test_c_abi_header_is_valid_c11(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
 
 
-def test_standalone_native_runner_rejects_external_plugin_path(tmp_path: Path) -> None:
+def test_standalone_native_runner_rejects_missing_external_plugin(
+    tmp_path: Path,
+) -> None:
     pipeline = _write_pipeline(tmp_path / "pipeline.yaml")
     raw = yaml.safe_load(pipeline.read_text(encoding="utf-8"))
     raw["runtime"]["engine"] = "native"
@@ -110,7 +129,7 @@ def test_standalone_native_runner_rejects_external_plugin_path(tmp_path: Path) -
     raw["edges"] = []
     pipeline.write_text(yaml.safe_dump(raw), encoding="utf-8")
     runtime = NativePipelineRuntime(load_manifest(pipeline), pipeline)
-    with pytest.raises(Exception, match="engine: unified"):
+    with pytest.raises(Exception, match="library does not exist"):
         runtime.build()
 
 

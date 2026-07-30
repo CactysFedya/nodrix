@@ -1,78 +1,81 @@
-# Nodrix 1.2.0 verification
+# Nodrix 2.0.0 verification
 
-Nodrix 1.2.0 adds reusable single-node YAML Blocks while preserving compact
-and canonical manifests, the Nodrix 1.x Python API, Plugin ABI 1.0, wire
-protocol, `.ndrx`, `.ndpkg`, and runtime execution behavior.
+Release candidate qualification was completed on 2026-07-30 from the local
+source archive, without using the GitHub repository as an implementation
+source.
 
-## Automated tests
+## Verified locally
 
-```text
-Python/unit/integration: 81 passed
-C++ Release CTest:       1/1 passed
-Release metadata:        consistent for 1.2.0
-```
+Environment:
 
-The new suite covers:
+- macOS 26.3.1 on Apple Silicon;
+- CPython 3.13.5;
+- Apple Clang 21.0.0;
+- CMake 4.2.0.
 
-- block expansion into canonical nodes;
-- temporary `--block name=path.yaml` replacement;
-- short parameter overrides such as `detector.conf=value`;
-- unknown-block and duplicate-name diagnostics;
-- block listing and inspection in text/JSON form;
-- source tracking in `config explain`;
-- real execution of resolved block graphs;
-- lock-file inclusion of used blocks only;
-- checksum failure after a referenced block changes;
-- rejection of `--locked` together with `--block`;
-- block-based vision project generation.
-
-All earlier compact-manifest, profile, telemetry, process isolation, Media Pack,
-Viewer, networking, recording, package, lock, and native-runtime tests remain
-green.
-
-## Runtime behavior
-
-A block graph was resolved and executed with the standard unified runtime. The
-block aliases became ordinary node names, and a lossless profile delivered all
-five generated messages to the sink. No extra runtime object or execution
-boundary exists for a block.
-
-## Installed wheel
-
-Built artifact:
+Results:
 
 ```text
-nodrix-1.2.0-cp313-cp313-linux_x86_64.whl
+Repository Python suite:       195 passed, 3 skipped
+Unpacked-sdist Python suite:   195 passed, 3 skipped
+Opt-in native ABI/stress:        2 passed
+C++ Release CTest:             2/2 passed
+C++ ASan/UBSan CTest:          2/2 passed
+Ruff release rules:            passed
+Release metadata:              consistent for 2.0.0
+twine sdist/wheel checks:      passed
 ```
 
-Verified outside the source tree:
+The three normal skips are platform or opt-in cases: Linux `memfd`, the legacy
+explicit C ABI example, and the one-million-message stress test. The two opt-in
+native tests were then enabled explicitly and passed, including one million
+messages without retained plugin buffers. macOS LeakSanitizer is unsupported,
+so the local sanitizer run used ASan and UBSan with leak detection disabled;
+the Linux CI job keeps leak detection enabled.
 
-- `nodrix --version` reports 1.2.0;
-- a generated vision template contains camera/detector/output blocks;
-- `nodrix block list --json` discovers the generated blocks;
-- `nodrix inspect --resolved` expands the selected detector into a canonical
-  node;
-- all four native extensions import.
+## Distribution verification
 
-## Offline source installation
+The source distribution was built in PEP 517 isolation. It contains the public
+tests and native SDK sources, contains no compiled objects, and excludes
+repository-only `.github` state.
 
-Built artifact:
+The local wheel was built from the unpacked source distribution:
 
 ```text
-nodrix-1.2.0.tar.gz
+nodrix-2.0.0.tar.gz
+nodrix-2.0.0-cp313-cp313-macosx_10_13_universal2.whl
 ```
 
-Installed with:
+`twine check` accepted both files. The macOS wheel contains executable
+`nodrix/bin/nodrix-native-runner`; the runner and all five Python extensions
+were inspected with `lipo` and contain both `arm64` and `x86_64`.
 
-```bash
-pip install nodrix-1.2.0.tar.gz --no-build-isolation --no-deps
-```
+A clean virtual environment installed the wheel and, with
+`NODRIX_ALLOW_RUNTIME_BUILD=0`, imported every native extension, resolved the
+runner from `site-packages`, and executed a 10,000-message native graph. The
+smoke run completed at approximately 731,000 messages/second with zero
+observed or planned copies. This number is a machine-specific smoke result, not
+a portable performance claim.
 
-The source package compiled and loaded all four native extensions without a
-network build-isolation environment.
+## Release automation
 
-## Platform scope
+The tag-triggered release workflow now:
 
-The local wheel is a CPython 3.13 Linux x86-64 verification artifact. The
-GitHub release workflow remains responsible for manylinux x86-64, manylinux
-ARM64/Raspberry Pi, and macOS Apple Silicon wheels for Python 3.11-3.14.
+1. verifies that the tag equals the package version;
+2. reruns lint, the full Python suite, million-message stress, and CTest;
+3. builds and validates one canonical source distribution;
+4. builds all wheels from that exact source distribution;
+5. publishes through PyPI Trusted Publishing only after every build succeeds.
+
+CI declares CPython 3.11-3.14 coverage for Linux x86-64, Linux ARM64, macOS
+Apple Silicon, and Windows x86-64. Those remote platform jobs are release
+gates, not claims of local execution.
+
+## Hardware scope
+
+The local qualification covers CPU, shared-memory, native C ABI loading,
+ownership, synchronization, reconnect, TLS, package verification, and NDRX2
+recovery paths. Raspberry Pi, Jetson, CUDA, DMA-BUF, Vulkan, Metal, and
+vendor-specific media accelerators were not available locally. Nodrix preserves
+matching opaque device-memory handles, but each hardware plugin still requires
+qualification on its target device.

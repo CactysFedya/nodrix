@@ -92,8 +92,10 @@ Wi-Fi throughput will be limited by the network, codec, CPU, and payload format.
 
 ### Native plugin
 
-A mixed Python source → C++ filter → Python sink graph passed plugin ABI 2 and
-processed 1,000 messages, with 500 emitted by an every-second-message filter.
+The release conformance graph runs external C ABI source → processor →
+processor → sink in the standalone C++ runner. Normal CI validates 100,000
+messages and exact correlation/ownership; the stress job validates one million
+messages without retained plugin buffers.
 
 ## Measuring your graph
 
@@ -110,6 +112,11 @@ Run reports include:
 - dropped messages and maximum queue depth;
 - exported stream queue and send counters.
 
+Dedicated same-host regression comparison is documented in
+`benchmarks/PERFORMANCE_GATES.md`. The gate rejects throughput loss above 10%,
+P95 growth above 15%, unexpected copies, and memory growth beyond the scenario
+allowance.
+
 ## Remaining performance work
 
 Planned improvements:
@@ -118,7 +125,7 @@ Planned improvements:
 - fixed binary metadata for standard types;
 - native network reactor and batching;
 - QUIC/UDP transports for best-effort realtime data;
-- CUDA IPC, DMA-BUF, DLPack, and accelerator handles;
+- hardware-specific CUDA IPC and DMA-BUF import/export operators;
 - CPU affinity and executor pools;
 - explicit deadline telemetry.
 
@@ -165,7 +172,8 @@ independently restartable components.
 
 ### `.ndrx` recording
 
-The recorder writes message headers and payload segments directly in arrival
-order and creates the index at close. Encoded H.264/H.265 payloads are not
-decoded or re-encoded. For raw frames, storage bandwidth remains the limiting
-factor; record an encoded branch when raw fidelity is unnecessary.
+The NDRX2 recorder writes message headers and payload segments directly in
+arrival order and checkpoints bounded indexes throughout the run. Encoded
+H.264/H.265 payloads are not decoded or re-encoded. For raw frames, storage
+bandwidth remains the limiting factor; record an encoded branch when raw
+fidelity is unnecessary.

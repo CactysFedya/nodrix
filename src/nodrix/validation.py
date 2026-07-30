@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+import os
 from pathlib import Path
+import stat
 from typing import Any
 
 from .manifest import PipelineManifest
@@ -173,7 +175,10 @@ def validate_production(
                     signature_verified = False
             if (
                 is_external
-                and manifest.security.require_signed_plugins
+                and (
+                    manifest.security.require_signed_plugins
+                    or not manifest.security.allow_unsigned_local_plugins
+                )
                 and not signature_verified
                 and not config.uses.startswith(("ros2.",))
             ):
@@ -185,6 +190,70 @@ def validate_production(
                         f"nodes.{name}.uses",
                     )
                 )
+            if config.uses.startswith("native:"):
+                reference = config.uses.removeprefix("native:")
+                library_text = reference.rsplit("#", 1)[0]
+                library = Path(library_text).expanduser()
+                allowlist: list[Path] = []
+                for item in manifest.security.native_plugin_allowlist:
+                    allow_root = Path(item).expanduser()
+                    if not allow_root.is_absolute():
+                        issues.append(
+                            ValidationIssue(
+                                "error",
+                                "P510",
+                                "Native plugin allowlist entries must be absolute",
+                                "security.native_plugin_allowlist",
+                            )
+                        )
+                        continue
+                    allowlist.append(allow_root.resolve())
+                if not library.is_absolute():
+                    issues.append(
+                        ValidationIssue(
+                            "error",
+                            "P506",
+                            "Production native plugin paths must be absolute",
+                            f"nodes.{name}.uses",
+                        )
+                    )
+                else:
+                    resolved = library.resolve()
+                    if not allowlist or not any(
+                        resolved == root or root in resolved.parents
+                        for root in allowlist
+                    ):
+                        issues.append(
+                            ValidationIssue(
+                                "error",
+                                "P507",
+                                "Native plugin is outside security.native_plugin_allowlist",
+                                f"nodes.{name}.uses",
+                            )
+                        )
+                    if not resolved.is_file():
+                        issues.append(
+                            ValidationIssue(
+                                "error",
+                                "P508",
+                                "Native plugin library does not exist",
+                                f"nodes.{name}.uses",
+                            )
+                        )
+                    elif (
+                        os.name != "nt"
+                        and manifest.security.reject_world_writable_plugins
+                        and stat.S_IMODE(resolved.stat().st_mode)
+                        & stat.S_IWOTH
+                    ):
+                        issues.append(
+                            ValidationIssue(
+                                "error",
+                                "P509",
+                                "World-writable native plugins are forbidden in production",
+                                f"nodes.{name}.uses",
+                            )
+                        )
     if manifest.runtime.shutdown.timeout_ms < 100:
         issues.append(ValidationIssue("warning", "W601", "Graceful shutdown timeout is extremely short", "runtime.shutdown"))
     if production and manifest.api_version != "nodrix.dev/v2":

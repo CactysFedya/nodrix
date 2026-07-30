@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import nodrix
 from nodrix.node_docs import parameter_schema
 from nodrix.project_templates import create_project
 from nodrix.ux import render_top

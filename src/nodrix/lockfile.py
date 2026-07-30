@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
-import os
 from pathlib import Path
 import platform
 import sys

@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 import math
-from typing import Any
 
 
 def _percentile(sorted_values: list[int], percentile: float) -> float:

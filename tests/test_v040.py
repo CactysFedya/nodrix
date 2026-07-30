@@ -6,7 +6,7 @@ import time
 import numpy as np
 import pytest
 
-from nodrix import BufferPool, Message, Node, SinkNode, SourceNode
+from nodrix import BufferPool, Message, SinkNode, SourceNode
 from nodrix.vision import Detections, Frame
 from nodrix.hybrid_runtime import HybridPipelineRuntime
 from nodrix.manifest import PipelineManifest
@@ -97,7 +97,11 @@ def test_approximate_timestamp_synchronization(tmp_path: Path) -> None:
 
     class Join(SinkNode):
         input_types = {"a": "core.object", "b": "core.object"}
-        def open(self, context): super().open(context); self.values = []
+
+        def open(self, context):
+            super().open(context)
+            self.values = []
+
         def process(self, inputs): self.values.append((inputs["a"].payload, inputs["b"].payload))
 
     BUILTINS.update({"test.sync_a": A, "test.sync_b": B, "test.sync_join": Join})
@@ -159,7 +163,11 @@ def test_latest_available_reuses_side_input(tmp_path: Path) -> None:
 
     class Join(SinkNode):
         input_types = {"frame": "core.object", "detections": "core.object"}
-        def open(self, context): super().open(context); self.values = []
+
+        def open(self, context):
+            super().open(context)
+            self.values = []
+
         def process(self, inputs):
             self.values.append((inputs["frame"].payload, inputs["detections"].payload))
 

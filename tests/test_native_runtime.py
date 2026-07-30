@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -23,11 +22,10 @@ def test_native_manifest_builds() -> None:
     assert len(description["edges"]) == 3
 
 
-@pytest.mark.skipif(
-    os.environ.get("NODRIX_NATIVE_E2E") != "1",
-    reason="set NODRIX_NATIVE_E2E=1 to compile and execute the native runner",
-)
-def test_native_runtime_executes_end_to_end(tmp_path: Path) -> None:
+def test_native_runtime_executes_end_to_end(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     if shutil.which("cmake") is None or shutil.which("c++") is None:
         pytest.skip("CMake and a C++ compiler are required")
 
@@ -72,6 +70,8 @@ edges:
         run_root=tmp_path / "runs",
     )
     runtime.toolchain.build_dir = tmp_path / "native-build"
+    runner = runtime.toolchain.build(portable=True)
+    monkeypatch.setenv("NODRIX_NATIVE_RUNNER", str(runner))
 
     report = asyncio.run(runtime.run())
 
@@ -89,4 +89,5 @@ edges:
     assert report["nodes"]["stage"]["errors"] == 0
     assert report["nodes"]["sink"]["errors"] == 0
     assert all(edge["dropped"] == 0 for edge in report["edges"])
+    assert report["messages_per_second"] >= 5_000
     assert (Path(report["run_dir"]) / "native-run.json").is_file()

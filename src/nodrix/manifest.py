@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 import yaml
 
 from .errors import ManifestError
-from .profiles import get_profile, profile_names
+from .profiles import get_profile
 
 
 _ENV_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
@@ -289,6 +289,8 @@ class RecordingConfig(StrictModel):
 class SecurityConfig(StrictModel):
     require_signed_plugins: bool = False
     allow_unsigned_local_plugins: bool = True
+    native_plugin_allowlist: list[str] = Field(default_factory=list)
+    reject_world_writable_plugins: bool = True
     secret_providers: list[str] = Field(default_factory=lambda: ["environment"])
 
 

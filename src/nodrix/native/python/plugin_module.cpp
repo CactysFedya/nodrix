@@ -1,6 +1,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -150,34 +151,146 @@ PyBufferProcs NativeBufferView_buffer_procs = {
     reinterpret_cast<releasebufferproc>(NativeBufferView_releasebuffer),
 };
 
-std::uint64_t python_trace_id(PyObject* value) {
-  if (PyLong_Check(value)) return PyLong_AsUnsignedLongLongMask(value);
+std::string python_text(PyObject* value) {
   PyObject* text = PyObject_Str(value);
-  if (!text) return 0;
-  const char* utf8 = PyUnicode_AsUTF8(text);
-  const auto result = utf8 ? vp::fnv1a_64(utf8) : 0;
+  if (!text) throw std::runtime_error("cannot convert message field to text");
+  Py_ssize_t size = 0;
+  const char* utf8 = PyUnicode_AsUTF8AndSize(text, &size);
+  if (!utf8) {
+    Py_DECREF(text);
+    throw std::runtime_error("message text field is not valid UTF-8");
+  }
+  std::string result(utf8, static_cast<std::size_t>(size));
   Py_DECREF(text);
   return result;
+}
+
+std::string message_text_attribute(
+    PyObject* message, const char* name, bool optional = false) {
+  PyObject* value = PyObject_GetAttrString(message, name);
+  if (!value) {
+    if (optional) {
+      PyErr_Clear();
+      return {};
+    }
+    throw std::runtime_error(std::string("message is missing field ") + name);
+  }
+  try {
+    std::string result = python_text(value);
+    Py_DECREF(value);
+    return result;
+  } catch (...) {
+    Py_DECREF(value);
+    throw;
+  }
+}
+
+nodrix_string_view_v2 string_view(const std::string& value) noexcept {
+  return {
+      sizeof(nodrix_string_view_v2),
+      value.empty() ? nullptr : value.data(),
+      value.size(),
+  };
+}
+
+std::string copy_string_view(
+    const nodrix_string_view_v2& value, const char* field) {
+  if (value.struct_size < NODRIX_STRING_VIEW_V2_REQUIRED_SIZE) {
+    throw std::runtime_error(
+        std::string("plugin emitted an undersized correlation field: ") + field);
+  }
+  if (value.size > 0 && !value.data) {
+    throw std::runtime_error(
+        std::string("plugin emitted a null correlation field: ") + field);
+  }
+  return value.size ? std::string(value.data, value.size) : std::string{};
+}
+
+bool valid_memory_domain(std::uint32_t domain) noexcept {
+  switch (domain) {
+    case NODRIX_MEMORY_HOST:
+    case NODRIX_MEMORY_PINNED_HOST:
+    case NODRIX_MEMORY_SHARED:
+    case NODRIX_MEMORY_DMABUF:
+    case NODRIX_MEMORY_CUDA:
+    case NODRIX_MEMORY_ROCM:
+    case NODRIX_MEMORY_VULKAN:
+    case NODRIX_MEMORY_OPENCL:
+    case NODRIX_MEMORY_METAL:
+    case NODRIX_MEMORY_NPU:
+    case NODRIX_MEMORY_DLPACK:
+    case NODRIX_MEMORY_EXTERNAL:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool valid_port_memory(const std::string& memory) {
+  return memory == "any" || memory == "cpu" ||
+         memory == "pinned_cpu" || memory == "shared" ||
+         memory == "dma_buf" || memory == "cuda" ||
+         memory == "rocm" || memory == "vulkan" ||
+         memory == "opencl" || memory == "metal" ||
+         memory == "npu" || memory == "dlpack" ||
+         memory == "external";
 }
 
 struct InputMessage {
   nodrix_message_v2 value{};
   PythonBufferContext* context{nullptr};
+  std::string pipeline_id;
+  std::string run_id;
+  std::string source_id;
+  std::string stream_id;
+  std::string trace_id;
+  std::string span_id;
 
   ~InputMessage() {
     if (context) release_python_buffer_owner(context);
   }
 };
 
+std::unique_ptr<InputMessage> absent_input_message(
+    const std::string& type) {
+  auto result = std::make_unique<InputMessage>();
+  result->value.struct_size = sizeof(nodrix_message_v2);
+  result->value.type_id = vp::fnv1a_64(type);
+  result->value.correlation = {
+      sizeof(nodrix_correlation_v2),
+      0,
+      string_view(result->pipeline_id),
+      string_view(result->run_id),
+      string_view(result->source_id),
+      string_view(result->stream_id),
+      string_view(result->trace_id),
+      string_view(result->span_id),
+  };
+  result->value.present = 0;
+  result->value.payload.struct_size = sizeof(nodrix_buffer_v2);
+  result->value.payload.memory = {
+      sizeof(nodrix_memory_handle_v2),
+      NODRIX_MEMORY_HOST,
+      0,
+      0,
+      0,
+      0,
+      NODRIX_MEMORY_FLAG_HOST_VISIBLE |
+          NODRIX_MEMORY_FLAG_READ_ONLY,
+      nullptr,
+      nullptr,
+      nullptr,
+  };
+  return result;
+}
+
 std::unique_ptr<InputMessage> message_from_python(PyObject* message) {
   auto result = std::make_unique<InputMessage>();
-  PyObject* type = PyObject_GetAttrString(message, "type");
   PyObject* sequence = PyObject_GetAttrString(message, "sequence");
   PyObject* timestamp = PyObject_GetAttrString(message, "timestamp_ns");
   PyObject* trace = PyObject_GetAttrString(message, "trace_id");
   PyObject* payload = PyObject_GetAttrString(message, "payload");
-  if (!type || !sequence || !timestamp || !trace || !payload) {
-    Py_XDECREF(type);
+  if (!sequence || !timestamp || !trace || !payload) {
     Py_XDECREF(sequence);
     Py_XDECREF(timestamp);
     Py_XDECREF(trace);
@@ -185,9 +298,16 @@ std::unique_ptr<InputMessage> message_from_python(PyObject* message) {
     throw std::runtime_error("invalid Nodrix Message object");
   }
 
+  const std::string type_text = message_text_attribute(message, "type");
+  result->pipeline_id = message_text_attribute(message, "pipeline_id");
+  result->run_id = message_text_attribute(message, "run_id");
+  result->source_id = message_text_attribute(message, "source_id");
+  result->stream_id = message_text_attribute(message, "stream_id");
+  result->trace_id = python_text(trace);
+  result->span_id = message_text_attribute(message, "span_id", true);
+
   auto* context = new PythonBufferContext();
   if (PyObject_GetBuffer(payload, &context->view, PyBUF_CONTIG_RO) != 0) {
-    Py_DECREF(type);
     Py_DECREF(sequence);
     Py_DECREF(timestamp);
     Py_DECREF(trace);
@@ -198,26 +318,41 @@ std::unique_ptr<InputMessage> message_from_python(PyObject* message) {
         "Frame.buffer.owner, Tensor.buffer.owner, bytes, memoryview, or NativeBuffer");
   }
   result->context = context;
-  const char* type_text = PyUnicode_AsUTF8(type);
-  result->value = {
-      sizeof(nodrix_message_v2),
-      type_text ? vp::fnv1a_64(type_text) : 0,
-      PyLong_AsUnsignedLongLong(sequence),
-      PyLong_AsLongLong(timestamp),
-      vp::steady_time_ns(),
-      python_trace_id(trace),
-      0,
-      {},
-      {
-          sizeof(nodrix_buffer_v2),
-          static_cast<const std::uint8_t*>(context->view.buf),
-          static_cast<std::size_t>(context->view.len),
-          context,
-          retain_python_buffer,
-          release_python_buffer_owner,
-      },
+  result->value.struct_size = sizeof(nodrix_message_v2);
+  result->value.type_id = vp::fnv1a_64(type_text);
+  result->value.sequence = PyLong_AsUnsignedLongLong(sequence);
+  result->value.source_timestamp_ns = PyLong_AsLongLong(timestamp);
+  result->value.runtime_timestamp_ns = vp::steady_time_ns();
+  result->value.correlation = {
+      sizeof(nodrix_correlation_v2),
+      PyLong_Check(trace) ? NODRIX_CORRELATION_TRACE_ID_INTEGER : 0u,
+      string_view(result->pipeline_id),
+      string_view(result->run_id),
+      string_view(result->source_id),
+      string_view(result->stream_id),
+      string_view(result->trace_id),
+      string_view(result->span_id),
   };
-  Py_DECREF(type);
+  result->value.present = 1;
+  result->value.payload.struct_size = sizeof(nodrix_buffer_v2);
+  result->value.payload.data =
+      static_cast<const std::uint8_t*>(context->view.buf);
+  result->value.payload.size = static_cast<std::size_t>(context->view.len);
+  result->value.payload.owner = context;
+  result->value.payload.retain = retain_python_buffer;
+  result->value.payload.release = release_python_buffer_owner;
+  result->value.payload.memory = {
+      sizeof(nodrix_memory_handle_v2),
+      NODRIX_MEMORY_HOST,
+      0,
+      0,
+      0,
+      static_cast<std::uint64_t>(context->view.len),
+      NODRIX_MEMORY_FLAG_HOST_VISIBLE | NODRIX_MEMORY_FLAG_READ_ONLY,
+      context,
+      retain_python_buffer,
+      release_python_buffer_owner,
+  };
   Py_DECREF(sequence);
   Py_DECREF(timestamp);
   Py_DECREF(trace);
@@ -229,6 +364,7 @@ std::unique_ptr<InputMessage> message_from_python(PyObject* message) {
 struct CBufferLease {
   void* owner;
   nodrix_buffer_release_v2 release;
+  std::shared_ptr<DynamicLibrary> library;
 };
 
 void release_c_buffer(void*, std::size_t, void* opaque) noexcept {
@@ -245,6 +381,7 @@ struct Collector {
   std::vector<CollectedOutput> outputs;
   std::string error;
   std::size_t output_count{0};
+  std::shared_ptr<DynamicLibrary> library;
 };
 
 void collect_output(
@@ -252,7 +389,7 @@ void collect_output(
   auto* collector = static_cast<Collector*>(opaque);
   if (!collector || !collector->error.empty()) return;
   try {
-    if (!raw || raw->struct_size < sizeof(nodrix_message_v2)) {
+    if (!raw || raw->struct_size < NODRIX_MESSAGE_V2_REQUIRED_SIZE) {
       throw std::runtime_error("plugin emitted an invalid message structure");
     }
     if (output_port >= collector->output_count) {
@@ -263,16 +400,47 @@ void collect_output(
     message.sequence = raw->sequence;
     message.source_timestamp_ns = raw->source_timestamp_ns;
     message.runtime_timestamp_ns = raw->runtime_timestamp_ns;
-    message.trace_id = raw->trace_id;
+    if (raw->correlation.struct_size < NODRIX_CORRELATION_V2_REQUIRED_SIZE) {
+      throw std::runtime_error("plugin emitted an invalid correlation structure");
+    }
+    message.pipeline_id =
+        copy_string_view(raw->correlation.pipeline_id, "pipeline_id");
+    message.run_id = copy_string_view(raw->correlation.run_id, "run_id");
+    message.source_id =
+        copy_string_view(raw->correlation.source_id, "source_id");
+    message.stream_id =
+        copy_string_view(raw->correlation.stream_id, "stream_id");
+    message.trace_id = copy_string_view(raw->correlation.trace_id, "trace_id");
+    message.span_id = copy_string_view(raw->correlation.span_id, "span_id");
+    message.trace_id_integer =
+        (raw->correlation.flags & NODRIX_CORRELATION_TRACE_ID_INTEGER) != 0;
+    message.present = raw->present != 0;
     message.end_of_stream = raw->end_of_stream != 0;
 
     const auto& payload = raw->payload;
+    if (payload.struct_size < NODRIX_BUFFER_V2_REQUIRED_SIZE ||
+        payload.memory.struct_size <
+            NODRIX_MEMORY_HANDLE_V2_REQUIRED_SIZE ||
+        !valid_memory_domain(payload.memory.domain)) {
+      throw std::runtime_error("plugin emitted an invalid buffer structure");
+    }
+    const bool host_visible =
+        (payload.memory.flags & NODRIX_MEMORY_FLAG_HOST_VISIBLE) != 0;
+    if (payload.size > 0 && !payload.data && !host_visible) {
+      throw std::runtime_error(
+          "Python host cannot expose a device-only plugin buffer; use a "
+          "domain-specific SDK adapter or the standalone native engine");
+    }
     if (payload.size > 0 && !payload.data) {
-      throw std::runtime_error("plugin emitted a null payload");
+      throw std::runtime_error("plugin marked a host-visible buffer without data");
     }
     if (payload.size > 0 && payload.retain && payload.release) {
       payload.retain(payload.owner);
-      auto* lease = new CBufferLease{payload.owner, payload.release};
+      auto* lease = new CBufferLease{
+          payload.owner,
+          payload.release,
+          collector->library,
+      };
       message.payload = vp::Buffer::wrap(
           const_cast<std::uint8_t*>(payload.data),
           payload.size,
@@ -292,7 +460,7 @@ void collect_output(
 
 typedef struct {
   PyObject_HEAD
-  DynamicLibrary* library;
+  std::shared_ptr<DynamicLibrary>* library;
   nodrix_node_api_v2 api;
   std::vector<vp::PortSpec>* inputs;
   std::vector<vp::PortSpec>* outputs;
@@ -323,16 +491,29 @@ std::vector<vp::PortSpec> read_ports(
                             ? api.input_port(api.instance, index, &port)
                             : api.output_port(api.instance, index, &port);
     if (status != NODRIX_STATUS_OK) throw std::runtime_error(plugin_error(api, status));
-    if (!port.name || !port.type) {
+    if (port.struct_size < NODRIX_PORT_V2_REQUIRED_SIZE ||
+        !port.name || !port.type) {
       throw std::runtime_error("Plugin C ABI 2.0 returned an invalid port");
     }
-    result.push_back({port.name, port.type, port.memory ? port.memory : "any"});
+    const std::string memory =
+        port.memory ? port.memory : "any";
+    if (!valid_port_memory(memory)) {
+      throw std::runtime_error(
+          "Plugin C ABI 2.0 returned an unknown memory domain");
+    }
+    result.push_back(
+        {
+            port.name,
+            port.type,
+            memory,
+            (port.flags & NODRIX_PORT_OPTIONAL) != 0,
+        });
   }
   return result;
 }
 
 void validate_api(const nodrix_node_api_v2& api) {
-  if (api.struct_size < sizeof(nodrix_node_api_v2) ||
+  if (api.struct_size < NODRIX_NODE_API_V2_REQUIRED_SIZE ||
       api.abi_version != NODRIX_C_ABI_VERSION || !api.instance ||
       !api.input_count || !api.output_count || !api.input_port ||
       !api.output_port || !api.is_source || !api.open || !api.process ||
@@ -372,15 +553,27 @@ int NativeNodeHost_init(
     return -1;
   }
   try {
-    self->library = new DynamicLibrary();
-    self->library->open(library_path);
+    self->library = new std::shared_ptr<DynamicLibrary>(
+        std::make_shared<DynamicLibrary>());
+    (*self->library)->open(library_path);
     const auto abi = reinterpret_cast<nodrix_plugin_abi_version_v2_fn>(
-        self->library->symbol("nodrix_plugin_abi_version_v2"));
+        (*self->library)->symbol("nodrix_plugin_abi_version_v2"));
     if (abi() != NODRIX_C_ABI_VERSION) {
       throw std::runtime_error("Nodrix Plugin C ABI 2.0 version mismatch");
     }
+    const auto features = reinterpret_cast<nodrix_plugin_features_v2_fn>(
+        (*self->library)->symbol("nodrix_plugin_features_v2"));
+    constexpr std::uint64_t required_features =
+        NODRIX_C_FEATURE_TYPED_PORTS |
+        NODRIX_C_FEATURE_MEMORY_DOMAINS |
+        NODRIX_C_FEATURE_CORRELATION |
+        NODRIX_C_FEATURE_DEVICE_HANDLES;
+    if ((features() & required_features) != required_features) {
+      throw std::runtime_error(
+          "Plugin C ABI 2.0 does not provide the required stable features");
+    }
     const auto create = reinterpret_cast<nodrix_plugin_create_v2_fn>(
-        self->library->symbol("nodrix_plugin_create_v2"));
+        (*self->library)->symbol("nodrix_plugin_create_v2"));
     self->api.struct_size = sizeof(nodrix_node_api_v2);
     const auto status =
         create(NODRIX_C_ABI_VERSION, node_type, parameters, &self->api);
@@ -458,6 +651,27 @@ PyObject* NativeNodeHost_output_memory(NativeNodeHostObject* self, void*) {
   return ports_to_dict(*self->outputs, true);
 }
 
+PyObject* NativeNodeHost_optional_inputs(
+    NativeNodeHostObject* self, void*) {
+  PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(
+      std::count_if(
+          self->inputs->begin(),
+          self->inputs->end(),
+          [](const vp::PortSpec& port) { return port.optional; })));
+  if (!result) return nullptr;
+  Py_ssize_t index = 0;
+  for (const auto& port : *self->inputs) {
+    if (!port.optional) continue;
+    PyObject* name = PyUnicode_FromString(port.name.c_str());
+    if (!name) {
+      Py_DECREF(result);
+      return nullptr;
+    }
+    PyTuple_SET_ITEM(result, index++, name);
+  }
+  return result;
+}
+
 PyObject* NativeNodeHost_is_source(NativeNodeHostObject* self, void*) {
   return PyBool_FromLong(self->api.is_source(self->api.instance));
 }
@@ -484,6 +698,8 @@ PyObject* NativeNodeHost_open(
       self->parameters_json ? self->parameters_json->c_str() : "{}",
       run_dir,
       device,
+      nullptr,
+      nullptr,
   };
   nodrix_status_v2 status = NODRIX_STATUS_RUNTIME_ERROR;
   Py_BEGIN_ALLOW_THREADS
@@ -532,15 +748,52 @@ PyObject* build_python_outputs(
       Py_DECREF(value);
       return status == 0;
     };
+    PyObject* trace_id = nullptr;
+    if (output.message.trace_id_integer) {
+      trace_id = PyLong_FromString(
+          const_cast<char*>(
+              output.message.trace_id.empty()
+                  ? "0"
+                  : output.message.trace_id.c_str()),
+          nullptr,
+          10);
+    } else {
+      trace_id = PyUnicode_FromStringAndSize(
+          output.message.trace_id.data(),
+          static_cast<Py_ssize_t>(output.message.trace_id.size()));
+    }
     if (!set_owned(
             "sequence",
             PyLong_FromUnsignedLongLong(output.message.sequence)) ||
         !set_owned(
             "timestamp_ns",
             PyLong_FromLongLong(output.message.source_timestamp_ns)) ||
+        !set_owned("trace_id", trace_id) ||
         !set_owned(
-            "trace_id",
-            PyLong_FromUnsignedLongLong(output.message.trace_id))) {
+            "pipeline_id",
+            PyUnicode_FromStringAndSize(
+                output.message.pipeline_id.data(),
+                static_cast<Py_ssize_t>(output.message.pipeline_id.size()))) ||
+        !set_owned(
+            "run_id",
+            PyUnicode_FromStringAndSize(
+                output.message.run_id.data(),
+                static_cast<Py_ssize_t>(output.message.run_id.size()))) ||
+        !set_owned(
+            "source_id",
+            PyUnicode_FromStringAndSize(
+                output.message.source_id.data(),
+                static_cast<Py_ssize_t>(output.message.source_id.size()))) ||
+        !set_owned(
+            "stream_id",
+            PyUnicode_FromStringAndSize(
+                output.message.stream_id.data(),
+                static_cast<Py_ssize_t>(output.message.stream_id.size()))) ||
+        !set_owned(
+            "span_id",
+            PyUnicode_FromStringAndSize(
+                output.message.span_id.data(),
+                static_cast<Py_ssize_t>(output.message.span_id.size())))) {
       Py_DECREF(call_args);
       Py_DECREF(call_kwargs);
       Py_DECREF(result);
@@ -583,7 +836,14 @@ PyObject* NativeNodeHost_process(
     for (const auto& port : *self->inputs) {
       PyObject* message = PyDict_GetItemString(inputs, port.name.c_str());
       if (!message) {
-        throw std::runtime_error("missing native node input: " + port.name);
+        if (!port.optional) {
+          throw std::runtime_error(
+              "missing native node input: " + port.name);
+        }
+        auto holder = absent_input_message(port.type);
+        native_inputs.push_back(holder->value);
+        holders.push_back(std::move(holder));
+        continue;
       }
       if (!template_message) template_message = message;
       auto holder = message_from_python(message);
@@ -592,6 +852,7 @@ PyObject* NativeNodeHost_process(
     }
     Collector collector;
     collector.output_count = self->outputs->size();
+    if (self->library) collector.library = *self->library;
     nodrix_status_v2 status = NODRIX_STATUS_RUNTIME_ERROR;
     Py_BEGIN_ALLOW_THREADS
     status = self->api.process(
@@ -624,6 +885,7 @@ PyObject* NativeNodeHost_process(
 PyObject* NativeNodeHost_flush(NativeNodeHostObject* self, PyObject*) {
   Collector collector;
   collector.output_count = self->outputs->size();
+  if (self->library) collector.library = *self->library;
   nodrix_status_v2 status = NODRIX_STATUS_RUNTIME_ERROR;
   Py_BEGIN_ALLOW_THREADS
   status =
@@ -699,6 +961,11 @@ PyGetSetDef NativeNodeHost_getset[] = {
      nullptr},
     {const_cast<char*>("output_memory"),
      reinterpret_cast<getter>(NativeNodeHost_output_memory),
+     nullptr,
+     nullptr,
+     nullptr},
+    {const_cast<char*>("optional_inputs"),
+     reinterpret_cast<getter>(NativeNodeHost_optional_inputs),
      nullptr,
      nullptr,
      nullptr},

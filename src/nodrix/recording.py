@@ -41,6 +41,10 @@ _ZERO_DIGEST = b"\0" * 32
 _MAX_METADATA_BYTES = 16 * 1024 * 1024
 _MAX_INDEX_BYTES = 64 * 1024 * 1024
 _DEFAULT_MAX_PACKET_BYTES = 1024 * 1024 * 1024
+_DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024 * 1024 * 1024
+_DEFAULT_MAX_CHUNKS = 1_000_000
+_DEFAULT_MAX_RECORDS = 100_000_000
+_DEFAULT_MAX_STREAMS = 100_000
 
 
 class RecordingError(RuntimeError):
@@ -293,11 +297,31 @@ class NdrxReader:
         *,
         recover: bool = True,
         max_packet_bytes: int = _DEFAULT_MAX_PACKET_BYTES,
+        max_file_bytes: int = _DEFAULT_MAX_FILE_BYTES,
+        max_chunks: int = _DEFAULT_MAX_CHUNKS,
+        max_records: int = _DEFAULT_MAX_RECORDS,
+        max_streams: int = _DEFAULT_MAX_STREAMS,
     ) -> None:
         self.path = Path(path).expanduser().resolve()
-        self.handle: BinaryIO = self.path.open("rb")
         self.max_packet_bytes = int(max_packet_bytes)
         self.file_size = self.path.stat().st_size
+        self.max_file_bytes = int(max_file_bytes)
+        self.max_chunks = int(max_chunks)
+        self.max_records = int(max_records)
+        self.max_streams = int(max_streams)
+        if min(
+            self.max_packet_bytes,
+            self.max_file_bytes,
+            self.max_chunks,
+            self.max_records,
+            self.max_streams,
+        ) <= 0:
+            raise ValueError("NDRX reader limits must be positive")
+        if self.file_size > self.max_file_bytes:
+            raise RecordingError(
+                f"NDRX file exceeds configured limit: {self.file_size}"
+            )
+        self.handle: BinaryIO = self.path.open("rb")
         header = self.handle.read(_FILE_HEADER.size)
         if len(header) != _FILE_HEADER.size:
             raise RecordingError("Truncated Nodrix recording header")
@@ -316,6 +340,8 @@ class NdrxReader:
             self.metadata = json.loads(metadata_bytes.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise RecordingError("Invalid Nodrix recording metadata") from exc
+        if not isinstance(self.metadata, dict):
+            raise RecordingError("Nodrix recording metadata must be a mapping")
         self.data_offset = self.handle.tell()
         self.recovered = False
         self.finalized = False
@@ -344,7 +370,15 @@ class NdrxReader:
         encoded = self.handle.read(index_len)
         if len(encoded) != index_len:
             raise RecordingError("Truncated NDRX1 recording index")
-        self.index = json.loads(encoded.decode("utf-8"))
+        try:
+            self.index = json.loads(encoded.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RecordingError("Invalid NDRX1 recording index") from exc
+        if not isinstance(self.index, dict):
+            raise RecordingError("NDRX1 recording index must be a mapping")
+        entries = self.index.get("entries", [])
+        if not isinstance(entries, list) or len(entries) > self.max_records:
+            raise RecordingError("NDRX1 record-count limit exceeded")
         self.index["format"] = "nodrix-recording/1"
         self.index["chunks"] = 0
         self.index["recovered"] = False
@@ -384,7 +418,12 @@ class NdrxReader:
             and checksum == _ZERO_DIGEST
         ):
             return None, data_offset, self.file_size
-        if count <= 0 or index_bytes <= 0 or index_bytes > _MAX_INDEX_BYTES:
+        if (
+            count <= 0
+            or count > self.max_records
+            or index_bytes <= 0
+            or index_bytes > _MAX_INDEX_BYTES
+        ):
             raise RecordingError("Invalid NDRX2 chunk lengths")
         end = data_offset + records_bytes + index_bytes
         if end > self.file_size:
@@ -401,13 +440,30 @@ class NdrxReader:
         if len(entries) != count:
             raise RecordingError("NDRX2 chunk record count mismatch")
         records_end = data_offset + records_bytes
+        expected_offset = data_offset
         for item in entries:
             if (
-                item.offset < data_offset
+                item.offset != expected_offset
+                or item.packet_bytes <= 0
+                or item.packet_bytes > self.max_packet_bytes
                 or item.offset + _RECORD_HEADER.size + item.packet_bytes
                 > records_end
             ):
-                raise RecordingError("NDRX2 index entry points outside its chunk")
+                raise RecordingError(
+                    "NDRX2 index does not exactly cover its chunk"
+                )
+            self.handle.seek(item.offset)
+            record_header = self.handle.read(_RECORD_HEADER.size)
+            if len(record_header) != _RECORD_HEADER.size:
+                raise RecordingError("Truncated NDRX2 record header")
+            _, packet_bytes = _RECORD_HEADER.unpack(record_header)
+            if packet_bytes != item.packet_bytes:
+                raise RecordingError("NDRX2 index packet size mismatch")
+            expected_offset += _RECORD_HEADER.size + item.packet_bytes
+        if expected_offset != records_end:
+            raise RecordingError(
+                "NDRX2 checkpoint contains unindexed record bytes"
+            )
         return entries, data_offset, end
 
     def _read_packet(self, entry: RecordIndexEntry) -> tuple[int, Message]:
@@ -434,10 +490,19 @@ class NdrxReader:
     def _recover_tail(
         self,
         start: int,
+        *,
+        remaining_records: int | None = None,
     ) -> list[RecordIndexEntry]:
         entries: list[RecordIndexEntry] = []
         position = start
+        limit = (
+            self.max_records
+            if remaining_records is None
+            else min(self.max_records, remaining_records)
+        )
         while position + _RECORD_HEADER.size <= self.file_size:
+            if len(entries) >= limit:
+                raise RecordingError("NDRX2 record-count limit exceeded")
             self.handle.seek(position)
             raw = self.handle.read(_RECORD_HEADER.size)
             if len(raw) != _RECORD_HEADER.size:
@@ -506,10 +571,15 @@ class NdrxReader:
             or hashlib.sha256(encoded).digest() != checksum
         ):
             raise RecordingError("Invalid NDRX2 final checksum")
+        if self.handle.tell() != self.file_size:
+            raise RecordingError("NDRX2 has trailing data after final summary")
         try:
-            return json.loads(encoded.decode("utf-8"))
+            summary = json.loads(encoded.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise RecordingError("Invalid NDRX2 summary JSON") from exc
+        if not isinstance(summary, dict):
+            raise RecordingError("NDRX2 summary must be a mapping")
+        return summary
 
     def _scan_v2(self, *, recover: bool) -> dict[str, Any]:
         position = self.data_offset
@@ -525,7 +595,10 @@ class NdrxReader:
                 if entries is None:
                     if not recover:
                         raise RecordingError("NDRX2 active chunk was not checkpointed")
-                    entries = self._recover_tail(tail_start)
+                    entries = self._recover_tail(
+                        tail_start,
+                        remaining_records=self.max_records - messages,
+                    )
                     added_messages, added_bytes = self._summarize(entries, streams)
                     messages += added_messages
                     payload_bytes += added_bytes
@@ -535,6 +608,12 @@ class NdrxReader:
                 messages += added_messages
                 payload_bytes += added_bytes
                 chunks += 1
+                if chunks > self.max_chunks:
+                    raise RecordingError("NDRX2 chunk-count limit exceeded")
+                if messages > self.max_records:
+                    raise RecordingError("NDRX2 record-count limit exceeded")
+                if len(streams) > self.max_streams:
+                    raise RecordingError("NDRX2 stream-count limit exceeded")
                 position = next_position
                 continue
             if magic == _V2_SUMMARY_MAGIC:
@@ -571,14 +650,25 @@ class NdrxReader:
 
     def _iter_v2_entries(self) -> Iterator[RecordIndexEntry]:
         position = self.data_offset
+        chunks = 0
+        records = 0
         while position < self.file_size:
             self.handle.seek(position)
             magic = self.handle.read(4)
             if magic == _V2_CHUNK_MAGIC:
                 entries, tail_start, next_position = self._read_chunk(position)
                 if entries is None:
-                    yield from self._recover_tail(tail_start)
+                    yield from self._recover_tail(
+                        tail_start,
+                        remaining_records=self.max_records - records,
+                    )
                     return
+                chunks += 1
+                records += len(entries)
+                if chunks > self.max_chunks:
+                    raise RecordingError("NDRX2 chunk-count limit exceeded")
+                if records > self.max_records:
+                    raise RecordingError("NDRX2 record-count limit exceeded")
                 yield from entries
                 position = next_position
                 continue

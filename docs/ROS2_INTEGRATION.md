@@ -28,3 +28,8 @@ from `timestamp_ns`.
 
 QoS parameters map reliability, durability, and queue depth explicitly. The ROS
 environment and generated message packages remain the operator's responsibility.
+
+The 2.0 adapters are generic Python mappings. They do not claim ROS 2 loaned
+messages, intra-process image zero-copy, or a zero-copy `PointCloud2` fast path.
+Use a target-specific native package when those properties are required; the
+stable Plugin C ABI and memory-domain contracts are the integration boundary.

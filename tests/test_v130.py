@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import numpy as np
 
-import nodrix
 from nodrix.cv_types import Detections, Frame, Tracks
 from nodrix.messages import Message
 from nodrix.node import NodeContext

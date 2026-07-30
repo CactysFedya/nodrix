@@ -23,6 +23,7 @@ from . import __version__
 class NativeNodeSpec:
     inputs: dict[str, str]
     outputs: dict[str, str]
+    optional_inputs: frozenset[str] = frozenset()
 
 
 NATIVE_BUILTINS: dict[str, NativeNodeSpec] = {
@@ -59,7 +60,7 @@ class NativeToolchain:
         name = "nodrix-native-runner.exe" if os.name == "nt" else "nodrix-native-runner"
         return self.build_dir / name
 
-    def build(self, *, clean: bool = False, portable: bool = False, quiet: bool = False) -> Path:
+    def build(self, *, clean: bool = False, portable: bool = True, quiet: bool = False) -> Path:
         if clean and self.build_dir.exists():
             shutil.rmtree(self.build_dir)
         self.build_dir.mkdir(parents=True, exist_ok=True)
@@ -101,9 +102,29 @@ class NativeToolchain:
             if not path.exists():
                 raise RuntimeGraphError(f"NODRIX_NATIVE_RUNNER does not exist: {path}")
             return path
+        name = (
+            "nodrix-native-runner.exe"
+            if os.name == "nt"
+            else "nodrix-native-runner"
+        )
+        packaged = Path(__file__).with_name("bin") / name
+        if packaged.is_file():
+            if os.name != "nt" and not os.access(packaged, os.X_OK):
+                raise RuntimeGraphError(
+                    f"Packaged native runner is not executable: {packaged}"
+                )
+            return packaged
         if self.runner.exists():
             return self.runner
-        return self.build(quiet=True)
+        if os.environ.get("NODRIX_ALLOW_RUNTIME_BUILD") == "1":
+            return self.build(portable=True, quiet=True)
+        raise RuntimeGraphError(
+            "The Nodrix native runner is not installed. Install a compatible "
+            "binary wheel, set NODRIX_NATIVE_RUNNER, run `nodrix native build` "
+            "during deployment, or explicitly allow a developer fallback with "
+            "NODRIX_ALLOW_RUNTIME_BUILD=1. Runtime compilation is disabled by "
+            "default."
+        )
 
     def doctor(self) -> dict[str, Any]:
         return {
@@ -114,6 +135,17 @@ class NativeToolchain:
             "build_dir": str(self.build_dir),
             "runner": str(self.runner),
             "runner_exists": self.runner.exists(),
+            "packaged_runner": str(
+                Path(__file__).with_name("bin")
+                / (
+                    "nodrix-native-runner.exe"
+                    if os.name == "nt"
+                    else "nodrix-native-runner"
+                )
+            ),
+            "runtime_build_allowed": (
+                os.environ.get("NODRIX_ALLOW_RUNTIME_BUILD") == "1"
+            ),
         }
 
 
@@ -136,13 +168,14 @@ class NativePipelineRuntime:
     def build(self) -> None:
         self.specs.clear()
         for name, config in self.manifest.nodes.items():
-            resolved_uses = resolve_package_node(config.uses)
+            resolved_uses = self._resolve_uses(
+                resolve_package_node(config.uses)
+            )
             if resolved_uses in NATIVE_BUILTINS:
                 spec = NATIVE_BUILTINS[resolved_uses]
             elif resolved_uses.startswith("native:"):
-                raise RuntimeGraphError(
-                    f"External Plugin C ABI 2.0 node {name!r} must use engine: unified; "
-                    "the standalone native runner is retained only for built-in native.* nodes"
+                spec = self._external_plugin_spec(
+                    resolved_uses, config.parameters
                 )
             else:
                 raise RuntimeGraphError(
@@ -177,11 +210,61 @@ class NativePipelineRuntime:
                 )
 
         for name, spec in self.specs.items():
-            missing = [port for port in spec.inputs if f"{name}.{port}" not in connected_inputs]
+            configured_optional = set(
+                self.manifest.nodes[name].synchronization.optional_inputs
+            )
+            unsupported = sorted(configured_optional - spec.optional_inputs)
+            if unsupported:
+                raise RuntimeGraphError(
+                    f"Node {name!r} cannot make required inputs optional: "
+                    f"{unsupported}"
+                )
+            optional = spec.optional_inputs | configured_optional
+            trigger = (
+                self.manifest.nodes[name].synchronization.trigger_port
+            )
+            if trigger and trigger in optional:
+                raise RuntimeGraphError(
+                    f"Node {name!r} synchronization trigger cannot be optional"
+                )
+            missing = [
+                port
+                for port in spec.inputs
+                if f"{name}.{port}" not in connected_inputs
+                and port not in optional
+            ]
             if missing:
                 raise RuntimeGraphError(f"Node {name!r} has unconnected inputs: {missing}")
         if not any(not spec.inputs for spec in self.specs.values()):
             raise RuntimeGraphError("Native pipeline requires at least one source node")
+
+    @staticmethod
+    def _external_plugin_spec(
+        uses: str, parameters: dict[str, Any]
+    ) -> NativeNodeSpec:
+        from .native_plugin import NativeNodeHost
+
+        if NativeNodeHost is None:
+            raise RuntimeGraphError(
+                "The installed Nodrix wheel has no Plugin C ABI host extension"
+            )
+        body = uses.removeprefix("native:")
+        library, node_type = body.rsplit("#", 1)
+        try:
+            host = NativeNodeHost(
+                library,
+                node_type,
+                json.dumps(parameters, separators=(",", ":")),
+            )
+            return NativeNodeSpec(
+                dict(host.input_types),
+                dict(host.output_types),
+                frozenset(host.optional_inputs),
+            )
+        except Exception as exc:
+            raise RuntimeGraphError(
+                f"Cannot inspect external native node {uses}: {exc}"
+            ) from exc
 
     @staticmethod
     def _types_compatible(source: str, target: str) -> bool:
@@ -271,14 +354,33 @@ class NativePipelineRuntime:
 
     def _plan_text(self, run_dir: Path) -> str:
         lines = [
-            "NODRIX_NATIVE_PLAN_V1",
+            "NODRIX_NATIVE_PLAN_V2",
             f"PIPELINE\t{_hex(self.manifest.metadata.name)}",
             f"RUN_DIR\t{_hex(str(run_dir))}",
+            "RUNTIME\t"
+            f"{self.manifest.runtime.shutdown.timeout_ms}\t"
+            f"{self.manifest.runtime.metrics.interval_ms}",
         ]
         for name, config in self.manifest.nodes.items():
             uses = self._resolve_uses(resolve_package_node(config.uses))
             parameters = json.dumps(config.parameters, ensure_ascii=False, separators=(",", ":"))
             lines.append(f"NODE\t{_hex(name)}\t{_hex(uses)}\t{_hex(parameters)}")
+            synchronization = config.synchronization
+            optional = "\n".join(
+                sorted(self.specs[name].optional_inputs)
+            )
+            lines.append(
+                "\t".join(
+                    [
+                        "SYNC",
+                        _hex(name),
+                        synchronization.policy,
+                        str(int(synchronization.tolerance_ms * 1_000_000)),
+                        _hex(synchronization.trigger_port or ""),
+                        _hex(optional),
+                    ]
+                )
+            )
         for edge in self.manifest.edges:
             src_name, src_port = edge.source.split(".", 1)
             dst_name, dst_port = edge.target.split(".", 1)

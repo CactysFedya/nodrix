@@ -63,9 +63,15 @@ nodrix_status_v2 guard(Node* node, Function&& function) noexcept {
   try {
     return function();
   } catch (const std::exception& exc) {
-    node->set_error(exc.what());
+    try {
+      node->set_error(exc.what());
+    } catch (...) {
+    }
   } catch (...) {
-    node->set_error("unknown C++ plugin exception");
+    try {
+      node->set_error("unknown C++ plugin exception");
+    } catch (...) {
+    }
   }
   return NODRIX_STATUS_RUNTIME_ERROR;
 }
@@ -81,6 +87,9 @@ inline size_t output_count(const void* opaque) {
 inline nodrix_status_v2 input_port(
     const void* opaque, size_t index, nodrix_port_v2* output) {
   if (!opaque || !output) return NODRIX_STATUS_INVALID_ARGUMENT;
+  if (output->struct_size < NODRIX_PORT_V2_REQUIRED_SIZE) {
+    return NODRIX_STATUS_INVALID_ARGUMENT;
+  }
   const auto ports = static_cast<const Node*>(opaque)->input_ports();
   if (index >= ports.size()) return NODRIX_STATUS_INVALID_ARGUMENT;
   *output = ports[index];
@@ -90,6 +99,9 @@ inline nodrix_status_v2 input_port(
 inline nodrix_status_v2 output_port(
     const void* opaque, size_t index, nodrix_port_v2* output) {
   if (!opaque || !output) return NODRIX_STATUS_INVALID_ARGUMENT;
+  if (output->struct_size < NODRIX_PORT_V2_REQUIRED_SIZE) {
+    return NODRIX_STATUS_INVALID_ARGUMENT;
+  }
   const auto ports = static_cast<const Node*>(opaque)->output_ports();
   if (index >= ports.size()) return NODRIX_STATUS_INVALID_ARGUMENT;
   *output = ports[index];
@@ -103,7 +115,10 @@ inline uint8_t is_source(const void* opaque) {
 inline nodrix_status_v2 open_node(
     void* opaque, const nodrix_node_context_v2* context) {
   auto* node = static_cast<Node*>(opaque);
-  if (!context) return NODRIX_STATUS_INVALID_ARGUMENT;
+  if (!context ||
+      context->struct_size < NODRIX_NODE_CONTEXT_V2_REQUIRED_SIZE) {
+    return NODRIX_STATUS_INVALID_ARGUMENT;
+  }
   return guard(node, [&] { return node->open(*context); });
 }
 
@@ -115,6 +130,18 @@ inline nodrix_status_v2 process(
     void* emitter_context) {
   auto* node = static_cast<Node*>(opaque);
   if (!inputs && count > 0) return NODRIX_STATUS_INVALID_ARGUMENT;
+  for (size_t index = 0; index < count; ++index) {
+    if (inputs[index].struct_size <
+            NODRIX_MESSAGE_V2_REQUIRED_SIZE ||
+        inputs[index].correlation.struct_size <
+            NODRIX_CORRELATION_V2_REQUIRED_SIZE ||
+        inputs[index].payload.struct_size <
+            NODRIX_BUFFER_V2_REQUIRED_SIZE ||
+        inputs[index].payload.memory.struct_size <
+            NODRIX_MEMORY_HANDLE_V2_REQUIRED_SIZE) {
+      return NODRIX_STATUS_INVALID_ARGUMENT;
+    }
+  }
   return guard(node, [&] {
     return node->process(
         std::span<const nodrix_message_v2>(inputs, count),
@@ -150,8 +177,11 @@ inline nodrix_status_v2 export_node(
     nodrix_node_api_v2* output,
     std::uint64_t features = NODRIX_C_FEATURE_TYPED_PORTS |
                              NODRIX_C_FEATURE_MEMORY_DOMAINS |
-                             NODRIX_C_FEATURE_ZERO_COPY_BUFFERS) noexcept {
-  if (!node || !output || output->struct_size < sizeof(nodrix_node_api_v2)) {
+                             NODRIX_C_FEATURE_ZERO_COPY_BUFFERS |
+                             NODRIX_C_FEATURE_CORRELATION |
+                             NODRIX_C_FEATURE_DEVICE_HANDLES) noexcept {
+  if (!node || !output ||
+      output->struct_size < NODRIX_NODE_API_V2_REQUIRED_SIZE) {
     delete node;
     return NODRIX_STATUS_INVALID_ARGUMENT;
   }

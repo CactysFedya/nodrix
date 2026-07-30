@@ -1,6 +1,9 @@
-# Офлайн-установка Nodrix 1.2.0
+# Офлайн-установка Nodrix 2.0.0
 
-Nodrix 1.2.0 снижает минимальное требование build backend до `setuptools>=68` и не требует `packaging>=24.2` только для чтения лицензии. Это позволяет собирать проект на Ubuntu 24.04/Raspberry Pi без обращения к PyPI, если основные зависимости уже перенесены локально.
+Nodrix сохраняет минимальное требование build backend `setuptools>=68` и не
+требует нового парсера SPDX только для чтения лицензии. Это позволяет собирать
+проект на Ubuntu 24.04/Raspberry Pi без обращения к PyPI, если основные
+зависимости уже перенесены локально.
 
 ## Быстрая установка из исходников
 
@@ -19,7 +22,10 @@ python3 -m pip install . \
 scripts/install_offline.sh
 ```
 
-Скрипт сначала проверяет локальное наличие `setuptools`, `wheel`, `typer`, `pydantic`, `PyYAML` и `rich`, затем компилирует четыре C++-расширения без сетевых запросов.
+Скрипт сначала проверяет локальное наличие `setuptools`, `wheel`, `typer`,
+`pydantic`, `PyYAML`, `rich`, `packaging`, CMake и C++20-компилятора. Затем он
+компилирует пять Python C++-расширений и упакованный standalone native runner
+без сетевых запросов.
 
 ## Перенос зависимостей
 
@@ -70,5 +76,6 @@ sudo apt install -y \
 
 ```bash
 nodrix --version
+nodrix native doctor
 nodrix media doctor
 ```

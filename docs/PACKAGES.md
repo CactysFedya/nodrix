@@ -29,7 +29,19 @@ nodrix plugin info cobra-perception
 nodrix plugin remove cobra-perception
 ```
 
-Installation rejects path traversal and checksum mismatches before extraction.
+Verification and extraction use the same open archive. Installation rejects
+path traversal, absolute/Windows-unsafe names, symlinks, directory entries,
+duplicates, cross-platform case/Unicode collisions, untracked members,
+checksum mismatches, excessive file count, per-file/total size, and compression
+ratio before extraction. Metadata name/version must match the packaged
+manifest.
+
+Extraction occurs in a private staging directory beside the target and is
+committed with one atomic rename. Installed `name/version` directories are
+immutable; reinstalling the same version fails instead of overwriting files.
+The `current` pointer is replaced atomically. A failed verification or
+compatibility check leaves no installed version.
+
 Ed25519 verification binds the archive metadata and complete checksum set to a
 trusted publisher key. The registry remains offline and does not download or
 execute packages during search.

@@ -3,13 +3,36 @@
 ## 2.0.0 — Stable Universal Runtime
 - Added strict Manifest v2, reusable nested Fragments, explicit engine selection, and safe non-destructive migration from 1.x.
 - Stabilized the Python SDK exports, Plugin C ABI 2, lifecycle states, health reasons/timestamps, and message correlation metadata for the 2.x line.
+- Finalized C ABI 2 correlation string views, integer/string trace identity,
+  optional ports, cooperative stop control, opaque device-memory handles, and
+  forward-compatible required-size prefixes.
+- Added direct external C ABI source/processor/sink loading to the standalone
+  C++ runner, including ABI/features/symbol/port/memory validation, exact
+  `last_error` artifacts, multiple instances, and retained zero-copy buffers.
+- Packaged a portable `nodrix-native-runner` in platform wheels and disabled
+  runtime compilation unless `NODRIX_ALLOW_RUNTIME_BUILD=1` is explicit.
+- Added native exact/approximate/latest/zip synchronization, optional
+  side-inputs, signal-driven bounded shutdown, lifecycle events, live
+  P50/P95/P99/queue status, copy counters, and shutdown-discard accounting.
+- Replaced per-connection-only retries with bounded per-disconnect and rolling
+  lifetime reconnect budgets, stable reset, capped jitter, interruptible
+  backoff, connection states, and reconnect metrics.
 - Added bounded `restart_node`, `fallback_node`, and `isolate_branch` policies with a fault-injected fallback integration test.
 - Added manifest-driven crash-safe recording that preserves pipeline, run, source, sequence, timestamp, and trace identity.
 - Added Ed25519 package signatures, checksum verification before extraction, retained verification records, and offline `nodrix plugin` commands.
+- Hardened `.ndpkg` verification against traversal, symlinks, duplicate and
+  cross-platform-colliding names, decompression/resource abuse, metadata
+  mismatch, and TOCTOU; versions now install atomically and immutably.
+- Hardened NDRX2 with file/chunk/record/stream limits, exact index coverage,
+  record-header validation, trailing-section rejection, and bounded mutation
+  tests.
 - Added `nodrix run --production` checks for schemas, health, stream security, hardware fallback, model paths, plugin signatures, and planned memory copies.
 - Added optional OpenTelemetry lifecycle traces without adding work to the per-message dataplane.
 - Added optional lazy ROS 2 source/sink adapters with QoS, timestamps, common message classes, and custom mapping hooks.
 - Added Linux ARM64, macOS, and Windows CI coverage, platform capabilities, and benchmark specifications for Raspberry Pi, Jetson, and GPU workstations.
+- Added unpacked-sdist/public-test/wheel-from-sdist qualification, installed
+  runner smoke tests, external plugin E2E, C11 ABI checks, ASan/UBSan, queue
+  TSan, security regression jobs, and same-host performance gate tooling.
 - Kept Manifest v1 and legacy Node lifecycle adapters readable while new templates produce v2.
 
 ## 1.9.0 — Planner, Diagnose, Explain and Measured Tuning

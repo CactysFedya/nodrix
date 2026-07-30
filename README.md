@@ -13,7 +13,9 @@ Nodrix is a high-performance typed runtime for local and distributed streaming g
 Nodrix 2.0 establishes stable Manifest v2, Python SDK and Plugin C ABI 2
 contracts while keeping existing Manifest v1 pipelines readable. It adds
 reusable Fragments, signed offline plugins, production validation, automatic
-recording, OpenTelemetry lifecycle traces, and optional ROS 2 adapters.
+recording, OpenTelemetry lifecycle traces, optional ROS 2 adapters, a packaged
+standalone C++ runner, and direct external C ABI plugin execution in
+`engine: native`.
 
 ```bash
 nodrix migrate pipeline.yaml --to v2
@@ -96,7 +98,11 @@ For an isolated CLI installation:
 pipx install nodrix
 ```
 
-GitHub Releases provide prebuilt Linux x86-64, Linux ARM64 and macOS Apple Silicon wheels. When a compatible wheel is unavailable, `pip` builds the included C++20 extensions from the source distribution, which requires a C++ compiler and Python development headers.
+Release wheels cover Linux x86-64, Linux ARM64, macOS Apple Silicon, and
+Windows x86-64. Each wheel contains the native extensions and
+`nodrix/bin/nodrix-native-runner`; production execution does not compile code
+on first use. When no compatible wheel exists, building the included source
+distribution requires CMake, a C++20 compiler, and Python development headers.
 
 ## Empty project and templates
 
@@ -211,7 +217,9 @@ nodes:
     uses: my-nodes/passthrough
 ```
 
-`.ndpkg` installation checks archive paths and SHA-256 checksums. Packages may
+`.ndpkg` installation verifies the complete member set and SHA-256 checksums
+before extraction, rejects traversal/symlinks/platform filename collisions and
+decompression bombs, and atomically installs immutable versions. Packages may
 be signed and verified with an Ed25519 key. The local registry is offline by
 design; Nodrix does not silently download or execute marketplace code.
 
@@ -265,7 +273,8 @@ The validator checks graph cycles, port/type compatibility, memory transfers, un
 The production gate additionally requires Manifest v2 and explicit health
 timeouts, rejects fallback-permitting acceleration, relative model paths,
 unverified required plugins, unencrypted/open LAN exports, and planned payload
-copies.
+copies. Direct native libraries additionally require an absolute path inside
+`security.native_plugin_allowlist` and cannot be world-writable.
 
 `nodrix optimize` writes separate benchmark variants and a decision report. It
 never edits or applies the production pipeline.
@@ -290,14 +299,26 @@ nodrix native inspect ./libdetector.so
 
 Plugin C ABI 2.0 uses numeric ABI `131072`, opaque handles and function
 tables. C++ standard-library objects and exceptions never cross the shared
-library boundary. Incompatible plugins are rejected before node creation.
+library boundary. Correlation strings and host/device memory ownership have
+explicit lifetime rules. Incompatible plugins are rejected before node
+creation. External source, processor, and sink plugins can execute entirely in
+the standalone runner:
+
+```yaml
+runtime:
+  engine: native
+nodes:
+  detector:
+    uses: native:/opt/nodrix/plugins/libdetector.so#vision.detector
+```
 
 ## Main capabilities carried into 1.0
 
 - Python/C++ unified graph executor;
 - native bounded queues and reusable buffer pools;
 - shared-memory process isolation with zero-copy input/output paths;
-- CPU, shared, DMA-BUF, CUDA, ROCm, Vulkan, OpenCL, Metal, NPU and external-memory contracts;
+- stable CPU, shared, DMA-BUF, CUDA, ROCm, Vulkan, OpenCL, Metal, NPU,
+  DLPack, and external-memory contracts;
 - DLPack interoperability;
 - `.ndrx` universal record/play;
 - FFmpeg Media Pack and H.264/H.265 named streams;
@@ -307,6 +328,21 @@ library boundary. Incompatible plugins are rejected before node creation.
 
 ## Honest limitations
 
-Nodrix 1.5.0 adds multi-rate tracking but does not claim a fully device-resident vision path. The current FFmpeg source and overlay use host BGR frames; full V4L2 DMA-BUF capture, native libav processing, timestamped H.264/H.265 access units, CUDA IPC mapping, QUIC/UDP and ROS 2 bridges remain future backends.
+Memory-domain contracts and planning are stable, but a declared domain is not
+a built-in hardware backend. Validated paths are listed in
+[docs/PLATFORM_CAPABILITIES.md](docs/PLATFORM_CAPABILITIES.md). The reference
+FFmpeg source and overlay still use host BGR frames; complete V4L2 DMA-BUF
+capture and CUDA IPC operators remain hardware-specific plugins. ROS 2
+adapters are generic Python adapters, not a claim of loaned-message image or
+PointCloud2 zero-copy. `placement` is a deployment contract, not a central
+scheduler.
 
-See [docs/BLOCKS.md](docs/BLOCKS.md), [docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md), [docs/PROFILES.md](docs/PROFILES.md), [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md), [docs/BENCHMARKING.md](docs/BENCHMARKING.md), [docs/MULTI_RATE_VISION.md](docs/MULTI_RATE_VISION.md), [docs/RELEASE_1.5.0.md](docs/RELEASE_1.5.0.md), [CONTRIBUTING.md](CONTRIBUTING.md), and [PUBLISHING_RU.md](PUBLISHING_RU.md).
+See [docs/BLOCKS.md](docs/BLOCKS.md),
+[docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md),
+[docs/PROFILES.md](docs/PROFILES.md),
+[docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md),
+[docs/BENCHMARKING.md](docs/BENCHMARKING.md),
+[docs/MULTI_RATE_VISION.md](docs/MULTI_RATE_VISION.md),
+[docs/RELEASE_2.0.0.md](docs/RELEASE_2.0.0.md),
+[CONTRIBUTING.md](CONTRIBUTING.md), and
+[PUBLISHING_RU.md](PUBLISHING_RU.md).

@@ -42,6 +42,12 @@ An interrupted file is still readable:
 
 NDRX1 files remain readable. New recordings always use NDRX2.
 
+Readers reject files above configured file/chunk/record/stream limits, packet
+or index lengths above their bounds, indexes that overlap or leave record bytes
+uncovered, record-header/index disagreement, and any data after a finalized
+summary. These limits are constructor parameters for deployments that need
+stricter bounds.
+
 ## Inspect and repair
 
 ```bash

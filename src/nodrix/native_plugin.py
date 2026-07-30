@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import json
 from pathlib import Path
 from typing import Any
@@ -35,6 +34,7 @@ class NativePluginNode(Node):
         self.output_types = dict(self.host.output_types)
         self.input_memory = dict(self.host.input_memory)
         self.output_memory = dict(self.host.output_memory)
+        self.optional_inputs = frozenset(self.host.optional_inputs)
         if bool(self.host.is_source):
             raise RuntimeError(
                 "Native source plugins currently require engine: native; mixed Python/C++ graphs support native processors and sinks"

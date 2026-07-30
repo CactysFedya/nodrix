@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <atomic>
 #include <span>
 #include <string>
 #include <string_view>
@@ -15,6 +16,7 @@ struct PortSpec final {
   std::string name;
   std::string type;
   std::string memory{"any"};
+  bool optional{false};
 };
 
 struct NodeContext final {
@@ -22,6 +24,12 @@ struct NodeContext final {
   std::string parameters_json;
   std::string run_dir;
   std::string device{"auto"};
+  const std::atomic<bool>* stop_requested{nullptr};
+
+  [[nodiscard]] bool should_stop() const noexcept {
+    return stop_requested &&
+           stop_requested->load(std::memory_order_acquire);
+  }
 };
 
 class Emitter {
@@ -42,7 +50,8 @@ class Node {
   virtual void run_source(Emitter&) {}
   virtual void process(std::span<const Message>, Emitter&) = 0;
   virtual void flush(Emitter&) {}
-  virtual void close() noexcept {}
+  virtual void close() {}
+  virtual std::uint64_t observed_copies() const noexcept { return 0; }
 };
 
 }  // namespace nodrix

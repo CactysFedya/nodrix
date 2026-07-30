@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 import time
@@ -157,6 +156,7 @@ def _runtime(
     overrides: list[str] | None = None,
     block_overrides: list[str] | None = None,
     event_callback=None,
+    production: bool = False,
 ):
     manifest = load_manifest(
         path,
@@ -164,6 +164,25 @@ def _runtime(
         overrides=overrides,
         block_overrides=block_overrides,
     )
+    if production:
+        preflight = validate_production(
+            manifest,
+            {"edges": []},
+            strict=True,
+            production=True,
+        )
+        failures = [
+            issue for issue in preflight if issue.severity == "error"
+        ]
+        if failures:
+            rendered = "; ".join(
+                f"{issue.code} {issue.location}: {issue.message}"
+                for issue in failures
+            )
+            raise NodrixError(
+                f"Production preflight failed before loading plugins: "
+                f"{rendered}"
+            )
     native_only = all(
         config.uses.startswith("native.") or config.uses.startswith("native:")
         for config in manifest.nodes.values()
@@ -231,6 +250,7 @@ def validate(
             profile=profile,
             overrides=set_values,
             block_overrides=block_values,
+            production=production,
         )
         desc = runtime.describe()
         issues = validate_production(
@@ -421,6 +441,7 @@ def run(
                 console.print(f"[red]- {issue}[/red]")
             raise typer.Exit(1)
     metrics_server = None
+    runtime = None
     try:
         details = load_manifest_details(
             pipeline,
@@ -428,16 +449,29 @@ def run(
             overrides=set_values,
             block_overrides=block_values,
         )
+        indexes = {
+            name: index
+            for index, name in enumerate(details.manifest.nodes, start=1)
+        }
+
+        def runtime_event(event: dict[str, object]) -> None:
+            console.print(
+                render_runtime_event(event, indexes, len(indexes))
+            )
+
         if production:
-            validation_runtime = _runtime(
+            runtime = _runtime(
                 pipeline,
+                run_root=run_root,
                 profile=profile,
                 overrides=set_values,
                 block_overrides=block_values,
+                event_callback=runtime_event,
+                production=True,
             )
             production_issues = validate_production(
                 details.manifest,
-                validation_runtime.describe(),
+                runtime.describe(),
                 strict=True,
                 production=True,
             )
@@ -469,19 +503,16 @@ def run(
                     + (f" ({attempts})" if attempts else "")
                 )
 
-        indexes = {name: index for index, name in enumerate(details.manifest.nodes, start=1)}
-
-        def runtime_event(event: dict[str, object]) -> None:
-            console.print(render_runtime_event(event, indexes, len(indexes)))
-
-        runtime = _runtime(
-            pipeline,
-            run_root=run_root,
-            profile=profile,
-            overrides=set_values,
-            block_overrides=block_values,
-            event_callback=runtime_event,
-        )
+        if runtime is None:
+            runtime = _runtime(
+                pipeline,
+                run_root=run_root,
+                profile=profile,
+                overrides=set_values,
+                block_overrides=block_values,
+                event_callback=runtime_event,
+                production=production,
+            )
         metrics_target = metrics_listen or details.manifest.runtime.metrics.listen
         if metrics_target:
             if not hasattr(runtime, "snapshot"):

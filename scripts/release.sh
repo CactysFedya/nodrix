@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${1:?Usage: scripts/release.sh 1.2.0}"
+VERSION="${1:?Usage: scripts/release.sh 2.0.0}"
 TAG="v$VERSION"
 
 python scripts/bump_version.py "$VERSION"

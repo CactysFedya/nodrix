@@ -36,11 +36,23 @@ through `token_env`. Client trust and mTLS credentials may be supplied through
 `.ndpkg` archives are SHA-256 checked before extraction and may be signed with
 Ed25519. `nodrix plugin verify --public-key ... --require-signature` verifies
 publisher identity, and installation retains the verification record.
-Production mode can require signed plugins.
+Verification rejects traversal, symlinks, portable-name collisions, untracked
+or duplicate members, and archive resource abuse. Installation is staged,
+atomic, and immutable. Production mode can require signed plugins.
 
 Native plugins execute trusted machine code. Use process isolation for
 components outside the deployment trust boundary. The local registry is
 offline: no package is downloaded or executed as a side effect of search.
+Direct native library paths are checked before `dlopen` in production: they
+must be absolute, below `security.native_plugin_allowlist`, present, and not
+world-writable. Lock/run artifacts retain the resolved path and file hash.
+
+## Recordings
+
+NDRX2 readers bound metadata, index, packet, file, chunk, record, and stream
+counts. Each checkpoint is checksummed, its index must exactly cover the record
+region, record headers are cross-checked, and a finalized file rejects trailing
+or duplicate sections.
 
 ## Production gate
 

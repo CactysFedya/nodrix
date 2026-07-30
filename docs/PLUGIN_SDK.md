@@ -30,9 +30,15 @@ nodrix plugin install dist/perception-pack-2.1.0.ndpkg \
 ```
 
 Other offline registry commands are `plugin search`, `plugin info`, and
-`plugin remove`. Installation verifies safe paths and every SHA-256 checksum
-before extraction. A trusted public key is required to mark the signature as
-verified; the verification record is retained with the installation.
+`plugin remove`. Installation verifies safe portable paths, resource limits,
+the complete member set, and every SHA-256 checksum before extraction.
+Versions are immutable and atomically installed. A trusted public key is
+required to mark the signature as verified; the verification record is
+retained with the installation.
 
 Native plugins are trusted machine code. Use process isolation when the
-publisher or implementation is outside the deployment trust boundary.
+publisher or implementation is outside the deployment trust boundary. In
+production, direct `native:/absolute/library#type` references must reside below
+an absolute `security.native_plugin_allowlist` entry and world-writable
+libraries are rejected. Signed installed packages are the preferred deployment
+unit.

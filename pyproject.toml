@@ -90,6 +90,8 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 nodrix = [
+  "bin/nodrix-native-runner",
+  "bin/nodrix-native-runner.exe",
   "native/CMakeLists.txt",
   "native/include/nodrix/*.h",
   "native/include/nodrix/*.hpp",
@@ -107,11 +109,14 @@ target-version = "py311"
 line-length = 120
 exclude = ["build", "dist", ".venv", "src/nodrix/native"]
 
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [tool.cibuildwheel]
 build = "cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux*"
 build-verbosity = 1
-test-command = "python -c \"import nodrix; print(nodrix.__version__)\" && nodrix --version"
+test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix; from nodrix.native_runtime import NativeToolchain; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == 'nodrix-native-runner 2.0.0'\" && nodrix --version"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"

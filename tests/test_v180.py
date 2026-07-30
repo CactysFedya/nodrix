@@ -17,7 +17,11 @@ from nodrix.streams import StreamClient, StreamServer, server_tls_context
 from nodrix.validation import validate_production
 
 
-def _certificate(tmp_path: Path) -> tuple[Path, Path]:
+def _certificate(
+    tmp_path: Path,
+    *,
+    include_ip: bool = True,
+) -> tuple[Path, Path]:
     executable = shutil.which("openssl")
     if executable is None:
         pytest.skip("OpenSSL command is unavailable")
@@ -37,7 +41,11 @@ def _certificate(tmp_path: Path) -> tuple[Path, Path]:
             "-subj",
             "/CN=localhost",
             "-addext",
-            "subjectAltName=DNS:localhost,IP:127.0.0.1",
+            (
+                "subjectAltName=DNS:localhost,IP:127.0.0.1"
+                if include_ip
+                else "subjectAltName=DNS:localhost"
+            ),
             "-keyout",
             str(private_key),
             "-out",
@@ -107,6 +115,32 @@ def test_tls_verification_cannot_be_disabled(tmp_path: Path) -> None:
     server.register("/secure", "core.object")
     server.start()
     client = StreamClient(f"nodrix+tls://localhost:{server.port}/secure")
+    try:
+        with pytest.raises(ssl.SSLCertVerificationError):
+            client.connect()
+    finally:
+        client.close()
+        server.close()
+
+
+def test_tls_rejects_hostname_mismatch(tmp_path: Path) -> None:
+    certificate, private_key = _certificate(
+        tmp_path,
+        include_ip=False,
+    )
+    server = StreamServer(
+        host="127.0.0.1",
+        tls_context=server_tls_context(
+            certificate=str(certificate),
+            private_key=str(private_key),
+        ),
+    )
+    server.register("/secure", "core.object")
+    server.start()
+    client = StreamClient(
+        f"nodrix+tls://127.0.0.1:{server.port}/secure",
+        ca_file=str(certificate),
+    )
     try:
         with pytest.raises(ssl.SSLCertVerificationError):
             client.connect()

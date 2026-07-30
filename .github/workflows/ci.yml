@@ -50,6 +50,10 @@ jobs:
           print("All Nodrix native extensions loaded")
           PY
 
+      - name: Lint
+        if: matrix.python-version == '3.13'
+        run: ruff check src tests scripts setup.py
+
       - name: Run tests
         run: pytest -q
 
@@ -128,8 +132,36 @@ jobs:
           UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
         run: ctest --test-dir build/native-sanitized --output-on-failure
 
+  native-thread-sanitizer:
+    name: C++ queue ThreadSanitizer
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Configure ThreadSanitizer
+        run: |
+          cmake -S src/nodrix/native -B build/native-tsan \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DNODRIX_BUILD_EXAMPLE_PLUGIN=OFF \
+            -DNODRIX_NATIVE_LTO=OFF \
+            -DNODRIX_NATIVE_MARCH_NATIVE=OFF \
+            -DNODRIX_NATIVE_THREAD_SANITIZER=ON
+
+      - name: Build queue test
+        run: |
+          cmake --build build/native-tsan \
+            --target nodrix-native-core-test --parallel 2
+
+      - name: Test queues
+        env:
+          TSAN_OPTIONS: halt_on_error=1:second_deadlock_stack=1
+        run: |
+          ctest --test-dir build/native-tsan \
+            --output-on-failure -R nodrix-native-core-test
+
   native-e2e:
-    name: Native end-to-end
+    name: Native and external plugin end-to-end
     runs-on: ubuntu-latest
 
     steps:
@@ -146,10 +178,38 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
-      - name: Compile and execute native graph
+      - name: Compile and execute native graphs
         env:
-          NODRIX_NATIVE_E2E: "1"
-        run: pytest -q tests/test_native_runtime.py -k executes
+          NODRIX_STRESS: "1"
+        run: |
+          pytest -q \
+            tests/test_native_runtime.py \
+            tests/test_native_plugin_runner.py
+
+  security-tests:
+    name: Package, recording, stream, and TLS hardening
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Nodrix
+        run: python -m pip install -e ".[dev,security]"
+
+      - name: Run security regression tests
+        run: |
+          pytest -q \
+            tests/test_release_hardening.py \
+            tests/test_v170.py \
+            tests/test_v180.py \
+            tests/test_v200.py::test_package_checksums_and_ed25519_signature
+
+      - name: Run bounded wire fuzzer
+        run: python scripts/wire_fuzz.py
 
   package-check:
     name: Build sdist and wheel
@@ -169,16 +229,64 @@ jobs:
       - name: Check version consistency
         run: python scripts/check_release.py --version-only
 
-      - name: Build distributions
-        run: python -m build
+      - name: Build source distribution
+        run: python -m build --sdist
 
-      - name: Validate distributions
-        run: python -m twine check dist/*
+      - name: Validate source distribution
+        run: python -m twine check dist/*.tar.gz
 
-      - name: Install built wheel
+      - name: Test unpacked source distribution
+        run: |
+          mkdir /tmp/nodrix-sdist-source
+          tar -xzf dist/*.tar.gz \
+            -C /tmp/nodrix-sdist-source --strip-components=1
+          test ! -e /tmp/nodrix-sdist-source/.github
+          test -e \
+            /tmp/nodrix-sdist-source/tests/test_release_101.py
+          python -m venv /tmp/nodrix-sdist-test
+          /tmp/nodrix-sdist-test/bin/python -m pip install --upgrade pip
+          /tmp/nodrix-sdist-test/bin/python -m pip install \
+            "/tmp/nodrix-sdist-source[dev,all]"
+          cd /tmp/nodrix-sdist-source
+          /tmp/nodrix-sdist-test/bin/python -m pytest \
+            -q -o pythonpath=
+
+      - name: Build wheel from unpacked sdist
+        run: |
+          cd /tmp/nodrix-sdist-source
+          /tmp/nodrix-sdist-test/bin/python -m pip install build
+          /tmp/nodrix-sdist-test/bin/python -m build \
+            --wheel --outdir /tmp/nodrix-wheelhouse
+          python -m twine check /tmp/nodrix-wheelhouse/*.whl
+
+      - name: Install wheel without runtime compilation
         run: |
           python -m venv /tmp/nodrix-wheel-test
           /tmp/nodrix-wheel-test/bin/python -m pip install --upgrade pip
-          /tmp/nodrix-wheel-test/bin/python -m pip install dist/*.whl
-          /tmp/nodrix-wheel-test/bin/python -c "import nodrix._native_queue, nodrix._native_buffer, nodrix._native_device, nodrix._native_plugin, nodrix._native_tracking"
+          /tmp/nodrix-wheel-test/bin/python -m pip install \
+            /tmp/nodrix-wheelhouse/*.whl
+          NODRIX_ALLOW_RUNTIME_BUILD=0 \
+            /tmp/nodrix-wheel-test/bin/python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          import tempfile
+          import nodrix
+          import nodrix._native_queue
+          import nodrix._native_buffer
+          import nodrix._native_device
+          import nodrix._native_plugin
+          import nodrix._native_tracking
+          from nodrix.native_runtime import NativeToolchain
+
+          runner = NativeToolchain(Path(tempfile.gettempdir())).ensure_runner()
+          version = subprocess.run(
+              [str(runner), "--version"],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout.strip()
+          assert version == "nodrix-native-runner 2.0.0"
+          assert "site-packages" in str(runner)
+          print(version)
+          PY
           /tmp/nodrix-wheel-test/bin/nodrix --version

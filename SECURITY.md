@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Security fixes are provided for the latest Nodrix 1.x release.
+Security fixes are provided for the latest Nodrix 2.x release.
 
 ## Reporting a vulnerability
 

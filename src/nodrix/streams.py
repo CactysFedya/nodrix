@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections import deque
 import json
 import hmac
 import ipaddress
 import os
 import queue
+import random
 import socket
 import ssl
 import struct
@@ -16,7 +18,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .discovery import DiscoveryAdvertiser, resolve_stream
 from .messages import Message
-from .wire import WirePacket, encode_message, recv_message, send_packet
+from .wire import encode_message, recv_message, send_packet
 
 _HANDSHAKE_LENGTH = struct.Struct("!I")
 _TLS_VERSIONS = {
@@ -319,7 +321,10 @@ class StreamServer:
             if count <= 0:
                 raise EOFError("incomplete Nodrix handshake")
             offset += count
-        return json.loads(bytes(data).decode("utf-8"))
+        value = json.loads(bytes(data).decode("utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError("Nodrix handshake must be a JSON object")
+        return value
 
     @staticmethod
     def _send_json(sock: socket.socket, value: dict[str, Any]) -> None:
@@ -570,6 +575,11 @@ class StreamClient:
         reconnect_attempts: int = 0,
         reconnect_backoff: float = 0.1,
         reconnect_max_backoff: float = 5.0,
+        reconnect_attempts_per_disconnect: int | None = None,
+        reconnect_max_total_attempts: int | None = None,
+        reconnect_window_seconds: float = 300.0,
+        reconnect_reset_after_stable_seconds: float = 60.0,
+        reconnect_jitter: float = 0.2,
     ) -> None:
         if uri_or_name.startswith(("nodrix://", "nodrix+tls://")):
             uri = uri_or_name
@@ -595,11 +605,35 @@ class StreamClient:
         self.token = token or os.environ.get("NODRIX_STREAM_TOKEN")
         self.max_message_bytes = int(max_message_bytes)
         self.receive_buffer_bytes = max(16384, int(receive_buffer_bytes))
-        if reconnect_attempts < 0:
-            raise ValueError("reconnect_attempts cannot be negative")
+        attempts_per_disconnect = (
+            reconnect_attempts
+            if reconnect_attempts_per_disconnect is None
+            else reconnect_attempts_per_disconnect
+        )
+        max_total_attempts = (
+            reconnect_attempts
+            if reconnect_max_total_attempts is None
+            else reconnect_max_total_attempts
+        )
+        if attempts_per_disconnect < 0 or max_total_attempts < 0:
+            raise ValueError("Reconnect attempt limits cannot be negative")
         if reconnect_backoff < 0 or reconnect_max_backoff < reconnect_backoff:
             raise ValueError("Reconnect backoff must be non-negative and bounded")
-        self.reconnect_attempts = int(reconnect_attempts)
+        if reconnect_window_seconds <= 0:
+            raise ValueError("reconnect_window_seconds must be positive")
+        if reconnect_reset_after_stable_seconds < 0:
+            raise ValueError(
+                "reconnect_reset_after_stable_seconds cannot be negative"
+            )
+        if not 0 <= reconnect_jitter <= 1:
+            raise ValueError("reconnect_jitter must be between 0 and 1")
+        self.reconnect_attempts = int(attempts_per_disconnect)
+        self.reconnect_max_total_attempts = int(max_total_attempts)
+        self.reconnect_window_seconds = float(reconnect_window_seconds)
+        self.reconnect_reset_after_stable_seconds = float(
+            reconnect_reset_after_stable_seconds
+        )
+        self.reconnect_jitter = float(reconnect_jitter)
         self.reconnect_backoff = float(reconnect_backoff)
         self.reconnect_max_backoff = float(reconnect_max_backoff)
         self.server_hostname = server_hostname or self.host
@@ -619,10 +653,84 @@ class StreamClient:
         self.socket: socket.socket | None = None
         self.type: str | None = None
         self.reconnects = 0
+        self.reconnect_attempts_total = 0
+        self.reconnect_success_total = 0
+        self.reconnect_failures_total = 0
+        self._reconnect_attempt_times: deque[float] = deque()
+        self._connected_since: float | None = None
+        self._state = "disconnected"
+        self._shutdown = threading.Event()
+        self._state_lock = threading.RLock()
 
-    def connect(self, timeout: float = 5.0) -> None:
+    def _prune_reconnect_budget(self, now: float) -> None:
+        threshold = now - self.reconnect_window_seconds
+        while (
+            self._reconnect_attempt_times
+            and self._reconnect_attempt_times[0] < threshold
+        ):
+            self._reconnect_attempt_times.popleft()
+
+    def _refresh_stable_state(self, now: float) -> None:
+        if (
+            self._connected_since is not None
+            and now - self._connected_since
+            >= self.reconnect_reset_after_stable_seconds
+        ):
+            self._reconnect_attempt_times.clear()
+            if self._state == "degraded":
+                self._state = "connected"
+
+    def _reserve_reconnect_attempt(self) -> None:
+        now = time.monotonic()
+        with self._state_lock:
+            self._prune_reconnect_budget(now)
+            self._refresh_stable_state(now)
+            if (
+                self.reconnect_max_total_attempts <= 0
+                or len(self._reconnect_attempt_times)
+                >= self.reconnect_max_total_attempts
+            ):
+                self._state = "budget_exhausted"
+                raise ConnectionError(
+                    "Nodrix stream reconnect budget exhausted"
+                )
+            self._reconnect_attempt_times.append(now)
+            self.reconnect_attempts_total += 1
+
+    def _mark_disconnect(self) -> None:
+        now = time.monotonic()
+        with self._state_lock:
+            self._refresh_stable_state(now)
+            self._connected_since = None
+            self._state = "reconnecting"
+
+    def _close_socket(self) -> None:
+        if self.socket is not None:
+            try:
+                self.socket.close()
+            finally:
+                self.socket = None
+
+    def connect(
+        self, timeout: float = 5.0, *, _reconnect: bool = False
+    ) -> None:
         last_error: Exception | None = None
-        for attempt in range(self.reconnect_attempts + 1):
+        attempt_limit = (
+            self.reconnect_attempts
+            if _reconnect
+            else self.reconnect_attempts + 1
+        )
+        if attempt_limit <= 0:
+            raise ConnectionError(
+                "Nodrix stream reconnect is disabled"
+            )
+        for attempt in range(attempt_limit):
+            if self._shutdown.is_set():
+                raise ConnectionAbortedError(
+                    "Nodrix stream client is shutting down"
+                )
+            if _reconnect:
+                self._reserve_reconnect_attempt()
             sock: socket.socket | None = None
             try:
                 sock = socket.create_connection((self.host, self.port), timeout=timeout)
@@ -648,17 +756,36 @@ class StreamClient:
                 sock.settimeout(None)
                 self.socket = sock
                 self.type = str(response.get("type", "core.any"))
+                with self._state_lock:
+                    self._state = (
+                        "degraded" if _reconnect else "connected"
+                    )
+                    self._connected_since = time.monotonic()
+                    if _reconnect:
+                        self.reconnect_success_total += 1
                 return
             except (OSError, EOFError, LookupError, ValueError) as exc:
                 last_error = exc
                 if sock is not None:
                     sock.close()
-                if attempt >= self.reconnect_attempts:
+                if attempt + 1 >= attempt_limit:
+                    with self._state_lock:
+                        self._state = "failed"
+                        if _reconnect:
+                            self.reconnect_failures_total += 1
                     raise
                 self.reconnects += 1
                 delay = min(self.reconnect_backoff * (2**attempt), self.reconnect_max_backoff)
+                if delay and self.reconnect_jitter:
+                    delay *= random.uniform(
+                        1.0 - self.reconnect_jitter,
+                        1.0 + self.reconnect_jitter,
+                    )
                 if delay:
-                    time.sleep(delay)
+                    if self._shutdown.wait(delay):
+                        raise ConnectionAbortedError(
+                            "Nodrix stream shutdown interrupted reconnect backoff"
+                        )
         assert last_error is not None
         raise last_error
 
@@ -669,16 +796,41 @@ class StreamClient:
         try:
             return recv_message(self.socket, max_message_bytes=self.max_message_bytes)
         except (OSError, EOFError, ConnectionError):
-            self.close()
+            self._close_socket()
+            self._mark_disconnect()
             if self.reconnect_attempts <= 0:
                 raise
-            self.connect()
+            self.connect(_reconnect=True)
             assert self.socket is not None
             return recv_message(self.socket, max_message_bytes=self.max_message_bytes)
 
+    def report(self) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._state_lock:
+            self._prune_reconnect_budget(now)
+            self._refresh_stable_state(now)
+            uptime = (
+                0.0
+                if self._connected_since is None
+                else max(0.0, now - self._connected_since)
+            )
+            return {
+                "state": self._state,
+                "transport": "tls" if self.tls else "tcp",
+                "reconnect_attempts_total": self.reconnect_attempts_total,
+                "reconnect_success_total": self.reconnect_success_total,
+                "reconnect_failures_total": self.reconnect_failures_total,
+                "reconnect_budget_remaining": max(
+                    0,
+                    self.reconnect_max_total_attempts
+                    - len(self._reconnect_attempt_times),
+                ),
+                "connection_uptime_seconds": uptime,
+            }
+
     def close(self) -> None:
-        if self.socket is not None:
-            try:
-                self.socket.close()
-            finally:
-                self.socket = None
+        self._shutdown.set()
+        self._close_socket()
+        with self._state_lock:
+            self._connected_since = None
+            self._state = "closed"

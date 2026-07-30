@@ -20,6 +20,7 @@ class Message:
     timestamp_ns: int = field(default_factory=time.time_ns)
     stream_id: str = ""
     trace_id: int | str = 0
+    span_id: str = ""
     pipeline_id: str = ""
     run_id: str = ""
     source_id: str = ""

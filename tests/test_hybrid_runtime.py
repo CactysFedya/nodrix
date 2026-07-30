@@ -92,8 +92,10 @@ def test_native_queue_handles_backpressure() -> None:
 
     a = threading.Thread(target=producer)
     b = threading.Thread(target=consumer)
-    a.start(); b.start()
-    a.join(timeout=5); b.join(timeout=5)
+    a.start()
+    b.start()
+    a.join(timeout=5)
+    b.join(timeout=5)
     assert not a.is_alive() and not b.is_alive()
     assert received == list(range(5000))
 

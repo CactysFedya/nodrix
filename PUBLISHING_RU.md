@@ -7,7 +7,8 @@
 - CLI: `nodrix` и `nodrix-viewer`;
 - репозиторий: `CactysFedya/nodrix`;
 - CI проверяет Python 3.11–3.14 и C++ runtime;
-- workflow `publish.yml` собирает Linux x86-64, Linux ARM64 и macOS wheels;
+- workflow `publish.yml` собирает Linux x86-64, Linux ARM64, macOS Apple
+  Silicon и Windows x86-64 wheels;
 - публикация использует PyPI Trusted Publishing через OIDC;
 - после успешной загрузки автоматически создаётся GitHub Release.
 
@@ -65,33 +66,34 @@ Repository → Settings → Environments → New environment → pypi
 
 Рекомендуется включить Required reviewers. Секрет `PYPI_TOKEN` добавлять не нужно.
 
-## 4. Релиз 1.5.0
+## 4. Релиз 2.0.0
 
 После push основного репозитория:
 
 ```bash
-git tag -s v1.5.0 -m "Nodrix 1.5.0"
+git tag -s v2.0.0 -m "Nodrix 2.0.0"
 ```
 
 Если GPG-подпись не настроена:
 
 ```bash
-git tag -a v1.5.0 -m "Nodrix 1.5.0"
+git tag -a v2.0.0 -m "Nodrix 2.0.0"
 ```
 
 Затем:
 
 ```bash
-git push origin v1.5.0
+git push origin v2.0.0
 ```
 
 GitHub Actions автоматически:
 
 1. проверит соответствие тега версии;
-2. соберёт sdist и platform wheels;
-3. проверит дистрибутивы;
-4. загрузит их на PyPI;
-5. создаст GitHub Release и приложит файлы.
+2. повторит lint, полный Python suite, million-message stress и CTest;
+3. соберёт и проверит канонический sdist;
+4. соберёт все platform wheels именно из этого sdist;
+5. загрузит дистрибутивы на PyPI;
+6. создаст GitHub Release и приложит файлы.
 
 Проверка после публикации:
 
@@ -112,10 +114,11 @@ pip install "nodrix[media]"
 ## 5. Следующие релизы
 
 ```bash
-scripts/release.sh 1.5.0
+scripts/release.sh 2.0.0
 ```
 
-Перед запуском добавь секцию `## [1.5.0]` в `CHANGELOG.md`. Скрипт обновит версии, создаст commit/tag и отправит их в GitHub.
+Перед запуском добавь секцию `## 2.0.0` в `CHANGELOG.md`. Скрипт обновит
+версии, создаст commit/tag и отправит их в GitHub.
 
 PyPI запрещает перезаписывать уже опубликованную версию. Любое исправление требует новой версии.
 
@@ -131,6 +134,9 @@ python -m twine upload dist/*
 
 Используй project-scoped PyPI API token и не сохраняй его в репозитории или `.pypirc` внутри проекта.
 
-## Матрица 1.5.0
+## Матрица 2.0.0
 
-Релиз собирает wheels для Linux x86-64, Linux ARM64 и macOS Apple Silicon. macOS Intel временно исключён и не блокирует публикацию.
+Релиз собирает wheels для Linux x86-64, Linux ARM64, macOS Apple Silicon и
+Windows x86-64. Каждый wheel обязан содержать
+`nodrix/bin/nodrix-native-runner`; macOS Intel не входит в обязательную матрицу
+2.0.0.

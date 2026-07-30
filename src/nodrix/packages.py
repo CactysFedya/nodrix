@@ -8,8 +8,10 @@ import platform
 from pathlib import Path
 from pathlib import PurePosixPath
 import shutil
+import stat
 import sys
 import tempfile
+import unicodedata
 import zipfile
 from typing import Any
 
@@ -22,6 +24,11 @@ from . import __version__
 PACKAGE_FORMAT = "nodrix-package/1"
 PLUGIN_ABI = 2
 _SANDBOX_POLICIES = {"in_process", "process"}
+MAX_PACKAGE_FILES = 4096
+MAX_PACKAGE_MEMBER_BYTES = 512 * 1024 * 1024
+MAX_PACKAGE_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024
+MAX_PACKAGE_COMPRESSION_RATIO = 200.0
+MAX_PACKAGE_METADATA_BYTES = 4 * 1024 * 1024
 
 
 def nodrix_home() -> Path:
@@ -216,7 +223,208 @@ def _safe_extract(archive: zipfile.ZipFile, target: Path) -> None:
         destination = (target / item.filename).resolve()
         if root != destination and root not in destination.parents:
             raise ValueError(f"Unsafe package member: {item.filename}")
-    archive.extractall(target)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with archive.open(item, "r") as source, destination.open("xb") as output:
+            shutil.copyfileobj(source, output, length=1024 * 1024)
+
+
+def _safe_member_name(name: str) -> PurePosixPath:
+    if "\\" in name or "\x00" in name:
+        raise ValueError(f"Unsafe package member separator: {name}")
+    raw_parts = name.split("/")
+    member = PurePosixPath(name)
+    if (
+        not name
+        or member.is_absolute()
+        or any(part in {"", ".", ".."} for part in raw_parts)
+        or any(
+            ":" in part
+            or part.rstrip(" .") != part
+            or part.split(".", 1)[0].upper()
+            in {
+                "CON",
+                "PRN",
+                "AUX",
+                "NUL",
+                "COM1",
+                "COM2",
+                "COM3",
+                "COM4",
+                "COM5",
+                "COM6",
+                "COM7",
+                "COM8",
+                "COM9",
+                "LPT1",
+                "LPT2",
+                "LPT3",
+                "LPT4",
+                "LPT5",
+                "LPT6",
+                "LPT7",
+                "LPT8",
+                "LPT9",
+            }
+            for part in raw_parts
+        )
+    ):
+        raise ValueError(f"Unsafe package member: {name}")
+    return member
+
+
+def _validate_archive_limits(
+    archive: zipfile.ZipFile,
+    *,
+    max_files: int = MAX_PACKAGE_FILES,
+    max_member_bytes: int = MAX_PACKAGE_MEMBER_BYTES,
+    max_uncompressed_bytes: int = MAX_PACKAGE_UNCOMPRESSED_BYTES,
+    max_compression_ratio: float = MAX_PACKAGE_COMPRESSION_RATIO,
+) -> list[zipfile.ZipInfo]:
+    members = archive.infolist()
+    if len(members) > max_files:
+        raise ValueError(
+            f"Package contains too many members: {len(members)} > {max_files}"
+        )
+    total = 0
+    for item in members:
+        _safe_member_name(item.filename)
+        unix_mode = (item.external_attr >> 16) & 0xFFFF
+        if unix_mode and stat.S_ISLNK(unix_mode):
+            raise ValueError(
+                f"Package symlink members are forbidden: {item.filename}"
+            )
+        if item.is_dir():
+            raise ValueError(
+                f"Package directory entries are forbidden: {item.filename}"
+            )
+        if item.file_size > max_member_bytes:
+            raise ValueError(
+                f"Package member is too large: {item.filename}"
+            )
+        total += item.file_size
+        if total > max_uncompressed_bytes:
+            raise ValueError("Package uncompressed-size limit exceeded")
+        if (
+            item.file_size > 0
+            and item.file_size / max(1, item.compress_size)
+            > max_compression_ratio
+        ):
+            raise ValueError(
+                f"Package compression-ratio limit exceeded: {item.filename}"
+            )
+    return members
+
+
+def _verify_archive(
+    archive: zipfile.ZipFile,
+    package_path: Path,
+    *,
+    public_key: str | Path | None = None,
+    require_signature: bool = False,
+) -> dict[str, Any]:
+    members = _validate_archive_limits(archive)
+    names = [item.filename for item in members]
+    if len(names) != len(set(names)):
+        raise ValueError("Package contains duplicate archive members")
+    portable_names = [
+        unicodedata.normalize("NFC", name).casefold()
+        for name in names
+    ]
+    if len(portable_names) != len(set(portable_names)):
+        raise ValueError(
+            "Package contains names that collide on a supported platform"
+        )
+    try:
+        metadata_info = archive.getinfo("NODRIX-PACKAGE.json")
+    except KeyError as exc:
+        raise ValueError("Package metadata is missing") from exc
+    if metadata_info.file_size > MAX_PACKAGE_METADATA_BYTES:
+        raise ValueError("Package metadata-size limit exceeded")
+    try:
+        metadata = json.loads(archive.read(metadata_info))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Package metadata is not valid JSON") from exc
+    if metadata.get("format") != PACKAGE_FORMAT:
+        raise ValueError("Unsupported Nodrix package format")
+    raw_checksums = metadata.get("checksums")
+    if not isinstance(raw_checksums, dict):
+        raise ValueError("Package metadata checksums must be a mapping")
+    checksums = dict(raw_checksums)
+    for name, checksum in checksums.items():
+        _safe_member_name(name)
+        if (
+            not isinstance(checksum, str)
+            or len(checksum) != 64
+            or any(ch not in "0123456789abcdef" for ch in checksum)
+        ):
+            raise ValueError(f"Invalid package checksum entry: {name}")
+    expected_members = set(checksums) | {"NODRIX-PACKAGE.json"}
+    if set(names) != expected_members:
+        untracked = sorted(set(names) - expected_members)
+        missing = sorted(expected_members - set(names))
+        raise ValueError(
+            f"Package member set mismatch; untracked={untracked}, missing={missing}"
+        )
+    for name, expected in checksums.items():
+        if _hash_bytes(archive.read(name)) != expected:
+            raise ValueError(f"Package checksum mismatch: {name}")
+    try:
+        package_manifest = yaml.safe_load(
+            archive.read("nodrix.package.yaml")
+        )
+    except (KeyError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ValueError("Package manifest is missing or invalid") from exc
+    if not isinstance(package_manifest, dict):
+        raise ValueError("Package manifest must be a mapping")
+    if (
+        metadata.get("name") != package_manifest.get("name")
+        or str(metadata.get("version", ""))
+        != str(package_manifest.get("version", ""))
+    ):
+        raise ValueError(
+            "Package metadata name/version does not match its manifest"
+        )
+    signature = metadata.get("signature")
+    if require_signature and not signature:
+        raise ValueError("Package signature is required")
+    signature_verified = False
+    if public_key is not None:
+        if not signature or signature.get("algorithm") != "ed25519":
+            raise ValueError("Package has no supported Ed25519 signature")
+        try:
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import ed25519
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "Package signature verification requires `pip install nodrix[security]`"
+            ) from exc
+        key = serialization.load_pem_public_key(
+            Path(public_key).expanduser().resolve().read_bytes()
+        )
+        if not isinstance(key, ed25519.Ed25519PublicKey):
+            raise ValueError("Trusted package key must be an Ed25519 public key")
+        public_der = key.public_bytes(
+            serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        fingerprint = hashlib.sha256(public_der).hexdigest()
+        if fingerprint != signature.get("key_sha256"):
+            raise ValueError("Package signing-key fingerprint mismatch")
+        key.verify(
+            base64.b64decode(str(signature["value"]), validate=True),
+            _signature_payload(metadata),
+        )
+        signature_verified = True
+    return {
+        "path": str(package_path),
+        "name": metadata.get("name"),
+        "version": metadata.get("version"),
+        "files": len(checksums),
+        "checksums": "verified",
+        "signed": bool(signature),
+        "signature_verified": signature_verified,
+        "key_sha256": None if not signature else signature.get("key_sha256"),
+    }
 
 
 def verify_package(
@@ -227,67 +435,12 @@ def verify_package(
 ) -> dict[str, Any]:
     package_path = Path(package).expanduser().resolve()
     with zipfile.ZipFile(package_path) as archive:
-        names = [item.filename for item in archive.infolist()]
-        if len(names) != len(set(names)):
-            raise ValueError("Package contains duplicate archive members")
-        metadata = json.loads(archive.read("NODRIX-PACKAGE.json"))
-        if metadata.get("format") != PACKAGE_FORMAT:
-            raise ValueError("Unsupported Nodrix package format")
-        checksums = dict(metadata.get("checksums") or {})
-        expected_members = set(checksums) | {"NODRIX-PACKAGE.json"}
-        if set(names) != expected_members:
-            untracked = sorted(set(names) - expected_members)
-            missing = sorted(expected_members - set(names))
-            raise ValueError(
-                f"Package member set mismatch; untracked={untracked}, missing={missing}"
-            )
-        for name, expected in checksums.items():
-            member = PurePosixPath(name)
-            if member.is_absolute() or ".." in member.parts:
-                raise ValueError(f"Unsafe package member: {name}")
-            if _hash_bytes(archive.read(name)) != expected:
-                raise ValueError(f"Package checksum mismatch: {name}")
-        signature = metadata.get("signature")
-        if require_signature and not signature:
-            raise ValueError("Package signature is required")
-        signature_verified = False
-        if public_key is not None:
-            if not signature or signature.get("algorithm") != "ed25519":
-                raise ValueError("Package has no supported Ed25519 signature")
-            try:
-                from cryptography.hazmat.primitives import serialization
-                from cryptography.hazmat.primitives.asymmetric import ed25519
-            except ModuleNotFoundError as exc:
-                raise RuntimeError(
-                    "Package signature verification requires `pip install nodrix[security]`"
-                ) from exc
-            key = serialization.load_pem_public_key(
-                Path(public_key).expanduser().resolve().read_bytes()
-            )
-            if not isinstance(key, ed25519.Ed25519PublicKey):
-                raise ValueError("Trusted package key must be an Ed25519 public key")
-            public_der = key.public_bytes(
-                serialization.Encoding.DER,
-                serialization.PublicFormat.SubjectPublicKeyInfo,
-            )
-            fingerprint = hashlib.sha256(public_der).hexdigest()
-            if fingerprint != signature.get("key_sha256"):
-                raise ValueError("Package signing-key fingerprint mismatch")
-            key.verify(
-                base64.b64decode(str(signature["value"]), validate=True),
-                _signature_payload(metadata),
-            )
-            signature_verified = True
-        return {
-            "path": str(package_path),
-            "name": metadata.get("name"),
-            "version": metadata.get("version"),
-            "files": len(metadata.get("checksums") or {}),
-            "checksums": "verified",
-            "signed": bool(signature),
-            "signature_verified": signature_verified,
-            "key_sha256": None if not signature else signature.get("key_sha256"),
-        }
+        return _verify_archive(
+            archive,
+            package_path,
+            public_key=public_key,
+            require_signature=require_signature,
+        )
 
 
 def install_package(
@@ -297,15 +450,14 @@ def install_package(
     require_signature: bool = False,
 ) -> dict[str, Any]:
     package_path = Path(package).expanduser().resolve()
-    verification = verify_package(
-        package_path,
-        public_key=public_key,
-        require_signature=require_signature,
-    )
     with zipfile.ZipFile(package_path) as archive:
+        verification = _verify_archive(
+            archive,
+            package_path,
+            public_key=public_key,
+            require_signature=require_signature,
+        )
         metadata = json.loads(archive.read("NODRIX-PACKAGE.json"))
-        if metadata.get("format") != PACKAGE_FORMAT:
-            raise ValueError("Unsupported Nodrix package format")
         with tempfile.TemporaryDirectory(prefix="nodrix-package-") as tmp:
             temp_root = Path(tmp)
             _safe_extract(archive, temp_root)
@@ -318,19 +470,44 @@ def install_package(
             target = packages_root() / manifest["name"] / manifest["version"]
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():
-                shutil.rmtree(target)
-            shutil.copytree(temp_root, target)
-            (target / ".nodrix-verification.json").write_text(
+                raise FileExistsError(
+                    "Package versions are immutable and already installed: "
+                    f"{manifest['name']} {manifest['version']}"
+                )
+            staging = Path(
+                tempfile.mkdtemp(
+                    prefix=f".{target.name}.install-",
+                    dir=target.parent,
+                )
+            )
+            shutil.copytree(temp_root, staging, dirs_exist_ok=True)
+            (staging / ".nodrix-verification.json").write_text(
                 json.dumps(verification, indent=2, sort_keys=True) + "\n",
                 encoding="utf-8",
             )
+            try:
+                os.replace(staging, target)
+            except Exception:
+                shutil.rmtree(staging, ignore_errors=True)
+                raise
     current = target.parent / "current"
+    temporary_current = (
+        target.parent / f".current-{os.getpid()}.tmp"
+    )
     try:
-        if current.is_symlink() or current.exists():
-            current.unlink()
-        current.symlink_to(target.name, target_is_directory=True)
+        if temporary_current.exists() or temporary_current.is_symlink():
+            temporary_current.unlink()
+        temporary_current.symlink_to(
+            target.name, target_is_directory=True
+        )
+        os.replace(temporary_current, current)
     except OSError:
-        (target.parent / "CURRENT").write_text(target.name, encoding="utf-8")
+        if temporary_current.exists() or temporary_current.is_symlink():
+            temporary_current.unlink()
+        marker = target.parent / "CURRENT"
+        temporary_marker = target.parent / f".CURRENT-{os.getpid()}.tmp"
+        temporary_marker.write_text(target.name, encoding="utf-8")
+        os.replace(temporary_marker, marker)
     return {
         "name": manifest["name"],
         "version": manifest["version"],

@@ -8,6 +8,7 @@
   `HARDWARE_ACCELERATION.md`
 - Distributed runtime and security: `DISTRIBUTED_RUNTIME.md`, `NETWORKING.md`,
   `SECURITY.md`
-- Recording and benchmarks: `RECORD_PLAY.md`, `BENCHMARKING.md`
+- Recording and benchmarks: `RECORD_PLAY.md`, `BENCHMARKING.md`,
+  `../benchmarks/PERFORMANCE_GATES.md`
 - Production and observability: `PRODUCTION_RUNTIME.md`, `OBSERVABILITY.md`
 - ROS 2 and platforms: `ROS2_INTEGRATION.md`, `PLATFORM_CAPABILITIES.md`

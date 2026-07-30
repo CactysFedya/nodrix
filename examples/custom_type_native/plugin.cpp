@@ -62,6 +62,18 @@ nodrix_status_v2 process(
       nullptr,
       nullptr,
       nullptr,
+      {
+          sizeof(nodrix_memory_handle_v2),
+          NODRIX_MEMORY_HOST,
+          0,
+          0,
+          0,
+          bytes.size(),
+          NODRIX_MEMORY_FLAG_HOST_VISIBLE,
+          nullptr,
+          nullptr,
+          nullptr,
+      },
   };
   /* No owner callbacks: the host copies this short custom value in emit(). */
   emit(emitter_context, 0, &output);
@@ -88,7 +100,9 @@ extern "C" NODRIX_C_EXPORT uint32_t nodrix_plugin_abi_version_v2(void) {
 
 extern "C" NODRIX_C_EXPORT uint64_t nodrix_plugin_features_v2(void) {
   return NODRIX_C_FEATURE_TYPED_PORTS |
-         NODRIX_C_FEATURE_MEMORY_DOMAINS;
+         NODRIX_C_FEATURE_MEMORY_DOMAINS |
+         NODRIX_C_FEATURE_CORRELATION |
+         NODRIX_C_FEATURE_DEVICE_HANDLES;
 }
 
 extern "C" NODRIX_C_EXPORT nodrix_status_v2 nodrix_plugin_create_v2(
@@ -102,7 +116,7 @@ extern "C" NODRIX_C_EXPORT nodrix_status_v2 nodrix_plugin_create_v2(
   if (!node_type || std::strcmp(node_type, "demo.increment_temperature") != 0) {
     return NODRIX_STATUS_UNSUPPORTED;
   }
-  if (!output || output->struct_size < sizeof(nodrix_node_api_v2)) {
+  if (!output || output->struct_size < NODRIX_NODE_API_V2_REQUIRED_SIZE) {
     return NODRIX_STATUS_INVALID_ARGUMENT;
   }
   auto* instance = new (std::nothrow) IncrementTemperature();

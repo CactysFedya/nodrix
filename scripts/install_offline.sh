@@ -23,6 +23,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if ! command -v cmake >/dev/null 2>&1; then
+  echo "Offline installation requires CMake to build the packaged native runner." >&2
+  exit 2
+fi
+if ! command -v c++ >/dev/null 2>&1 &&
+   ! command -v g++ >/dev/null 2>&1 &&
+   ! command -v clang++ >/dev/null 2>&1; then
+  echo "Offline installation requires a C++20 compiler." >&2
+  exit 2
+fi
+
 "$PYTHON_BIN" - <<'PY'
 from __future__ import annotations
 
@@ -36,6 +47,7 @@ required = {
     "pydantic": "configuration models",
     "yaml": "YAML parser (PyYAML)",
     "rich": "terminal output",
+    "packaging": "version and compatibility checks",
 }
 missing = []
 for module, purpose in required.items():
@@ -64,4 +76,29 @@ fi
   --no-deps \
   "${PIP_ARGS[@]}"
 
-"$PYTHON_BIN" -c 'import nodrix; print(f"Nodrix {nodrix.__version__} installed")'
+NODRIX_ALLOW_RUNTIME_BUILD=0 "$PYTHON_BIN" - <<'PY'
+from pathlib import Path
+import subprocess
+import tempfile
+
+import nodrix
+import nodrix._native_buffer
+import nodrix._native_device
+import nodrix._native_plugin
+import nodrix._native_queue
+import nodrix._native_tracking
+from nodrix.native_runtime import NativeToolchain
+
+runner = NativeToolchain(Path(tempfile.gettempdir())).ensure_runner()
+version = subprocess.run(
+    [str(runner), "--version"],
+    check=True,
+    capture_output=True,
+    text=True,
+).stdout.strip()
+if version != f"nodrix-native-runner {nodrix.__version__}":
+    raise SystemExit(
+        f"Packaged native runner version mismatch: {version}"
+    )
+print(f"Nodrix {nodrix.__version__} installed; {version}")
+PY

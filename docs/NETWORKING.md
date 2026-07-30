@@ -140,13 +140,26 @@ Remote sources can use a finite reconnect budget:
 parameters:
   uri: nodrix+tls://robot.local:7420/robot/events
   ca_file: secrets/ca.crt
-  reconnect_attempts: 5
+  reconnect_attempts_per_disconnect: 5
+  reconnect_max_total_attempts: 20
+  reconnect_window_seconds: 300
+  reconnect_reset_after_stable_seconds: 60
   reconnect_backoff: 0.25
   reconnect_max_backoff: 4.0
+  reconnect_jitter: 0.2
 ```
 
-Backoff is exponential and capped. A permanently unavailable endpoint therefore
-becomes an explicit node failure instead of an infinite retry loop or queue.
+The per-disconnect limit bounds one recovery series. The rolling lifetime
+budget prevents a server that repeatedly disconnects from resetting its retry
+allowance forever. Stable operation resets the rolling budget. Backoff is
+exponential, capped, jittered, and interruptible by shutdown.
+
+Connection state is one of `connected`, `reconnecting`, `degraded`,
+`budget_exhausted`, `failed`, or `closed`. Reports expose
+`reconnect_attempts_total`, `reconnect_success_total`,
+`reconnect_failures_total`, `reconnect_budget_remaining`, and
+`connection_uptime_seconds`. The legacy `reconnect_attempts` parameter remains
+accepted as the default for both new attempt limits.
 
 ## What can be transmitted
 

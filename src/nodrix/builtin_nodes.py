@@ -365,6 +365,27 @@ class StreamSource(SourceNode):
             reconnect_attempts=int(self.parameters.get("reconnect_attempts", 0)),
             reconnect_backoff=float(self.parameters.get("reconnect_backoff", 0.1)),
             reconnect_max_backoff=float(self.parameters.get("reconnect_max_backoff", 5.0)),
+            reconnect_attempts_per_disconnect=(
+                int(self.parameters["reconnect_attempts_per_disconnect"])
+                if "reconnect_attempts_per_disconnect" in self.parameters
+                else None
+            ),
+            reconnect_max_total_attempts=(
+                int(self.parameters["reconnect_max_total_attempts"])
+                if "reconnect_max_total_attempts" in self.parameters
+                else None
+            ),
+            reconnect_window_seconds=float(
+                self.parameters.get("reconnect_window_seconds", 300.0)
+            ),
+            reconnect_reset_after_stable_seconds=float(
+                self.parameters.get(
+                    "reconnect_reset_after_stable_seconds", 60.0
+                )
+            ),
+            reconnect_jitter=float(
+                self.parameters.get("reconnect_jitter", 0.2)
+            ),
         )
         self.client.connect(timeout=float(self.parameters.get("connect_timeout", 5.0)))
         self.limit = int(self.parameters.get("max_messages", 0))

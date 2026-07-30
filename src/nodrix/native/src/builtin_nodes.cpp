@@ -57,6 +57,10 @@ class SyntheticSource final : public Node {
   const std::vector<PortSpec>& output_ports() const noexcept override { return outputs_; }
   bool is_source() const noexcept override { return true; }
 
+  void open(const NodeContext& context) override {
+    stop_requested_ = context.stop_requested;
+  }
+
   void run_source(Emitter& emitter) override {
     Buffer reusable;
     if (payload_bytes_ > 0 && reuse_buffer_) {
@@ -64,6 +68,10 @@ class SyntheticSource final : public Node {
       std::memset(reusable.data(), 0x5A, reusable.size());
     }
     for (std::uint64_t sequence = 0; sequence < count_; ++sequence) {
+      if (stop_requested_ &&
+          stop_requested_->load(std::memory_order_acquire)) {
+        break;
+      }
       Buffer payload = reusable;
       if (payload_bytes_ > 0 && !reuse_buffer_) {
         payload = Buffer::allocate(payload_bytes_);
@@ -74,7 +82,8 @@ class SyntheticSource final : public Node {
       message.sequence = sequence;
       message.source_timestamp_ns = steady_time_ns();
       message.runtime_timestamp_ns = message.source_timestamp_ns;
-      message.trace_id = sequence;
+      message.trace_id = std::to_string(sequence);
+      message.trace_id_integer = true;
       message.payload = std::move(payload);
       emitter.emit(0, std::move(message));
     }
@@ -86,6 +95,7 @@ class SyntheticSource final : public Node {
   std::uint64_t count_;
   std::uint64_t payload_bytes_;
   bool reuse_buffer_;
+  const std::atomic<bool>* stop_requested_{nullptr};
   const std::vector<PortSpec> inputs_{};
   const std::vector<PortSpec> outputs_{{"output", "core.bytes"}};
 };
@@ -135,7 +145,7 @@ class CounterSink final : public Node {
     checksum_ ^= inputs.front().sequence + inputs.front().payload.size();
   }
 
-  void close() noexcept override {
+  void close() override {
     // The host report contains the authoritative count. The volatile checksum
     // keeps the compiler from optimizing the data path away in benchmarks.
     volatile std::uint64_t keep = checksum_;

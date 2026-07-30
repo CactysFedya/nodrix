@@ -70,6 +70,23 @@ class Buffer final {
   [[nodiscard]] std::uint32_t use_count() const noexcept {
     return control_ ? control_->references.load(std::memory_order_relaxed) : 0;
   }
+  [[nodiscard]] void* owner_handle() const noexcept { return control_; }
+
+  /*
+   * C ABI bridge helpers. owner_handle() is opaque outside this class. A
+   * plugin that stores a buffer after process() returns calls retain_owner()
+   * and must eventually call release_owner().
+   */
+  static void retain_owner(void* opaque) noexcept {
+    auto* control = static_cast<ControlBlock*>(opaque);
+    if (control) {
+      control->references.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+
+  static void release_owner(void* opaque) noexcept {
+    release_control(static_cast<ControlBlock*>(opaque));
+  }
 
  private:
   struct alignas(64) ControlBlock {
@@ -91,6 +108,10 @@ class Buffer final {
 
   void release() noexcept {
     ControlBlock* control = std::exchange(control_, nullptr);
+    release_control(control);
+  }
+
+  static void release_control(ControlBlock* control) noexcept {
     if (control == nullptr) return;
     if (control->references.fetch_sub(1, std::memory_order_acq_rel) == 1) {
       control->deleter(control->data, control->size, control->context);

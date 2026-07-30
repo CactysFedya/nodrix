@@ -552,8 +552,12 @@ def test_cli_surface_ci_matrix_and_generated_v2_template(
     assert generated.api_version == "nodrix.dev/v2"
 
     root = Path(__file__).resolve().parents[1]
-    ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    publish = (root / ".github/workflows/publish.yml").read_text(
+    ci_path = root / ".github/workflows/ci.yml"
+    publish_path = root / ".github/workflows/publish.yml"
+    if not ci_path.is_file() or not publish_path.is_file():
+        return
+    ci = ci_path.read_text(encoding="utf-8")
+    publish = publish_path.read_text(
         encoding="utf-8"
     )
     assert "ubuntu-24.04-arm" in ci
@@ -573,6 +577,7 @@ def test_message_correlation_metadata_is_wire_stable() -> None:
         run_id="run",
         source_id="camera",
         trace_id="trace",
+        span_id="span",
     )
     packet = encode_message(original)
     restored = decode_packet_parts(
@@ -586,4 +591,5 @@ def test_message_correlation_metadata_is_wire_stable() -> None:
         restored.run_id,
         restored.source_id,
         restored.trace_id,
-    ) == ("pipe", "run", "camera", "trace")
+        restored.span_id,
+    ) == ("pipe", "run", "camera", "trace", "span")

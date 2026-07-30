@@ -104,7 +104,9 @@ extern "C" NODRIX_C_EXPORT uint32_t nodrix_plugin_abi_version_v2(void) {
 extern "C" NODRIX_C_EXPORT uint64_t nodrix_plugin_features_v2(void) {
   return NODRIX_C_FEATURE_TYPED_PORTS |
          NODRIX_C_FEATURE_MEMORY_DOMAINS |
-         NODRIX_C_FEATURE_ZERO_COPY_BUFFERS;
+         NODRIX_C_FEATURE_ZERO_COPY_BUFFERS |
+         NODRIX_C_FEATURE_CORRELATION |
+         NODRIX_C_FEATURE_DEVICE_HANDLES;
 }
 
 extern "C" NODRIX_C_EXPORT nodrix_status_v2 nodrix_plugin_create_v2(
@@ -115,7 +117,8 @@ extern "C" NODRIX_C_EXPORT nodrix_status_v2 nodrix_plugin_create_v2(
   if (host_abi_version != NODRIX_C_ABI_VERSION) {
     return NODRIX_STATUS_ABI_MISMATCH;
   }
-  if (!node_type || !output || output->struct_size < sizeof(nodrix_node_api_v2)) {
+  if (!node_type || !output ||
+      output->struct_size < NODRIX_NODE_API_V2_REQUIRED_SIZE) {
     return NODRIX_STATUS_INVALID_ARGUMENT;
   }
   const std::string_view type(node_type);

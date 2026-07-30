@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string_view>
+#include <utility>
 
 namespace nodrix {
 
@@ -18,7 +19,8 @@ enum class MemoryDomain : std::uint8_t {
   opencl,
   metal,
   npu,
-  external,
+  dlpack,
+  external = 255,
 };
 
 struct DmaBufPlane {
@@ -30,11 +32,78 @@ struct DmaBufPlane {
 };
 
 struct DeviceBufferDescriptor {
+  using Retain = void (*)(void*);
+  using Release = void (*)(void*);
+
   MemoryDomain domain{MemoryDomain::cpu};
-  std::uint32_t device_index{0};
+  std::uint64_t device_index{0};
+  std::uint64_t handle{0};
   std::uint64_t size{0};
   std::uint64_t offset{0};
-  std::array<std::byte, 64> opaque_handle{};
+  std::uint64_t flags{0};
+  void* owner{nullptr};
+  Retain retain{nullptr};
+  Release release{nullptr};
+
+  DeviceBufferDescriptor() noexcept = default;
+  DeviceBufferDescriptor(const DeviceBufferDescriptor& other) noexcept
+      : domain(other.domain),
+        device_index(other.device_index),
+        handle(other.handle),
+        size(other.size),
+        offset(other.offset),
+        flags(other.flags),
+        owner(other.owner),
+        retain(other.retain),
+        release(other.release) {
+    if (owner && retain) retain(owner);
+  }
+  DeviceBufferDescriptor(DeviceBufferDescriptor&& other) noexcept
+      : domain(other.domain),
+        device_index(other.device_index),
+        handle(other.handle),
+        size(other.size),
+        offset(other.offset),
+        flags(other.flags),
+        owner(std::exchange(other.owner, nullptr)),
+        retain(other.retain),
+        release(other.release) {}
+  DeviceBufferDescriptor& operator=(
+      const DeviceBufferDescriptor& other) noexcept {
+    if (this == &other) return *this;
+    reset();
+    domain = other.domain;
+    device_index = other.device_index;
+    handle = other.handle;
+    size = other.size;
+    offset = other.offset;
+    flags = other.flags;
+    owner = other.owner;
+    retain = other.retain;
+    release = other.release;
+    if (owner && retain) retain(owner);
+    return *this;
+  }
+  DeviceBufferDescriptor& operator=(DeviceBufferDescriptor&& other) noexcept {
+    if (this == &other) return *this;
+    reset();
+    domain = other.domain;
+    device_index = other.device_index;
+    handle = other.handle;
+    size = other.size;
+    offset = other.offset;
+    flags = other.flags;
+    owner = std::exchange(other.owner, nullptr);
+    retain = other.retain;
+    release = other.release;
+    return *this;
+  }
+  ~DeviceBufferDescriptor() { reset(); }
+
+  void reset() noexcept {
+    void* value = std::exchange(owner, nullptr);
+    if (value && release) release(value);
+  }
 };
 
 constexpr std::string_view memory_domain_name(MemoryDomain domain) noexcept {
@@ -49,6 +118,7 @@ constexpr std::string_view memory_domain_name(MemoryDomain domain) noexcept {
     case MemoryDomain::opencl: return "opencl";
     case MemoryDomain::metal: return "metal";
     case MemoryDomain::npu: return "npu";
+    case MemoryDomain::dlpack: return "dlpack";
     case MemoryDomain::external: return "external";
   }
   return "unknown";
