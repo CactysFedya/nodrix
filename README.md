@@ -1,4 +1,4 @@
-# Nodrix 2.0.0
+# Nodrix 2.1.0
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -8,7 +8,22 @@
 Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
 
 
-## Nodrix 2.0 highlights
+## Nodrix 2.1 highlights
+
+Nodrix 2.1 adds Provider API 1: independently installed providers are
+discovered from signed metadata, checked for API/version/features and trust,
+then imported lazily only when selected. Existing Core, Media, Vision,
+Recording and ROS 2 Node ids continue through a compatibility adapter.
+
+```bash
+nodrix provider list
+nodrix provider verify example.echo
+nodrix doctor --provider ros2
+nodrix doctor --deep --json
+```
+
+Production pipelines verify provider signatures and explicit allowlist
+membership before executing provider import-time code.
 
 Nodrix 2.0 establishes stable Manifest v2, Python SDK and Plugin C ABI 2
 contracts while keeping existing Manifest v1 pipelines readable. It adds
@@ -84,7 +99,7 @@ pip install "nodrix[vision-ncnn,media,viewer]"
 
 ### Raspberry Pi and offline source installation
 
-Nodrix 2.0.0 can be built without PyPI build isolation when the runtime dependencies are already present:
+Nodrix 2.1.0 can be built without PyPI build isolation when the runtime dependencies are already present:
 
 ```bash
 python3 -m pip install . --no-build-isolation --no-deps
@@ -343,6 +358,8 @@ See [docs/BLOCKS.md](docs/BLOCKS.md),
 [docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md),
 [docs/BENCHMARKING.md](docs/BENCHMARKING.md),
 [docs/MULTI_RATE_VISION.md](docs/MULTI_RATE_VISION.md),
+[docs/PROVIDER_API.md](docs/PROVIDER_API.md),
+[docs/RELEASE_2.1.0.md](docs/RELEASE_2.1.0.md),
 [docs/RELEASE_2.0.0.md](docs/RELEASE_2.0.0.md),
 [CONTRIBUTING.md](CONTRIBUTING.md), and
 [PUBLISHING_RU.md](PUBLISHING_RU.md).

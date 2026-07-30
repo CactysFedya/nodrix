@@ -47,6 +47,28 @@ Direct native library paths are checked before `dlopen` in production: they
 must be absolute, below `security.native_plugin_allowlist`, present, and not
 world-writable. Lock/run artifacts retain the resolved path and file hash.
 
+## Provider distributions
+
+Provider API 1 separates discovery from import. `nodrix provider list` and
+`info` read `nodrix-provider.json` directly from installed distribution files;
+provider Python modules cannot execute during discovery. Before import,
+Nodrix validates the provider schema/API, distribution version, Core version,
+required features, detached Ed25519 signature, trusted-key fingerprint, and
+production allowlist.
+
+Production trust keys live under
+`~/.config/nodrix/trust/providers` by default or the directory selected by
+`NODRIX_PROVIDER_TRUST_STORE`. The directory and `.pem` files must not be
+group/world-writable on POSIX. Provider ids are authorized by
+`allowlist.json`, `NODRIX_PROVIDER_ALLOWLIST`, or explicit CLI `--allow`
+options. Private signing keys must never be installed in the trust store or
+provider wheel.
+
+Unsigned external providers are development-only. `nodrix run --production`
+rejects an unsigned, untrusted, incompatible, non-allowlisted, or
+feature-incompatible provider before importing its entry point. See
+`PROVIDER_API.md`.
+
 ## Recordings
 
 NDRX2 readers bound metadata, index, packet, file, chunk, record, and stream

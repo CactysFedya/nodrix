@@ -94,7 +94,7 @@ def _description() -> dict:
 
 
 def test_v190_version() -> None:
-    assert nodrix.__version__ == "2.0.0"
+    assert nodrix.__version__ == "2.1.0"
 
 
 def test_planner_uses_declared_rates_and_never_invents_unknowns() -> None:

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(nodrix_native VERSION 2.0.0 LANGUAGES CXX)
+project(nodrix_native VERSION 2.1.0 LANGUAGES CXX)
 
 option(NODRIX_NATIVE_LTO "Enable link-time optimization" ON)
 option(NODRIX_NATIVE_MARCH_NATIVE "Tune for the build machine" OFF)

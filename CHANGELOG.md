@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.1.0 — Provider API 1 and Unified Doctor
+- Added public `ProviderMetadata`, `NodeDescriptor`, `ProbeDescriptor`,
+  `TemplateDescriptor`, `ProviderManifest`, and `ProviderRuntime` contracts.
+- Added metadata-only discovery through `nodrix.providers` entry points;
+  listing and inspection never import provider packages.
+- Added schema/version/feature negotiation before provider import, lazy Node
+  resolution, runtime declaration checks, duplicate-id rejection, and a legacy
+  adapter preserving all existing Node ids.
+- Added detached Ed25519 `nodrix-provider.sig` verification, a local trust
+  store, explicit production allowlists, safe POSIX key permissions, and
+  pre-import provider verification for production pipelines.
+- Added `nodrix provider list|info|verify` and the unified `nodrix doctor`
+  safe/deep/JSON/provider modes with bounded provider probes.
+- Added an independently buildable Provider API example, security and
+  compatibility tests, and complete provider-author documentation.
+
 ## 2.0.0 — Stable Universal Runtime
 - Added strict Manifest v2, reusable nested Fragments, explicit engine selection, and safe non-destructive migration from 1.x.
 - Stabilized the Python SDK exports, Plugin C ABI 2, lifecycle states, health reasons/timestamps, and message correlation metadata for the 2.x line.
