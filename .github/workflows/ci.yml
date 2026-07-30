@@ -201,6 +201,50 @@ jobs:
             tests/test_native_runtime.py \
             tests/test_native_plugin_runner.py
 
+  native-ncnn:
+    name: Native NCNN runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake g++ gdb
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[vision]"
+
+      - name: Build pinned NCNN provider
+        run: |
+          cmake -S src/nodrix/native -B build/native-ncnn \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNODRIX_BUILD_EXAMPLE_PLUGIN=OFF \
+            -DNODRIX_BUILD_TESTS=OFF \
+            -DNODRIX_BUILD_NCNN_PLUGIN=ON \
+            -DNODRIX_FETCH_NCNN=ON
+          cmake --build build/native-ncnn \
+            --target nodrix_ncnn_detector --parallel 2
+
+      - name: Execute real NCNN inference
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: |
+          gdb --quiet --batch --return-child-result \
+            -ex run \
+            -ex "thread apply all bt" \
+            --args python scripts/ncnn_smoke.py \
+              --plugin build/native-ncnn/libnodrix_ncnn_detector.so \
+              --param \
+                build/native-ncnn/_deps/ncnn-src/examples/squeezenet_v1.1.param \
+              --bin \
+                build/native-ncnn/_deps/ncnn-src/examples/squeezenet_v1.1.bin
+
   security-tests:
     name: Package, recording, stream, and TLS hardening
     runs-on: ubuntu-latest
