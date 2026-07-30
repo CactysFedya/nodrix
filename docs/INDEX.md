@@ -6,7 +6,7 @@
 - Providers, plugins and Fragments: `PROVIDER_API.md`, `PLUGIN_SDK.md`,
   `FRAGMENT_SDK.md`
 - Memory and hardware: `MEMORY_NEGOTIATION.md`, `DEVICE_MEMORY.md`,
-  `HARDWARE_ACCELERATION.md`
+  `HARDWARE_ACCELERATION.md`, `NATIVE_NCNN_QUALIFICATION.md`
 - Distributed runtime and security: `DISTRIBUTED_RUNTIME.md`, `NETWORKING.md`,
   `SECURITY.md`
 - Recording and benchmarks: `RECORD_PLAY.md`, `BENCHMARKING.md`,

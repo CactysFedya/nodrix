@@ -92,12 +92,16 @@ where = ["src"]
 nodrix = [
   "bin/nodrix-native-runner",
   "bin/nodrix-native-runner.exe",
+  "bin/libnodrix_ncnn_detector.so",
+  "bin/libnodrix_ncnn_detector.dylib",
+  "bin/nodrix_ncnn_detector.dll",
   "native/CMakeLists.txt",
   "native/include/nodrix/*.h",
   "native/include/nodrix/*.hpp",
   "native/src/*.cpp",
   "native/examples/*.cpp",
   "native/tests/*.cpp",
+  "native/tests/fake_ncnn/*.h",
 ]
 
 [tool.pytest.ini_options]
@@ -116,7 +120,8 @@ select = ["E4", "E7", "E9", "F"]
 build = "cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux*"
 build-verbosity = 1
-test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix; from nodrix.native_runtime import NativeToolchain; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == 'nodrix-native-runner 2.1.0'\" && nodrix --version"
+environment = { NODRIX_BUILD_NCNN_PLUGIN = "1", NODRIX_FETCH_NCNN = "1" }
+test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix; from nodrix.native_runtime import NativeToolchain; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == 'nodrix-native-runner 2.1.0'; root=Path(nodrix.__file__).resolve().parent/'bin'; assert any(root.glob('*ncnn_detector*')), root\" && nodrix --version"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"

@@ -27,7 +27,9 @@ def test_vision_template_keeps_parameters_in_blocks(tmp_path: Path) -> None:
     assert "NODRIX_" not in encoder
     assert "rate=30" in source
     assert "fps: 30" in source
-    assert "threads: 3" in detector
+    assert "threads: 4" in detector
+    assert "use: vision.ncnn_detector_native" in detector
+    assert "imgsz: 320" in detector
     assert "# Minimum detection confidence" in detector
     assert "capacity: 4" in pipeline
     assert "policy: drop_oldest" in pipeline
@@ -39,7 +41,7 @@ def test_vision_template_keeps_parameters_in_blocks(tmp_path: Path) -> None:
 def test_detector_parameters_are_documented() -> None:
     names = {
         row["name"]
-        for row in parameter_schema("vision.ncnn_detector")
+        for row in parameter_schema("vision.ncnn_detector_native")
     }
     assert names >= {
         "model",

@@ -25,6 +25,19 @@ nodrix doctor --deep --json
 Production pipelines verify provider signatures and explicit allowlist
 membership before executing provider import-time code.
 
+The official Vision provider adds a native NCNN production block:
+
+```yaml
+use: vision.ncnn_detector_native
+model: models/yolo26n_ncnn_model
+imgsz: 320
+threads: 4
+```
+
+Preprocessing, NCNN inference, YOLO decoding, filtering, and NMS execute in
+C++ through Plugin C ABI 2. The previous `vision.ncnn_detector` remains the
+Python reference backend.
+
 Nodrix 2.0 establishes stable Manifest v2, Python SDK and Plugin C ABI 2
 contracts while keeping existing Manifest v1 pipelines readable. It adds
 reusable Fragments, signed offline plugins, production validation, automatic
@@ -93,9 +106,11 @@ Optional media and viewer dependencies:
 ```bash
 pip install "nodrix[viewer]"
 pip install "nodrix[media]"
-pip install "nodrix[vision-ncnn,media,viewer]"
+pip install "nodrix[vision,media,viewer]"
 ```
 
+Use `nodrix[vision-ncnn]` only when the Python NCNN reference backend is also
+required. Official wheels already contain the native NCNN provider.
 
 ### Raspberry Pi and offline source installation
 
@@ -115,9 +130,11 @@ pipx install nodrix
 
 Release wheels cover Linux x86-64, Linux ARM64, macOS Apple Silicon, and
 Windows x86-64. Each wheel contains the native extensions and
-`nodrix/bin/nodrix-native-runner`; production execution does not compile code
-on first use. When no compatible wheel exists, building the included source
-distribution requires CMake, a C++20 compiler, and Python development headers.
+`nodrix/bin/nodrix-native-runner` plus the native NCNN provider; production
+execution does not compile code on first use. When no compatible wheel exists,
+building the included source distribution requires CMake, a C++20 compiler,
+and Python development headers. Native NCNN source builds are opt-in as
+documented in [the 2.1 release notes](docs/RELEASE_2.1.0.md).
 
 ## Empty project and templates
 

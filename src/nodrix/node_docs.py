@@ -65,6 +65,19 @@ NODE_PARAMETER_SCHEMAS: dict[str, list[dict[str, Any]]] = {
     ],
 }
 
+# The native backend shares the reference detector contract and makes its
+# exact C ABI input geometry explicit.
+NODE_PARAMETER_SCHEMAS["vision.ncnn_detector_native"] = [
+    *NODE_PARAMETER_SCHEMAS["vision.ncnn_detector"],
+    {
+        "name": "imgsz",
+        "type": "integer",
+        "default": "320",
+        "values": ">= 1",
+        "description": "Native detector input width and height.",
+    },
+]
+
 
 def parameter_schema(reference: str) -> list[dict[str, Any]]:
     return list(NODE_PARAMETER_SCHEMAS.get(reference, ()))
@@ -79,13 +92,21 @@ def validate_parameters(reference: str, parameters: dict[str, Any]) -> None:
     """
     if reference == "media.ffmpeg_source" and not parameters.get("uri") and not parameters.get("source"):
         raise ValueError("media.ffmpeg_source requires parameter 'uri'")
-    if reference == "vision.ncnn_detector":
+    if reference == "vision.ncnn_detector_native" and str(
+        parameters.get("backend", "cpu")
+    ).lower() not in {"auto", "cpu"}:
+        raise ValueError(
+            "vision.ncnn_detector_native.backend must be auto or cpu"
+        )
+    if reference in {"vision.ncnn_detector", "vision.ncnn_detector_native"}:
         has_pair = bool(
             (parameters.get("param") or parameters.get("param_path"))
             and (parameters.get("bin") or parameters.get("bin_path"))
         )
         if not parameters.get("model") and not has_pair:
-            raise ValueError("vision.ncnn_detector requires 'model', or both 'param' and 'bin'")
+            raise ValueError(
+                f"{reference} requires 'model', or both 'param' and 'bin'"
+            )
 
     by_name = {str(item["name"]): item for item in parameter_schema(reference)}
     for name, value in parameters.items():
@@ -107,7 +128,11 @@ def validate_parameters(reference: str, parameters: dict[str, Any]) -> None:
                 lower, upper = values.split("..", 1)
                 if not float(lower) <= float(number) <= float(upper):
                     raise ValueError(f"{reference}.{name} must be in range {values}")
-            elif values.startswith(">=") and float(number) < float(values.removeprefix(">=").strip()):
-                raise ValueError(f"{reference}.{name} must be {values}")
-            elif values.startswith(">") and float(number) <= float(values.removeprefix(">").strip()):
-                raise ValueError(f"{reference}.{name} must be {values}")
+            elif values.startswith(">="):
+                minimum = float(values.removeprefix(">=").strip())
+                if float(number) < minimum:
+                    raise ValueError(f"{reference}.{name} must be {values}")
+            elif values.startswith(">"):
+                minimum = float(values.removeprefix(">").strip())
+                if float(number) <= minimum:
+                    raise ValueError(f"{reference}.{name} must be {values}")

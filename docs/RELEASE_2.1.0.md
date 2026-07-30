@@ -5,6 +5,45 @@ all stable 2.0 contracts: Manifest v2, Python Node API, Plugin C ABI 2,
 existing Node ids, `nodrix.lock`, NDRX2, the native runner, pipelines, and CLI
 commands.
 
+## Native NCNN provider
+
+The Vision provider now includes `vision.ncnn_detector_native`. Its production
+path is:
+
+```text
+Plugin C ABI 2
+→ NCNN C++ preprocessing and inference
+→ C++ YOLO decode/filter/NMS
+→ versioned NDT2 detections
+→ public Nodrix Detections
+```
+
+It does not import the Python NCNN binding and does not need
+`execution.isolation: process`. The old `vision.ncnn_detector` remains a
+source-compatible Python reference/fallback.
+
+Official wheels build the provider from the pinned NCNN 20260526 full source
+and verify SHA-256 before compilation. Source builds are explicit:
+
+```bash
+NODRIX_BUILD_NCNN_PLUGIN=1 NODRIX_FETCH_NCNN=1 \
+  python -m build --wheel
+```
+
+Offline builds use an already verified source tree:
+
+```bash
+NODRIX_BUILD_NCNN_PLUGIN=1 \
+NODRIX_FETCH_NCNN=0 \
+NODRIX_NCNN_SOURCE_DIR=/opt/src/ncnn-20260526 \
+  python -m build --wheel
+```
+
+The adapter validates exact BGR8 geometry, shape, stride, dtype, channels, and
+payload length before crossing the C ABI. Model paths are resolved against the
+pipeline project, including Unicode paths. C++ golden tests cover modern,
+objectness, transposed, xyxy, class filtering, and NMS layouts.
+
 ## Provider API 1
 
 - Public metadata, Node, probe, template, runtime, and feature-negotiation
@@ -45,3 +84,7 @@ No 2.0 feature was removed or silently changed. Legacy doctor commands and
 provider prefixes remain supported. Uninstalling an external provider leaves
 Core operational; a pipeline using that provider then fails with an explicit
 unknown-provider/Node diagnostic.
+
+The 2.1 hotfix set also corrects `>=` parameter validation, empty detections
+serialization, incomplete-run display in `nodrix top`, metrics disconnect
+noise, and normal FFmpeg/Ctrl+C shutdown.

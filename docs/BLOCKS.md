@@ -51,8 +51,8 @@ therefore remain readable and stable.
 ## Block file
 
 ```yaml
-use: vision.ncnn_detector
-model: models/yolo26n-320.ncnn
+use: vision.ncnn_detector_native
+model: models/yolo26n_ncnn_model
 imgsz: 320
 conf: 0.18
 iou: 0.65

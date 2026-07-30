@@ -163,3 +163,8 @@ Nodrix 2.1 exposes existing Core, Vision, Media, Recording, and ROS 2 Node ids
 as internal Provider API records. The adapter preserves all 2.0 pipelines and
 does not require signatures for implementations shipped inside the verified
 Nodrix distribution. External providers cannot shadow an internal provider id.
+
+The official Vision record also declares
+`vision.ncnn_detector_native` with features `plugin-c-abi.2` and
+`ncnn.native`. Unified Doctor reports whether its packaged platform library is
+present without loading a model or acquiring a device.

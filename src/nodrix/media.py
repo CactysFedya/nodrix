@@ -935,19 +935,39 @@ class FFmpegEncoder(Node):
     def close(self) -> None:
         if self._process is None:
             return
-        if self._process.stdin is not None and not self._process.stdin.closed:
-            self._process.stdin.close()
-        if self._process.poll() is None:
+        process = self._process
+        self._process = None
+        requested_shutdown = False
+        if process.stdin is not None and not process.stdin.closed:
             try:
-                self._process.wait(timeout=5.0)
+                process.stdin.close()
+                requested_shutdown = True
+            except (BrokenPipeError, OSError):
+                requested_shutdown = True
+        if process.poll() is None:
+            try:
+                process.wait(timeout=5.0)
             except subprocess.TimeoutExpired:
-                self._process.kill()
+                process.terminate()
+                requested_shutdown = True
+                try:
+                    process.wait(timeout=2.0)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait(timeout=2.0)
         if self.stderr is not None:
             self.stderr.join()
         detail = self.stderr.text() if self.stderr else ""
-        return_code = self._process.returncode
-        self._process = None
-        if return_code not in {0, None}:
+        return_code = process.returncode
+        if process.stdout is not None:
+            process.stdout.close()
+        if process.stderr is not None:
+            process.stderr.close()
+        # FFmpeg may return 255/negative signal codes when the runtime closes
+        # its pipes during a user-requested shutdown. Do not turn Ctrl+C into
+        # a failed pipeline; non-zero exits during normal processing are still
+        # reported by process().
+        if return_code not in {0, None} and not requested_shutdown:
             raise MediaError(f"ffmpeg encoder exited with code {return_code}: {detail}")
 
 

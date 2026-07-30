@@ -20,9 +20,13 @@ source .venv/bin/activate
 python -m pip install -e ".[dev,all]"
 pytest -q
 make native-test
-python -m build
+NODRIX_BUILD_NCNN_PLUGIN=1 NODRIX_FETCH_NCNN=1 python -m build
 python -m twine check dist/*
 ```
+
+Для полной локальной NCNN-проверки используйте закреплённый исходник и
+`scripts/ncnn_smoke.py`; точная команда и модель приведены в
+`docs/NATIVE_NCNN_QUALIFICATION.md`.
 
 ## 2. Создание GitHub-репозитория
 
@@ -93,9 +97,11 @@ git push origin v2.1.0
 GitHub Actions автоматически:
 
 1. проверит соответствие тега версии;
-2. повторит lint, полный Python suite, million-message stress и CTest;
+2. повторит lint, полный Python suite, million-message stress, CTest и
+   реальную сборку/smoke-проверку NCNN;
 3. соберёт и проверит канонический sdist;
-4. соберёт все platform wheels именно из этого sdist;
+4. соберёт все platform wheels именно из этого sdist и проверит наличие
+   нативного NCNN provider в каждом wheel;
 5. загрузит дистрибутивы на PyPI;
 6. создаст GitHub Release и приложит файлы.
 

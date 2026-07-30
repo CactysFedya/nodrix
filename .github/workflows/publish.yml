@@ -65,6 +65,23 @@ jobs:
           cmake --build build/native --parallel 2
           ctest --test-dir build/native --output-on-failure
 
+      - name: Compile and link pinned NCNN provider
+        run: |
+          cmake -S src/nodrix/native -B build/native-ncnn \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DNODRIX_BUILD_EXAMPLE_PLUGIN=OFF \
+            -DNODRIX_BUILD_TESTS=OFF \
+            -DNODRIX_BUILD_NCNN_PLUGIN=ON \
+            -DNODRIX_FETCH_NCNN=ON
+          cmake --build build/native-ncnn \
+            --target nodrix_ncnn_detector --parallel 2
+          python scripts/ncnn_smoke.py \
+            --plugin build/native-ncnn/libnodrix_ncnn_detector.so \
+            --param \
+              build/native-ncnn/_deps/ncnn-src/examples/squeezenet_v1.1.param \
+            --bin \
+              build/native-ncnn/_deps/ncnn-src/examples/squeezenet_v1.1.bin
+
   build-sdist:
     name: Source distribution
     needs: [verify-tag, release-gate]

@@ -521,6 +521,16 @@ def _legacy_candidates() -> list[ProviderCandidate]:
                     {"frame": "vision.frame"},
                     {"detections": "vision.detections"},
                 ),
+                NodeDescriptor(
+                    id="vision.ncnn_detector_native",
+                    factory=(
+                        "nodrix.vision.nodes:"
+                        "NativeNcnnDetectorNode"
+                    ),
+                    inputs={"frame": "vision.frame"},
+                    outputs={"detections": "vision.detections"},
+                    features=("plugin-c-abi.2", "ncnn.native"),
+                ),
                 _node(
                     "vision.bytetrack",
                     "nodrix.vision.nodes:ByteTrackNode",
@@ -653,10 +663,37 @@ def _legacy_candidates() -> list[ProviderCandidate]:
 
 
 def _legacy_vision_probe() -> dict[str, Any]:
+    package_root = Path(__file__).resolve().parent
+    plugin_names = (
+        "libnodrix_ncnn_detector.so",
+        "libnodrix_ncnn_detector.dylib",
+        "nodrix_ncnn_detector.dll",
+        "nodrix_ncnn_detector.so",
+    )
+    override = os.environ.get("NODRIX_NCNN_PLUGIN")
+    native_path = (
+        Path(override).expanduser().resolve()
+        if override
+        else next(
+            (
+                package_root / "bin" / name
+                for name in plugin_names
+                if (package_root / "bin" / name).is_file()
+            ),
+            None,
+        )
+    )
+    native_available = bool(
+        native_path is not None and native_path.is_file()
+    )
     return {
         "status": "ok",
         "numpy": importlib.util.find_spec("numpy") is not None,
         "opencv": importlib.util.find_spec("cv2") is not None,
+        "native_ncnn": native_available,
+        "native_ncnn_path": (
+            str(native_path) if native_available else None
+        ),
     }
 
 

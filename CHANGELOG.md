@@ -1,6 +1,17 @@
 # Changelog
 
 ## 2.1.0 — Provider API 1 and Unified Doctor
+- Added the official `vision.ncnn_detector_native` Plugin C ABI 2 backend:
+  NCNN preprocessing, inference, YOLO decoding, filtering, and NMS now run
+  in C++ without the Python NCNN binding or Python process isolation.
+- Pinned the official NCNN 20260526 full source with SHA-256 verification and
+  added reproducible online/offline build controls for release wheels.
+- Added strict BGR8 frame-contract validation, project-relative Unicode model
+  paths, compact versioned NDT2 detections, C++ decoder/NMS golden tests, and
+  real NCNN compile/link/inference release checks.
+- Fixed numeric `>=` validation, empty detections serialization, transient
+  `nodrix top` startup reports, metrics client disconnects, and normal FFmpeg
+  shutdown/Ctrl+C handling.
 - Added public `ProviderMetadata`, `NodeDescriptor`, `ProbeDescriptor`,
   `TemplateDescriptor`, `ProviderManifest`, and `ProviderRuntime` contracts.
 - Added metadata-only discovery through `nodrix.providers` entry points;

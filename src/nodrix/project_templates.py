@@ -357,29 +357,26 @@ def _vision_files(project_name: str) -> dict[str, str]:
 
     detector = dedent(
         """
-        use: vision.ncnn_detector
+        use: vision.ncnn_detector_native
 
         # Directory containing one NCNN .param/.bin pair.
         model: models/yolo26n_ncnn_model
 
+        # Must match the preceding letterbox block.
+        imgsz: 320
+
         # Minimum detection confidence: 0.0..1.0.
         conf: 0.18
 
-        # IoU threshold used by non-maximum suppression: 0.0..1.0.
+        # IoU threshold used by native C++ NMS: 0.0..1.0.
         iou: 0.65
 
         # Maximum number of detections published for one frame.
         max_det: 150
 
-        # Backend: auto, cpu, or vulkan. auto probes Vulkan first.
-        backend: auto
-
-        # Acceleration policy: required, preferred, or disabled.
-        # preferred reports a visible CPU fallback when no GPU is usable.
-        acceleration: preferred
-
-        # Native NCNN CPU worker threads used by the CPU backend.
-        threads: 3
+        # NCNN ARM/NEON workers. No Python process isolation is required.
+        backend: cpu
+        threads: 4
 
         # Output tensor decoder: auto, xyxy, or yolo.
         output_format: auto
@@ -506,7 +503,7 @@ def _vision_files(project_name: str) -> dict[str, str]:
 
     return {
         "pipeline.yaml": pipeline,
-        "requirements.txt": "nodrix[vision-ncnn,media,viewer]==2.1.0\n",
+        "requirements.txt": "nodrix[vision,media,viewer]==2.1.0\n",
         "blocks/sources/ffmpeg.yaml": source,
         "blocks/preprocess/letterbox-320.yaml": preprocess,
         "blocks/detectors/yolo26n-ncnn.yaml": detector,

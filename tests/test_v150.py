@@ -38,8 +38,9 @@ def test_v150_template_is_multirate_hardware_first_and_self_contained(tmp_path: 
     assert tracker.parameters["delayed_measurement_replay"] is True
     assert tracker.parameters["max_prediction_frames"] == 15
 
-    assert detector.parameters["backend"] == "auto"
-    assert detector.parameters["acceleration"] == "preferred"
+    assert detector.uses == "vision.ncnn_detector_native"
+    assert detector.parameters["backend"] == "cpu"
+    assert detector.parameters["threads"] == 4
     assert encoder.parameters["encoder"] == "auto"
     assert encoder.parameters["acceleration"] == "preferred"
     assert manifest.runtime.metrics.listen == "127.0.0.1:9464"
