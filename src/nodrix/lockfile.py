@@ -81,9 +81,9 @@ def build_lock(manifest_path: str | Path = "pipeline.yaml") -> dict[str, Any]:
             continue
         seen.add(path)
         try:
-            rel = str(path.relative_to(project_dir))
+            rel = path.relative_to(project_dir).as_posix()
         except ValueError:
-            rel = str(path)
+            rel = path.as_posix()
         files[rel] = {"sha256": sha256_file(path), "size": path.stat().st_size}
     return {
         "format": LOCK_FORMAT,

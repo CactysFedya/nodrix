@@ -4,7 +4,6 @@ from collections import deque
 from dataclasses import dataclass, field
 import json
 import os
-import select
 from functools import lru_cache
 from pathlib import Path
 import platform
@@ -185,6 +184,53 @@ class _StderrCollector:
 
     def text(self) -> str:
         return "\n".join(self.lines)
+
+    def join(self, timeout: float = 1.0) -> None:
+        self.thread.join(timeout=timeout)
+
+
+class _BinaryPipeCollector:
+    """Drain a subprocess pipe on a thread so Windows does not need select()."""
+
+    def __init__(self, pipe: Any, chunk_size: int) -> None:
+        self.pipe = pipe
+        self.chunk_size = max(1, int(chunk_size))
+        self.chunks: deque[bytes] = deque()
+        self.condition = threading.Condition()
+        self.closed = False
+        self.thread = threading.Thread(
+            target=self._read,
+            name="nodrix-ffmpeg-stdout",
+            daemon=True,
+        )
+        self.thread.start()
+
+    def _read(self) -> None:
+        try:
+            while self.pipe is not None:
+                chunk = os.read(self.pipe.fileno(), self.chunk_size)
+                if not chunk:
+                    break
+                with self.condition:
+                    self.chunks.append(chunk)
+                    self.condition.notify_all()
+        except (OSError, ValueError):
+            pass
+        finally:
+            with self.condition:
+                self.closed = True
+                self.condition.notify_all()
+
+    def drain(self, timeout: float) -> bytes:
+        with self.condition:
+            if not self.chunks and not self.closed and timeout > 0:
+                self.condition.wait_for(
+                    lambda: bool(self.chunks) or self.closed,
+                    timeout=timeout,
+                )
+            chunks = tuple(self.chunks)
+            self.chunks.clear()
+        return b"".join(chunks)
 
     def join(self, timeout: float = 1.0) -> None:
         self.thread.join(timeout=timeout)
@@ -695,6 +741,7 @@ class FFmpegWriter(SinkNode):
         self.keyint = int(self.parameters.get("keyint", 30))
         self._process: subprocess.Popen[bytes] | None = None
         self.stderr: _StderrCollector | None = None
+        self.stdout: _BinaryPipeCollector | None = None
         self.shape: tuple[int, int] | None = None
         self.frames = 0
 
@@ -850,28 +897,16 @@ class FFmpegEncoder(Node):
             command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0
         )
         assert self._process.stdout is not None
-        os.set_blocking(self._process.stdout.fileno(), False)
+        self.stdout = _BinaryPipeCollector(
+            self._process.stdout,
+            self.chunk_size,
+        )
         self.stderr = _StderrCollector(self._process.stderr)
 
     def _drain(self, timeout: float) -> bytes:
-        if self._process is None or self._process.stdout is None:
+        if self.stdout is None:
             return b""
-        fd = self._process.stdout.fileno()
-        chunks: list[bytes] = []
-        first = True
-        while True:
-            readable, _, _ = select.select([fd], [], [], timeout if first else 0.0)
-            first = False
-            if not readable:
-                break
-            try:
-                chunk = os.read(fd, self.chunk_size)
-            except BlockingIOError:
-                break
-            if not chunk:
-                break
-            chunks.append(chunk)
-        return b"".join(chunks)
+        return self.stdout.drain(timeout)
 
     def _message(self, data: bytes, source: Message) -> dict[str, Message] | None:
         if not data:
@@ -920,6 +955,8 @@ class FFmpegEncoder(Node):
         except subprocess.TimeoutExpired:
             self._process.terminate()
             self._process.wait(timeout=2.0)
+        if self.stdout is not None:
+            self.stdout.join()
         return self._message(self._drain(0.0), self.last_source)
 
     def runtime_info(self) -> dict[str, Any]:
@@ -957,10 +994,13 @@ class FFmpegEncoder(Node):
                     process.wait(timeout=2.0)
         if self.stderr is not None:
             self.stderr.join()
+        if self.stdout is not None:
+            self.stdout.join()
         detail = self.stderr.text() if self.stderr else ""
         return_code = process.returncode
         if process.stdout is not None:
             process.stdout.close()
+        self.stdout = None
         if process.stderr is not None:
             process.stderr.close()
         # FFmpeg may return 255/negative signal codes when the runtime closes

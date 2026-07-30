@@ -551,7 +551,14 @@ def _normalize_compact(
         node, node_sources = _normalize_node(
             block_name,
             raw_block,
-            source=f"block:{block_file.relative_to(base_dir) if block_file.is_relative_to(base_dir) else block_file}",
+            source=(
+                "block:"
+                + (
+                    block_file.relative_to(base_dir).as_posix()
+                    if block_file.is_relative_to(base_dir)
+                    else block_file.as_posix()
+                )
+            ),
         )
         canonical["nodes"][block_name] = node
         sources.update(node_sources)

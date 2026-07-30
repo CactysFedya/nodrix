@@ -75,7 +75,12 @@ def test_shared_buffer_pool_reuses_block_and_closes_cleanly() -> None:
 
 def test_physical_memory_uses_sysconf_when_available(monkeypatch) -> None:
     values = {"SC_PHYS_PAGES": 1024, "SC_PAGE_SIZE": 4096}
-    monkeypatch.setattr(resources.os, "sysconf", lambda key: values[key])
+    monkeypatch.setattr(
+        resources.os,
+        "sysconf",
+        lambda key: values[key],
+        raising=False,
+    )
 
     assert resources._physical_memory_total_bytes() == 1024 * 4096
 
@@ -84,7 +89,12 @@ def test_physical_memory_uses_macos_sysctl_fallback(monkeypatch) -> None:
     def failing_sysconf(_key):
         raise OSError("not available")
 
-    monkeypatch.setattr(resources.os, "sysconf", failing_sysconf)
+    monkeypatch.setattr(
+        resources.os,
+        "sysconf",
+        failing_sysconf,
+        raising=False,
+    )
     monkeypatch.setattr(resources, "sys", SimpleNamespace(platform="darwin"))
     monkeypatch.setattr(
         resources.subprocess,
@@ -98,9 +108,21 @@ def test_physical_memory_uses_macos_sysctl_fallback(monkeypatch) -> None:
     assert resources._physical_memory_total_bytes() == 17179869184
 
 
+def test_physical_memory_uses_windows_api_fallback(monkeypatch) -> None:
+    monkeypatch.delattr(resources.os, "sysconf", raising=False)
+    monkeypatch.setattr(resources.sys, "platform", "win32")
+    monkeypatch.setattr(
+        resources,
+        "_windows_physical_memory_total_bytes",
+        lambda: 8 * 1024**3,
+    )
+
+    assert resources._physical_memory_total_bytes() == 8 * 1024**3
+
+
 def test_system_snapshot_without_posix_resource(monkeypatch) -> None:
     monkeypatch.setattr(resources, "_resource", None)
-    monkeypatch.delattr(resources.os, "getloadavg")
+    monkeypatch.delattr(resources.os, "getloadavg", raising=False)
     monkeypatch.setattr(
         resources,
         "_physical_memory_total_bytes",
