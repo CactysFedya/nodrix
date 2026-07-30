@@ -76,13 +76,10 @@ def _local_ipv4_interfaces() -> list[str]:
                     addresses.add(address)
         except (OSError, subprocess.SubprocessError):
             pass
-    try:
-        for item in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_DGRAM):
-            addresses.add(item[4][0])
-    except OSError:
-        pass
     # A route probe does not transmit traffic; it asks the kernel which local
     # address it would use and helps on platforms where ioctl is unavailable.
+    # Do not resolve the hostname here: getaddrinfo() may block indefinitely
+    # when a CI runner or an offline edge device has broken DNS.
     try:
         probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:

@@ -111,6 +111,13 @@ def test_process_local_discovery_survives_blocked_multicast(
     import nodrix.discovery as discovery
 
     monkeypatch.setattr(
+        discovery.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("discovery must not depend on hostname DNS")
+        ),
+    )
+    monkeypatch.setattr(
         discovery,
         "_send_multicast",
         lambda _sock, _interfaces, _data: None,
