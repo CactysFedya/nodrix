@@ -117,3 +117,47 @@ def test_system_snapshot_without_posix_resource(monkeypatch) -> None:
     assert snapshot["cpu_count"] >= 1
     assert snapshot["load_average"] == []
     assert "process_max_rss_bytes" not in snapshot
+
+
+def test_ps_process_rejects_zombie_and_zero_rss(monkeypatch) -> None:
+    monkeypatch.setattr(
+        resources.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="Z 0:00.01 0 0\n",
+        ),
+    )
+
+    assert resources._ps_process(123) is None
+
+
+def test_ps_process_parses_live_snapshot(monkeypatch) -> None:
+    monkeypatch.setattr(
+        resources.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            stdout="S+ 0:01.25 64 128\n",
+        ),
+    )
+
+    assert resources._ps_process(123) == {
+        "pid": 123,
+        "cpu_time_seconds": 1.25,
+        "rss_bytes": 64 * 1024,
+        "vms_bytes": 128 * 1024,
+        "threads": None,
+    }
+
+
+def test_process_snapshot_uses_windows_api(monkeypatch) -> None:
+    expected = {
+        "pid": 123,
+        "cpu_time_seconds": 0.5,
+        "rss_bytes": 4096,
+        "vms_bytes": 8192,
+        "threads": None,
+    }
+    monkeypatch.setattr(resources.sys, "platform", "win32")
+    monkeypatch.setattr(resources, "_windows_process", lambda pid: expected if pid == 123 else None)
+
+    assert resources.process_snapshot(123) == expected

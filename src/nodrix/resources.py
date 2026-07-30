@@ -40,16 +40,22 @@ def _linux_process(pid: int) -> dict[str, Any] | None:
 def _ps_process(pid: int) -> dict[str, Any] | None:
     try:
         result = subprocess.run(
-            ["ps", "-o", "time=,rss=,vsz=", "-p", str(pid)],
+            ["ps", "-o", "stat=,time=,rss=,vsz=", "-p", str(pid)],
             capture_output=True,
             text=True,
             timeout=0.25,
             check=False,
         )
         parts = result.stdout.strip().split()
-        if len(parts) < 3:
+        if len(parts) < 4:
             return None
-        time_text, rss, vms = parts[-3:]
+        status, time_text, rss, vms = parts[-4:]
+        rss_bytes = int(rss) * 1024
+        vms_bytes = int(vms) * 1024
+        # ps can still expose a child briefly after exit. Never let a zombie
+        # or a transient zero sample erase the last valid live measurement.
+        if status.startswith(("Z", "X")) or rss_bytes <= 0:
+            return None
         segments = [float(item) for item in time_text.split(":")]
         cpu_seconds = segments[-1] + (segments[-2] * 60 if len(segments) >= 2 else 0)
         if len(segments) >= 3:
@@ -57,17 +63,105 @@ def _ps_process(pid: int) -> dict[str, Any] | None:
         return {
             "pid": pid,
             "cpu_time_seconds": cpu_seconds,
-            "rss_bytes": int(rss) * 1024,
-            "vms_bytes": int(vms) * 1024,
+            "rss_bytes": rss_bytes,
+            "vms_bytes": vms_bytes,
             "threads": None,
         }
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
 
 
+def _windows_process(pid: int) -> dict[str, Any] | None:
+    """Read a child process snapshot using Win32 without an optional psutil dependency."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class ProcessMemoryCountersEx(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+                ("PrivateUsage", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        kernel32.GetProcessTimes.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+            ctypes.POINTER(wintypes.FILETIME),
+        ]
+        kernel32.GetProcessTimes.restype = wintypes.BOOL
+        psapi.GetProcessMemoryInfo.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(ProcessMemoryCountersEx),
+            wintypes.DWORD,
+        ]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+
+        # PROCESS_QUERY_INFORMATION | PROCESS_VM_READ. Nodrix owns the child,
+        # so these rights do not require elevation.
+        handle = kernel32.OpenProcess(0x0400 | 0x0010, False, int(pid))
+        if not handle:
+            return None
+        try:
+            memory = ProcessMemoryCountersEx()
+            memory.cb = ctypes.sizeof(memory)
+            if not psapi.GetProcessMemoryInfo(handle, ctypes.byref(memory), memory.cb):
+                return None
+            created = wintypes.FILETIME()
+            exited = wintypes.FILETIME()
+            kernel = wintypes.FILETIME()
+            user = wintypes.FILETIME()
+            if not kernel32.GetProcessTimes(
+                handle,
+                ctypes.byref(created),
+                ctypes.byref(exited),
+                ctypes.byref(kernel),
+                ctypes.byref(user),
+            ):
+                return None
+
+            def filetime_value(value: Any) -> int:
+                return (int(value.dwHighDateTime) << 32) | int(value.dwLowDateTime)
+
+            rss_bytes = int(memory.WorkingSetSize)
+            if rss_bytes <= 0:
+                return None
+            return {
+                "pid": pid,
+                "cpu_time_seconds": (
+                    filetime_value(kernel) + filetime_value(user)
+                ) / 10_000_000.0,
+                "rss_bytes": rss_bytes,
+                "vms_bytes": int(memory.PrivateUsage or memory.PagefileUsage),
+                "threads": None,
+            }
+        finally:
+            kernel32.CloseHandle(handle)
+    except (AttributeError, OSError, TypeError, ValueError):
+        return None
+
+
 def process_snapshot(pid: int) -> dict[str, Any] | None:
     if sys.platform.startswith("linux"):
         return _linux_process(pid)
+    if sys.platform == "win32":
+        return _windows_process(pid)
     return _ps_process(pid)
 
 
