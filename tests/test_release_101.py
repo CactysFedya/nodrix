@@ -17,6 +17,10 @@ def test_patch_release_metadata() -> None:
 
 
 def test_release_matrix_excludes_intel_mac_and_uses_node24_actions() -> None:
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        config = tomllib.load(handle)
+    assert config["tool"]["cibuildwheel"]["windows"]["archs"] == ["AMD64"]
+
     workflow_path = ROOT / ".github/workflows/publish.yml"
     if not workflow_path.exists():
         return

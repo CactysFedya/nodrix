@@ -872,7 +872,7 @@ struct NodeStats {
   std::atomic<std::uint64_t> errors{0};
   std::atomic<std::uint64_t> total_process_ns{0};
   std::atomic<std::uint64_t> min_process_ns{
-      std::numeric_limits<std::uint64_t>::max()};
+      (std::numeric_limits<std::uint64_t>::max)()};
   std::atomic<std::uint64_t> max_process_ns{0};
   std::atomic<std::uint64_t> synchronization_misses{0};
   mutable std::mutex duration_samples_mutex;
@@ -1685,7 +1685,8 @@ class Runtime final {
         if (!blocking_cache(loaded, index)) return false;
       }
       std::size_t oldest = required.front();
-      std::uint64_t minimum = std::numeric_limits<std::uint64_t>::max();
+      std::uint64_t minimum =
+          (std::numeric_limits<std::uint64_t>::max)();
       std::uint64_t maximum = 0;
       for (std::size_t index : required) {
         const auto& message = loaded.synchronized_cache[index];

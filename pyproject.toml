@@ -124,3 +124,6 @@ manylinux-aarch64-image = "manylinux_2_28"
 
 [tool.cibuildwheel.macos]
 archs = ["auto"]
+
+[tool.cibuildwheel.windows]
+archs = ["AMD64"]

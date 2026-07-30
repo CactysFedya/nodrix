@@ -10,12 +10,19 @@
 #include <thread>
 #include <utility>
 
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#include <intrin.h>
+#endif
+
 namespace nodrix {
 
 inline void cpu_relax() noexcept {
-#if defined(__x86_64__) || defined(_M_X64) || defined(__i386) || defined(_M_IX86)
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+  _mm_pause();
+#elif defined(__x86_64__) || defined(__i386)
   __builtin_ia32_pause();
-#elif defined(__aarch64__) || defined(__arm__)
+#elif (defined(__aarch64__) || defined(__arm__)) && \
+    (defined(__GNUC__) || defined(__clang__))
   asm volatile("yield" ::: "memory");
 #else
   std::atomic_signal_fence(std::memory_order_seq_cst);

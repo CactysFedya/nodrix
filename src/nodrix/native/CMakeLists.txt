@@ -21,6 +21,11 @@ find_package(Threads REQUIRED)
 
 add_library(nodrix_native_sdk INTERFACE)
 target_include_directories(nodrix_native_sdk INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if(WIN32)
+  target_compile_definitions(
+    nodrix_native_sdk INTERFACE NOMINMAX WIN32_LEAN_AND_MEAN
+  )
+endif()
 
 
 function(nodrix_enable_sanitizers target)

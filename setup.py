@@ -13,7 +13,15 @@ from setuptools.command.build_py import build_py
 compile_args: list[str] = []
 link_args: list[str] = []
 if os.name == "nt":
-    compile_args.extend(["/O2", "/std:c++20", "/DNDEBUG"])
+    compile_args.extend(
+        [
+            "/O2",
+            "/std:c++20",
+            "/DNDEBUG",
+            "/DNOMINMAX",
+            "/DWIN32_LEAN_AND_MEAN",
+        ]
+    )
 else:
     compile_args.extend(["-O3", "-std=c++20", "-DNDEBUG", "-fvisibility=hidden"])
     if sys.platform == "darwin":
