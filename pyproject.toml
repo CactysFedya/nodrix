@@ -67,6 +67,7 @@ dev = [
   "build>=1.2",
   "cibuildwheel>=3.4.1,<4",
   "pytest>=8.0",
+  "pytest-timeout>=2.4",
   "ruff>=0.12",
   "twine>=6.1",
 ]
@@ -107,6 +108,8 @@ nodrix = [
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+timeout = 60
+timeout_method = "thread"
 
 [tool.ruff]
 target-version = "py311"
