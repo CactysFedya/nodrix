@@ -81,6 +81,20 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      - name: Install FFmpeg on Ubuntu
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
+      - name: Install FFmpeg on macOS
+        if: startsWith(matrix.os, 'macos')
+        run: brew install ffmpeg
+
+      - name: Install FFmpeg on Windows
+        if: startsWith(matrix.os, 'windows')
+        run: choco install ffmpeg --no-progress -y
+
       - name: Install Nodrix
         run: python -m pip install -e ".[dev,all]"
 
@@ -222,6 +236,11 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+
+      - name: Install system test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Install build tools
         run: python -m pip install --upgrade build twine
