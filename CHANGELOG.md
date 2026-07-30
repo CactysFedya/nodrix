@@ -9,6 +9,10 @@
 - Added strict BGR8 frame-contract validation, project-relative Unicode model
   paths, compact versioned NDT2 detections, C++ decoder/NMS golden tests, and
   real NCNN compile/link/inference release checks.
+- Kept ABI-compatible plugin libraries mapped for process lifetime so OpenMP
+  workers and TLS destructors cannot execute unloaded code during shutdown.
+- Preserved live isolated-process telemetry across Linux exit races and
+  captured a baseline resource sample as soon as each process reports ready.
 - Fixed numeric `>=` validation, empty detections serialization, transient
   `nodrix top` startup reports, metrics client disconnects, and normal FFmpeg
   shutdown/Ctrl+C handling.

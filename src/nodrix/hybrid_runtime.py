@@ -654,6 +654,32 @@ class HybridPipelineRuntime:
         except Exception as exc:
             return {"diagnostic_error": f"{type(exc).__name__}: {exc}"}
 
+    def _sample_isolated_resources(
+        self,
+        loaded: LoadedNode,
+        *,
+        attempts: int = 1,
+    ) -> dict[str, Any]:
+        pid = loaded.node.pid if isinstance(loaded.node, ProcessNodeProxy) else None
+        resources: dict[str, Any] = {
+            "pid": int(pid or 0),
+            "available": False,
+        }
+        if pid is not None:
+            for attempt in range(max(1, attempts)):
+                resources = self._resource_sampler.process(pid)
+                if resources.get("available"):
+                    self._last_node_resources[loaded.name] = dict(resources)
+                    break
+                if attempt + 1 < attempts:
+                    time.sleep(0.01)
+        if not resources.get("available") and loaded.name in self._last_node_resources:
+            resources = {
+                **self._last_node_resources[loaded.name],
+                "stale": True,
+            }
+        return resources
+
     def _node_report(self, loaded: LoadedNode, duration: float | None = None) -> dict[str, Any]:
         pressures = []
         estimated_queue_bytes = 0
@@ -673,12 +699,7 @@ class HybridPipelineRuntime:
         report = loaded.stats.report(duration)  # type: ignore[union-attr]
         if isinstance(loaded.node, ProcessNodeProxy):
             transport = loaded.node.transport_report()
-            pid = loaded.node.pid
-            resources = self._resource_sampler.process(pid) if pid is not None else {"available": False}
-            if resources.get("available"):
-                self._last_node_resources[loaded.name] = dict(resources)
-            elif loaded.name in self._last_node_resources:
-                resources = {**self._last_node_resources[loaded.name], "stale": True}
+            resources = self._sample_isolated_resources(loaded)
             resources["scope"] = "isolated_process"
             input_pool = dict(transport.get("shared_input_pool", {}))
             output_pool = dict(transport.get("shared_output_pool", {}))
@@ -983,6 +1004,11 @@ class HybridPipelineRuntime:
             loaded.node._lifecycle.transition(LifecycleState.READY)
             loaded.node._lifecycle.transition(LifecycleState.STARTING)
             bridge.resolve(loaded.node.start())
+            if isinstance(loaded.node, ProcessNodeProxy):
+                # The child has acknowledged READY, so capture one guaranteed
+                # live baseline before a short graph can finish or metrics
+                # reach their first periodic interval.
+                self._sample_isolated_resources(loaded, attempts=5)
             self._emit_event(
                 "node_ready",
                 node=loaded.name,

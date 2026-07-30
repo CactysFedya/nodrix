@@ -328,13 +328,15 @@ class DynamicLibrary final {
   DynamicLibrary& operator=(const DynamicLibrary&) = delete;
 
   ~DynamicLibrary() {
-    if (!handle_) return;
+    if (!handle_ || pinned_) return;
 #if defined(_WIN32)
     FreeLibrary(handle_);
 #else
     dlclose(handle_);
 #endif
   }
+
+  void pin() noexcept { pinned_ = true; }
 
   void* symbol(const char* name) const {
 #if defined(_WIN32)
@@ -354,6 +356,10 @@ class DynamicLibrary final {
 
  private:
   fs::path path_;
+  // A compatible plugin may own process-wide workers or TLS destructors.
+  // Keep its code mapped until the process exits so those callbacks never
+  // execute from an unloaded DSO.
+  bool pinned_{false};
 #if defined(_WIN32)
   HMODULE handle_{nullptr};
 #else
@@ -472,6 +478,7 @@ class CAbiNode final : public vp::Node {
       throw std::runtime_error(
           "Plugin does not implement required C ABI 2.0 features");
     }
+    library_->pin();
     api_ = {};
     api_.struct_size = sizeof(api_);
     const nodrix_status_v2 status = create(

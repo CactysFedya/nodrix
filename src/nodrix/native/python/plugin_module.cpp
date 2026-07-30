@@ -61,8 +61,14 @@ struct DynamicLibrary {
     return value;
   }
 
+  void pin() noexcept { pinned = true; }
+
   void close() noexcept {
     if (!handle) return;
+    // ABI-compatible plugins stay mapped for process lifetime. Runtime
+    // workers or TLS destructors (OpenMP is a common example) may remain
+    // active after the last node instance closes.
+    if (pinned) return;
 #if defined(_WIN32)
     FreeLibrary(handle);
 #else
@@ -70,6 +76,8 @@ struct DynamicLibrary {
 #endif
     handle = nullptr;
   }
+
+  bool pinned{false};
 };
 
 struct PythonBufferContext {
@@ -572,6 +580,7 @@ int NativeNodeHost_init(
       throw std::runtime_error(
           "Plugin C ABI 2.0 does not provide the required stable features");
     }
+    (*self->library)->pin();
     const auto create = reinterpret_cast<nodrix_plugin_create_v2_fn>(
         (*self->library)->symbol("nodrix_plugin_create_v2"));
     self->api.struct_size = sizeof(nodrix_node_api_v2);

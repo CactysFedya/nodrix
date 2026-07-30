@@ -28,11 +28,18 @@ def _linux_process(pid: int) -> dict[str, Any] | None:
         return None
     ticks = float(os.sysconf("SC_CLK_TCK"))
     page = int(os.sysconf("SC_PAGE_SIZE"))
+    rss_bytes = int(statm[1]) * page
+    vms_bytes = int(statm[0]) * page
+    # A process can exit between reading stat and statm. In that narrow
+    # window Linux may expose an all-zero statm before stat reports Z.
+    # Reject the transitional sample so it cannot erase a valid live one.
+    if rss_bytes <= 0 or vms_bytes <= 0:
+        return None
     return {
         "pid": pid,
         "cpu_time_seconds": (int(stat[13]) + int(stat[14])) / ticks,
-        "rss_bytes": int(statm[1]) * page,
-        "vms_bytes": int(statm[0]) * page,
+        "rss_bytes": rss_bytes,
+        "vms_bytes": vms_bytes,
         "threads": int(stat[19]),
     }
 
