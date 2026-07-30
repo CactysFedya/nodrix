@@ -96,3 +96,24 @@ def test_physical_memory_uses_macos_sysctl_fallback(monkeypatch) -> None:
     )
 
     assert resources._physical_memory_total_bytes() == 17179869184
+
+
+def test_system_snapshot_without_posix_resource(monkeypatch) -> None:
+    monkeypatch.setattr(resources, "_resource", None)
+    monkeypatch.delattr(resources.os, "getloadavg")
+    monkeypatch.setattr(
+        resources,
+        "_physical_memory_total_bytes",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        resources.sys,
+        "platform",
+        "win32",
+    )
+
+    snapshot = resources.system_snapshot()
+
+    assert snapshot["cpu_count"] >= 1
+    assert snapshot["load_average"] == []
+    assert "process_max_rss_bytes" not in snapshot

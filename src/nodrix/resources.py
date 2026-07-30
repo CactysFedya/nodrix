@@ -3,11 +3,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import os
 from pathlib import Path
-import resource
 import subprocess
 import sys
 import time
 from typing import Any
+
+try:
+    import resource as _resource
+except ImportError:  # Windows has no POSIX resource module.
+    _resource = None
 
 
 def _linux_process(pid: int) -> dict[str, Any] | None:
@@ -130,8 +134,8 @@ def system_snapshot() -> dict[str, Any]:
                 result["throttled"] = throttled.read_text().strip()
         except OSError:
             pass
-    else:
-        usage = resource.getrusage(resource.RUSAGE_SELF)
+    elif _resource is not None:
+        usage = _resource.getrusage(_resource.RUSAGE_SELF)
         result["process_max_rss_bytes"] = int(usage.ru_maxrss) * (1 if sys.platform == "darwin" else 1024)
     return result
 
