@@ -1,0 +1,93 @@
+{
+  "metadata": {
+    "description": "External ROS 2 transport and typed sensor adapters",
+    "features": [
+      "platform.ros2",
+      "ros2.topic_source",
+      "ros2.topic_sink",
+      "ros2.point_cloud2",
+      "ros2.odometry",
+      "ros2.shared_executor"
+    ],
+    "id": "nodrix.ros2",
+    "name": "Nodrix ROS 2 Provider",
+    "provider_api": "1",
+    "requires_features": [
+      "python-node-api.2"
+    ],
+    "requires_nodrix": ">=2.1,<3",
+    "version": "0.1.0"
+  },
+  "nodes": [
+    {
+      "factory": "nodrix_ros2.nodes.topic_source:Ros2TopicSource",
+      "features": [
+        "ros2.topic_source"
+      ],
+      "id": "ros2.topic_source",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "output": "core.any"
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_sink:Ros2TopicSink",
+      "features": [
+        "ros2.topic_sink"
+      ],
+      "id": "ros2.topic_sink",
+      "inputs": {
+        "input": "core.any"
+      },
+      "optional_inputs": [],
+      "outputs": {}
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_source:Ros2PointCloud2Source",
+      "features": [
+        "ros2.point_cloud2"
+      ],
+      "id": "ros2.point_cloud2_source",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "cloud": "mapping.point_cloud/v1"
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_source:Ros2OdometrySource",
+      "features": [
+        "ros2.odometry"
+      ],
+      "id": "ros2.odometry_source",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "odometry": "geometry.odometry/v1"
+      }
+    }
+  ],
+  "probes": [
+    {
+      "callable": "nodrix_ros2.probes:safe_probe",
+      "cooldown_seconds": 0.0,
+      "depth": "safe",
+      "id": "nodrix.ros2.safe",
+      "permissions": [],
+      "timeout_seconds": 2.0
+    },
+    {
+      "callable": "nodrix_ros2.probes:deep_probe",
+      "cooldown_seconds": 5.0,
+      "depth": "deep",
+      "id": "nodrix.ros2.deep",
+      "permissions": [
+        "ros-environment"
+      ],
+      "timeout_seconds": 5.0
+    }
+  ],
+  "schema": "nodrix-provider/1",
+  "templates": []
+}

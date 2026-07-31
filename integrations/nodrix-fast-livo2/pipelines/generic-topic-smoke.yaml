@@ -1,0 +1,40 @@
+apiVersion: nodrix.dev/v2
+kind: Pipeline
+
+metadata:
+  name: ros2-generic-topic-smoke
+
+runtime:
+  engine: unified
+
+nodes:
+  source:
+    uses: ros2.topic_source
+    parameters:
+      topic: /diagnostics
+      message_type: diagnostic_msgs/msg/DiagnosticArray
+      raw_message: false
+      capacity: 1
+      qos:
+        reliability: reliable
+        depth: 1
+
+  counter:
+    uses: core.counter_sink
+
+fragments: {}
+
+edges:
+  - from: source.output
+    to: counter.input
+    queue:
+      capacity: 1
+      policy: latest
+    memory:
+      domain: cpu
+      allow_copy: true
+
+streams: {}
+recording: {}
+security: {}
+placement: {}

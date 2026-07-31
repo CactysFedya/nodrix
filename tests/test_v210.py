@@ -213,7 +213,10 @@ def test_discovery_is_metadata_only_and_node_import_is_lazy(
     marker, _, _ = _install_fake_provider(tmp_path)
     monkeypatch.syspath_prepend(str(tmp_path))
 
-    candidates = discover_providers(include_legacy=False)
+    candidates = discover_providers(
+        include_legacy=False,
+        paths=[tmp_path],
+    )
 
     assert [item.id for item in candidates] == ["acme.test"]
     assert marker.exists() is False

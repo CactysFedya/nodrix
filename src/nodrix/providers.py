@@ -241,33 +241,97 @@ def sign_provider_metadata(
     return target
 
 
+def _editable_distribution(
+    distribution: importlib.metadata.Distribution,
+) -> bool:
+    try:
+        raw = distribution.read_text("direct_url.json")
+    except (OSError, UnicodeDecodeError):
+        return False
+    if not raw:
+        return False
+    try:
+        document = json.loads(raw)
+    except ValueError:
+        return False
+    return bool(
+        isinstance(document, Mapping)
+        and isinstance(document.get("dir_info"), Mapping)
+        and document["dir_info"].get("editable") is True
+    )
+
+
+def _entry_point_package_directories(entry_point: Any) -> tuple[Path, ...]:
+    module_name = str(
+        getattr(entry_point, "module", "")
+        or str(getattr(entry_point, "value", "")).split(":", 1)[0]
+    ).strip()
+    package_name = module_name.split(".", 1)[0]
+    if not package_name:
+        return ()
+    try:
+        spec = importlib.util.find_spec(package_name)
+    except (ImportError, AttributeError, ValueError):
+        return ()
+    if spec is None:
+        return ()
+    directories: list[Path] = []
+    for item in spec.submodule_search_locations or ():
+        directories.append(Path(item).resolve())
+    if spec.origin and spec.origin not in {"built-in", "frozen"}:
+        directories.append(Path(spec.origin).resolve().parent)
+    return tuple(dict.fromkeys(directories))
+
+
 def _safe_distribution_file(
     distribution: importlib.metadata.Distribution,
     filename: str,
     *,
     required: bool,
+    entry_point: Any | None = None,
 ) -> Path | None:
-    matches = [
-        item
+    paths: list[Path] = [
+        Path(distribution.locate_file(item)).resolve()
         for item in distribution.files or ()
         if Path(str(item)).name == filename
     ]
-    if not matches:
+    if entry_point is not None and _editable_distribution(distribution):
+        for directory in _entry_point_package_directories(entry_point):
+            candidate = (directory / filename).resolve()
+            if candidate.is_file():
+                paths.append(candidate)
+
+    unique: list[Path] = []
+    for path in paths:
+        if path not in unique:
+            unique.append(path)
+    if not unique:
         if required:
             raise ValueError(f"distribution has no {filename}")
         return None
-    if len(matches) != 1:
-        raise ValueError(f"distribution contains multiple {filename} files")
-    path = Path(distribution.locate_file(matches[0]))
-    if path.is_symlink():
-        raise ValueError(f"{filename} must not be a symbolic link")
-    try:
-        mode = path.stat().st_mode
-    except OSError as exc:
-        raise ValueError(f"cannot inspect {filename}: {exc}") from exc
-    if not stat.S_ISREG(mode):
-        raise ValueError(f"{filename} must be a regular file")
-    return path.resolve()
+
+    checked: list[Path] = []
+    for path in unique:
+        if path.is_symlink():
+            raise ValueError(f"{filename} must not be a symbolic link")
+        try:
+            mode = path.stat().st_mode
+        except OSError as exc:
+            raise ValueError(f"cannot inspect {filename}: {exc}") from exc
+        if not stat.S_ISREG(mode):
+            raise ValueError(f"{filename} must be a regular file")
+        checked.append(path)
+
+    if len(checked) > 1:
+        digests = {
+            hashlib.sha256(path.read_bytes()).digest()
+            for path in checked
+        }
+        if len(digests) != 1:
+            raise ValueError(
+                f"distribution contains conflicting {filename} files"
+            )
+    return sorted(checked, key=str)[0]
 
 
 def _distribution_identity(
@@ -327,12 +391,14 @@ def _external_candidates(
                 distribution,
                 "nodrix-provider.json",
                 required=True,
+                entry_point=entry_point,
             )
             assert metadata_path is not None
             signature_path = _safe_distribution_file(
                 distribution,
                 "nodrix-provider.sig",
                 required=False,
+                entry_point=entry_point,
             )
             document = _read_json(metadata_path)
             if not isinstance(document, dict):
@@ -375,6 +441,42 @@ def _external_candidates(
                     error=str(exc),
                 )
             )
+    return _deduplicate_external_candidates(result)
+
+
+def _deduplicate_external_candidates(
+    candidates: Iterable[ProviderCandidate],
+) -> list[ProviderCandidate]:
+    grouped: dict[tuple[str, str, str, str], list[ProviderCandidate]] = {}
+    for candidate in candidates:
+        entry_point = candidate.entry_point
+        key = (
+            candidate.distribution.lower().replace("_", "-"),
+            candidate.distribution_version,
+            str(getattr(entry_point, "name", candidate.id)),
+            str(getattr(entry_point, "value", "")),
+        )
+        grouped.setdefault(key, []).append(candidate)
+
+    result: list[ProviderCandidate] = []
+    for values in grouped.values():
+        valid = [
+            item
+            for item in values
+            if item.manifest is not None and item.document is not None
+        ]
+        if not valid:
+            result.append(values[0])
+            continue
+        documents = {
+            _canonical_document(item.document)
+            for item in valid
+            if item.document is not None
+        }
+        if len(documents) == 1:
+            result.append(valid[0])
+        else:
+            result.extend(valid)
     return result
 
 
@@ -715,7 +817,12 @@ def discover_providers(
 
     candidates = _external_candidates(paths)
     if include_legacy:
-        candidates.extend(_legacy_candidates())
+        external_ids = {candidate.id for candidate in candidates}
+        candidates.extend(
+            candidate
+            for candidate in _legacy_candidates()
+            if candidate.id not in external_ids
+        )
     by_id: dict[str, list[int]] = {}
     for index, candidate in enumerate(candidates):
         by_id.setdefault(candidate.id, []).append(index)

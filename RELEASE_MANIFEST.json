@@ -1,0 +1,201 @@
+{
+  "files": [
+    {
+      "bytes": 1211,
+      "path": "docs/RELEASE_2.2.0-alpha.1.md",
+      "sha256": "8bb4572bf6ccca54eacb6504e07883918220a43cd597dd731f98f5d949b9a5a1"
+    },
+    {
+      "bytes": 136,
+      "path": "integrations/README.md",
+      "sha256": "01a349fcec8c7c484ce9535e1220647005fa6b88f536822f7769748ff60fd111"
+    },
+    {
+      "bytes": 710,
+      "path": "integrations/nodrix-fast-livo2/README.md",
+      "sha256": "088b5c9e2365c34ecfb679a51405ed724a465226faca416434b8def31ab4463d"
+    },
+    {
+      "bytes": 624,
+      "path": "integrations/nodrix-fast-livo2/pipelines/generic-topic-smoke.yaml",
+      "sha256": "9ac9c133351542f5f41e9654ac7df07bae9fd15287958b20383cdf726d2cb6cf"
+    },
+    {
+      "bytes": 1782,
+      "path": "integrations/nodrix-fast-livo2/pipelines/input.yaml",
+      "sha256": "c3399d5f70d9084670616f5b22b4911049e4f30ca09a44159c917c0af0b24499"
+    },
+    {
+      "bytes": 342,
+      "path": "packages/README.md",
+      "sha256": "21443d754ea979b298e6939d7ae6ca5e11ddf384b7a0e7a16e9fcabf75417cef"
+    },
+    {
+      "bytes": 37,
+      "path": "packages/nodrix-mapping/.pytest_cache/.gitignore",
+      "sha256": "3ed731b65d06150c138e2dadb0be0697550888a6b47eb8c45ecc9adba8b8e9bd"
+    },
+    {
+      "bytes": 191,
+      "path": "packages/nodrix-mapping/.pytest_cache/CACHEDIR.TAG",
+      "sha256": "37dc88ef9a0abeddbe81053a6dd8fdfb13afb613045ea1eb4a5c815a74a3bde4"
+    },
+    {
+      "bytes": 302,
+      "path": "packages/nodrix-mapping/.pytest_cache/README.md",
+      "sha256": "73fd6fccdd802c419a6b2d983d6c3173b7da97558ac4b589edec2dfe443db9ad"
+    },
+    {
+      "bytes": 256,
+      "path": "packages/nodrix-mapping/.pytest_cache/v/cache/nodeids",
+      "sha256": "a3731d0dc7feaf1c6cdcc33a5e81be20dc9aba098a8d12a25c27af61acdff91d"
+    },
+    {
+      "bytes": 304,
+      "path": "packages/nodrix-mapping/README.md",
+      "sha256": "4a4840d23c39d710af3c7352103484416c0b4a91fd3575e77daad7174f6ab49c"
+    },
+    {
+      "bytes": 611,
+      "path": "packages/nodrix-mapping/pyproject.toml",
+      "sha256": "204503fc5c0be9af2ff797f65e919bc7bcb57be0b53f2acc51065709720908c6"
+    },
+    {
+      "bytes": 380,
+      "path": "packages/nodrix-mapping/src/nodrix_mapping/__init__.py",
+      "sha256": "40a7155a50f5dfefdf20358a2e7a5c3634461a96b390184b227f2c96b0cf622f"
+    },
+    {
+      "bytes": 718,
+      "path": "packages/nodrix-mapping/src/nodrix_mapping/nodrix-provider.json",
+      "sha256": "6da5364ea27cf99f69d82701a38e787c9bbcc7ad77f59ef9c1617d39d2d37270"
+    },
+    {
+      "bytes": 1024,
+      "path": "packages/nodrix-mapping/src/nodrix_mapping/provider.py",
+      "sha256": "739a05d3f830eb2fee16c96813e28f620985d375f9996773b7c8bc31f4e09eba"
+    },
+    {
+      "bytes": 0,
+      "path": "packages/nodrix-mapping/src/nodrix_mapping/py.typed",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 2874,
+      "path": "packages/nodrix-mapping/src/nodrix_mapping/types.py",
+      "sha256": "550e057c7bd593879449383ea4c2d584df1eeef725114cd3eabe0e4bfb07595f"
+    },
+    {
+      "bytes": 685,
+      "path": "packages/nodrix-mapping/tests/test_types.py",
+      "sha256": "9e5b28fc1032152c4179085cfb4df3f50c48f0feee10541e3fb6f5fc0c9d92d4"
+    },
+    {
+      "bytes": 665,
+      "path": "packages/nodrix-ros2/README.md",
+      "sha256": "eb7904fb756dd5513b490dba7f0f01a94df46eb5fc0dfb3e0ee10cc13fa9dd5b"
+    },
+    {
+      "bytes": 671,
+      "path": "packages/nodrix-ros2/pyproject.toml",
+      "sha256": "854ab42845a47287cf6394c747e50c9e5c388ce0764eee89f6c13631d9cb190f"
+    },
+    {
+      "bytes": 406,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/__init__.py",
+      "sha256": "87ad0b2f8f92d4a7b756fb3a605d6a68b830ff8e3ee2771f54e8688ece9ef614"
+    },
+    {
+      "bytes": 146,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/adapters/__init__.py",
+      "sha256": "8cbf4ebad44bf9a5babe1c1c8cee9e62160006f2b35acf2c988657d3d16f8c76"
+    },
+    {
+      "bytes": 1500,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/adapters/odometry.py",
+      "sha256": "6b40590a3a21091d790518f5b0d7ea2b750071772f58ac33406677a24fb57bee"
+    },
+    {
+      "bytes": 1328,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/adapters/point_cloud2.py",
+      "sha256": "3a173020af60a3e8d9309ae58a525f0707395d16c66d76191efa1d82746c6281"
+    },
+    {
+      "bytes": 2441,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/common.py",
+      "sha256": "2a73e46c0bd4fee319bc8719362bd1a4657109cda5fac2ba70d9e5b791429264"
+    },
+    {
+      "bytes": 4044,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/context.py",
+      "sha256": "671ffac0bbb0009ec7eb59e3c97a63ff71a75090f6f3497aa0cd6a166299e894"
+    },
+    {
+      "bytes": 254,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/nodes/__init__.py",
+      "sha256": "b46a72a668cc9562c83ae6026f75d4e6f1e7d834eeda65f19c3e01fdb247bf4a"
+    },
+    {
+      "bytes": 3021,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/nodes/topic_sink.py",
+      "sha256": "38ea3e17ba00f4a33b88a2af953f587442bfdc3d4b4e379b58f69f43f7ae32aa"
+    },
+    {
+      "bytes": 5809,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/nodes/topic_source.py",
+      "sha256": "ecf1ee88fd255e2441431f256373b6155b7a495e2471f1e7d8baaf7440419915"
+    },
+    {
+      "bytes": 2142,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/nodrix-provider.json",
+      "sha256": "17a69d4f90bfcef211d436afd7fb9fe968fe9126cf9de55f7a8e5b4f6b4ba09f"
+    },
+    {
+      "bytes": 1208,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/probes.py",
+      "sha256": "6c1a85ce41794af0ca2f0e9bf4799bcb26ba514915bb08073098e7bdcd48c5a8"
+    },
+    {
+      "bytes": 693,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/provider.py",
+      "sha256": "a62c8353b2e5ec748b8678a29255122f6a0fe047508e9814656a2c5a68b1049b"
+    },
+    {
+      "bytes": 0,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/py.typed",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "bytes": 1485,
+      "path": "packages/nodrix-ros2/src/nodrix_ros2/qos.py",
+      "sha256": "d8f1ed7be7358c1b5aa4a99d1340f1599a44333f4b6007177fde9cc3e3c53379"
+    },
+    {
+      "bytes": 2001,
+      "path": "packages/nodrix-ros2/tests/test_adapters.py",
+      "sha256": "8d97de5a804666a2ef846458173c5621d45883bdae14972fd41158eaab9773c0"
+    },
+    {
+      "bytes": 602,
+      "path": "packages/nodrix-ros2/tests/test_provider.py",
+      "sha256": "c424474a4a263800dfece42f3329f74bcc11e33a530881729ef37ae302649c08"
+    },
+    {
+      "bytes": 423,
+      "path": "scripts/install_modular_ros2_dev.sh",
+      "sha256": "8c76373f179420138c4b762813a12b07d2cf97cea0bcc1e9f6ca4ae55c1ae15b"
+    },
+    {
+      "bytes": 381,
+      "path": "scripts/test_modular_ros2.sh",
+      "sha256": "dd0a19b07b338541104d939248817a765bf6ff4143705d62bde135d15449161a"
+    }
+  ],
+  "name": "Modular ROS 2 Foundation",
+  "release": "2.2.0-alpha.1",
+  "validation": {
+    "package_tests_without_ros_graph": "4 passed",
+    "pointcloud_buffer_copy": "not performed by adapter",
+    "python_compile": "passed"
+  }
+}

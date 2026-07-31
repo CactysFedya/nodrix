@@ -1,0 +1,95 @@
+apiVersion: nodrix.dev/v2
+kind: Pipeline
+
+metadata:
+  name: fast-livo2-input
+  description: Typed FAST-LIVO2 cloud and odometry ingestion
+
+runtime:
+  engine: unified
+  mode: realtime
+  profile: realtime-low-latency
+
+nodes:
+  cloud:
+    uses: ros2.point_cloud2_source
+    parameters:
+      topic: /cloud_registered
+      message_type: sensor_msgs/msg/PointCloud2
+      node_name: nodrix_fast_livo2_cloud
+      capacity: 1
+      qos:
+        preset: sensor_data
+        depth: 1
+    failure:
+      policy: restart_node
+      max_restarts: 5
+      backoff_ms: 500
+    health:
+      timeout_ms: 5000
+
+  odometry:
+    uses: ros2.odometry_source
+    parameters:
+      topic: /odometry
+      message_type: nav_msgs/msg/Odometry
+      node_name: nodrix_fast_livo2_odometry
+      capacity: 4
+      qos:
+        reliability: best_effort
+        durability: volatile
+        depth: 4
+    failure:
+      policy: restart_node
+      max_restarts: 5
+      backoff_ms: 500
+    health:
+      timeout_ms: 5000
+
+  cloud_counter:
+    uses: core.counter_sink
+
+  odometry_counter:
+    uses: core.counter_sink
+
+fragments: {}
+
+edges:
+  - from: cloud.cloud
+    to: cloud_counter.input
+    queue:
+      capacity: 1
+      policy: latest
+    memory:
+      domain: cpu
+      allow_copy: false
+
+  - from: odometry.odometry
+    to: odometry_counter.input
+    queue:
+      capacity: 4
+      policy: drop_oldest
+    memory:
+      domain: cpu
+      allow_copy: true
+
+streams: {}
+
+recording:
+  enabled: false
+  streams: []
+  directory: recordings
+  checkpoint_records: 1024
+  durable: true
+
+security:
+  require_signed_plugins: false
+  allow_unsigned_local_plugins: true
+  native_plugin_allowlist: []
+  reject_world_writable_plugins: true
+  secret_providers:
+    - environment
+
+placement:
+  default: local
+  nodes: {}
