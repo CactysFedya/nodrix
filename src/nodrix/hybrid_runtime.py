@@ -331,6 +331,7 @@ class HybridPipelineRuntime:
         self.edges: list[EdgeQueue] = []
         self._start = threading.Event()
         self._stop = threading.Event()
+        self._interrupted = threading.Event()
         self._errors: list[tuple[str, BaseException]] = []
         self._error_lock = threading.Lock()
         self._validated_ports: set[tuple[str, str]] = set()
@@ -637,7 +638,16 @@ class HybridPipelineRuntime:
         return self.nodes[node].node.output_types[port]
 
     async def run(self) -> dict[str, Any]:
-        return await asyncio.to_thread(self.run_sync)
+        # asyncio.to_thread() cannot forward Ctrl+C into the worker thread.
+        # Convert task cancellation into an explicit graceful runtime stop and
+        # wait until run artifacts have been finalized.
+        worker = asyncio.create_task(asyncio.to_thread(self.run_sync))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            self._interrupted.set()
+            self.request_stop()
+            return await asyncio.shield(worker)
 
     @staticmethod
     def _safe_runtime_info(loaded: LoadedNode) -> dict[str, Any]:
@@ -914,6 +924,7 @@ class HybridPipelineRuntime:
                         break
             except KeyboardInterrupt:
                 interrupted = True
+                self._interrupted.set()
                 self.request_stop()
                 deadline = time.monotonic() + timeout_seconds
         alive = [thread for thread in threads if thread.is_alive()]
@@ -947,7 +958,13 @@ class HybridPipelineRuntime:
             self._stream_publisher = None
         report = {
             "pipeline": self.manifest.metadata.name,
-            "status": "failed" if error else "stopped" if interrupted else "completed",
+            "status": (
+                "failed"
+                if error
+                else "stopped"
+                if interrupted or self._interrupted.is_set()
+                else "completed"
+            ),
             "mode": self.manifest.runtime.mode,
             "profile": self.manifest.runtime.profile,
             "engine": "unified",

@@ -7,6 +7,22 @@ from typing import Any, Mapping
 from .benchmarking import aggregate_reports
 
 
+_ACTIVE_RUN_STATUSES = {
+    "starting",
+    "running",
+    "rate_limited",
+    "degraded",
+    "stopping",
+}
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
 def run_root(project: str | Path = ".") -> Path:
     return Path(project).expanduser().resolve() / ".nodrix" / "runs"
 
@@ -16,24 +32,55 @@ def list_runs(project: str | Path = ".") -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     if not root.is_dir():
         return result
-    for directory in sorted((path for path in root.iterdir() if path.is_dir()), reverse=True):
-        report_path = directory / "summary.json"
-        if not report_path.is_file():
-            report_path = directory / "run.json"
+
+    for directory in (path for path in root.iterdir() if path.is_dir()):
+        # Final reports are authoritative. status.json is used only while a
+        # run has not produced summary.json or run.json yet.
         report: dict[str, Any] = {}
-        if report_path.is_file():
-            try:
-                report = json.loads(report_path.read_text(encoding="utf-8"))
-            except Exception:
-                report = {}
-        result.append({
-            "id": directory.name,
-            "path": str(directory),
-            "pipeline": report.get("pipeline"),
-            "status": report.get("status", "unknown"),
-            "duration_seconds": report.get("duration_seconds"),
-        })
+        report_path: Path | None = None
+        for name in ("summary.json", "run.json", "status.json"):
+            candidate = directory / name
+            if candidate.is_file():
+                loaded = _read_json(candidate)
+                if loaded:
+                    report = loaded
+                    report_path = candidate
+                    break
+
+        updated_ns = (
+            report_path.stat().st_mtime_ns
+            if report_path is not None
+            else directory.stat().st_mtime_ns
+        )
+        result.append(
+            {
+                "id": directory.name,
+                "path": str(directory),
+                "pipeline": report.get("pipeline"),
+                "status": report.get("status", "starting"),
+                "duration_seconds": report.get("duration_seconds"),
+                "updated_ns": updated_ns,
+            }
+        )
+
+    result.sort(
+        key=lambda item: (int(item.get("updated_ns", 0)), str(item["id"])),
+        reverse=True,
+    )
     return result
+
+
+def latest_run_id(project: str | Path = ".") -> str:
+    items = list_runs(project)
+    if not items:
+        raise LookupError("No Nodrix runs found")
+
+    active = [
+        item
+        for item in items
+        if str(item.get("status", "")).lower() in _ACTIVE_RUN_STATUSES
+    ]
+    return str((active or items)[0]["id"])
 
 
 def resolve_run(run_id: str, project: str | Path = ".") -> Path:
@@ -49,7 +96,7 @@ def resolve_run(run_id: str, project: str | Path = ".") -> Path:
 
 def load_run(run_id: str, project: str | Path = ".") -> dict[str, Any]:
     directory = resolve_run(run_id, project)
-    for name in ("status.json", "summary.json", "run.json"):
+    for name in ("summary.json", "run.json", "status.json"):
         path = directory / name
         if path.is_file():
             try:

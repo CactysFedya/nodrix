@@ -43,7 +43,7 @@ from .packages import (
     remove_package,
     verify_package,
 )
-from .runs import list_runs, load_run, compare_runs, resolve_run
+from .runs import compare_runs, latest_run_id, list_runs, load_run, resolve_run
 from .benchmarking import direct_benchmark_plan, load_benchmark_plan, replay_plan, run_benchmark_suite
 from .planning import (
     build_static_plan,
@@ -2203,10 +2203,7 @@ def lock_command(
 
 
 def _latest_run_id(project: Path) -> str:
-    items = list_runs(project)
-    if not items:
-        raise LookupError("No Nodrix runs found")
-    return str(items[0]["id"])
+    return latest_run_id(project)
 
 
 @app.command("status")
@@ -2218,9 +2215,7 @@ def status_command(
     """Show the latest live status snapshot or final run summary."""
     try:
         selected = run_id or _latest_run_id(project)
-        directory = resolve_run(selected, project)
-        status_path = directory / "status.json"
-        data = json.loads(status_path.read_text(encoding="utf-8")) if status_path.is_file() else load_run(selected, project)
+        data = load_run(selected, project)
     except Exception as exc:
         console.print(f"[red]Status unavailable:[/red] {exc}")
         raise typer.Exit(1)
@@ -2251,11 +2246,9 @@ def health_command(
     interval: Annotated[float, typer.Option("--interval", min=0.1)] = 1.0,
 ) -> None:
     """Show node readiness and health; optionally watch a running pipeline."""
-    selected = run_id or _latest_run_id(project)
     while True:
-        directory = resolve_run(selected, project)
-        status_path = directory / "status.json"
-        data = json.loads(status_path.read_text(encoding="utf-8")) if status_path.is_file() else load_run(selected, project)
+        selected = run_id or _latest_run_id(project)
+        data = load_run(selected, project)
         table = Table("Node", "Alive", "Ready", "Health", "Queue pressure", "Restarts", "Last error")
         for name, raw in dict(data.get("nodes", {})).items():
             health = dict(dict(raw).get("health", {}))
@@ -2279,9 +2272,7 @@ def metrics_command(
 ) -> None:
     """Print metrics from a live snapshot or completed run."""
     selected = run_id or _latest_run_id(project)
-    directory = resolve_run(selected, project)
-    status_path = directory / "status.json"
-    data = json.loads(status_path.read_text(encoding="utf-8")) if status_path.is_file() else load_run(selected, project)
+    data = load_run(selected, project)
     if format_name == "json":
         console.print_json(json.dumps(data))
     elif format_name == "prometheus":
@@ -2302,23 +2293,18 @@ def top_command(
     interval: Annotated[float, typer.Option("--interval", min=0.1)] = 1.0,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
-    """Show a compact htop-style runtime dashboard."""
-    selected = run_id or _latest_run_id(project)
+    "Show a compact htop-style runtime dashboard."
 
     def snapshot() -> dict[str, object]:
-        directory = resolve_run(selected, project)
-        status_path = directory / "status.json"
-        if status_path.is_file():
-            return json.loads(
-                status_path.read_text(encoding="utf-8")
-            )
+        # Explicit --run pins the dashboard. Otherwise follow the active run.
+        selected = run_id or _latest_run_id(project)
         return load_run(selected, project)
 
     data = snapshot()
     if json_output:
         console.print_json(json.dumps(data))
         return
-    if not watch:
+    if not watch or not console.is_terminal:
         console.print(_top_table(data))
         return
 
@@ -2326,7 +2312,8 @@ def top_command(
         _top_table(data),
         console=console,
         refresh_per_second=max(2, int(1.0 / interval)),
-        transient=False,
+        screen=True,
+        transient=True,
     ) as live_view:
         try:
             while True:
@@ -2476,7 +2463,10 @@ def runs_show_command(run_id: str, project: Annotated[Path, typer.Option("--proj
 
 
 @runs_app.command("logs")
-def runs_logs_command(run_id: str, project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd()) -> None:
+def runs_logs_command(
+    run_id: str,
+    project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd(),
+) -> None:
     directory = resolve_run(run_id, project)
     found = False
     for path in sorted(directory.rglob("*.log")):
@@ -2484,7 +2474,9 @@ def runs_logs_command(run_id: str, project: Annotated[Path, typer.Option("--proj
         console.rule(str(path.relative_to(directory)))
         console.print(path.read_text(encoding="utf-8", errors="replace"))
     if not found:
-        console.print("No log files")
+        console.print("No separate log files were produced.")
+        if (directory / "events.jsonl").is_file():
+            console.print("Structured events are available in events.jsonl.")
 
 
 @runs_app.command("compare")
