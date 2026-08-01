@@ -1,0 +1,74 @@
+name: Modular Packages
+
+on:
+  push:
+    branches:
+      - main
+      - feature/2.2.0-modular-ros2
+    paths:
+      - "packages/**"
+      - "integrations/**"
+      - "tests/test_v220_provider_discovery.py"
+      - ".github/workflows/modular-packages.yml"
+  pull_request:
+    paths:
+      - "packages/**"
+      - "integrations/**"
+      - "tests/test_v220_provider_discovery.py"
+      - ".github/workflows/modular-packages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Core and package workspaces
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip install -e packages/nodrix-spatial --no-deps
+          python -m pip install -e packages/nodrix-mapping --no-deps
+          python -m pip install -e packages/nodrix-ros2 --no-deps
+          python -m pip install build twine
+
+      - name: Test Provider API and package contracts
+        run: |
+          python -m pytest -q \
+            tests/test_v220_provider_discovery.py \
+            packages/nodrix-spatial/tests \
+            packages/nodrix-mapping/tests \
+            packages/nodrix-ros2/tests
+
+      - name: Validate provider discovery and ROS graphs
+        env:
+          LIVOX_WS: /opt/ros/jazzy
+          ROBOT_WS: ${{ github.workspace }}
+        run: |
+          nodrix provider list
+          nodrix provider info nodrix.spatial
+          nodrix provider info nodrix.mapping
+          nodrix provider info nodrix.ros2
+          nodrix validate integrations/nodrix-fast-livo2/pipelines/input.yaml
+          nodrix validate integrations/nodrix-fast-livo2/pipelines/generic-topic-smoke.yaml
+          nodrix validate integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml
+
+      - name: Build independent distributions
+        run: |
+          python -m build packages/nodrix-spatial --outdir dist/nodrix-spatial
+          python -m build packages/nodrix-mapping --outdir dist/nodrix-mapping
+          python -m build packages/nodrix-ros2 --outdir dist/nodrix-ros2
+          python -m twine check \
+            dist/nodrix-spatial/* \
+            dist/nodrix-mapping/* \
+            dist/nodrix-ros2/*

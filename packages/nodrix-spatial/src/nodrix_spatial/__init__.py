@@ -1,10 +1,12 @@
 from .provider import register_types
 from .types import (
+    ImuFrame,
     OdometryFrame,
     PointCloudFrame,
     PointFieldSpec,
     Pose3D,
     Quaternion,
+    TransformFrame,
     Twist3D,
     Vector3,
 )
@@ -18,8 +20,10 @@ __all__ = [
     "Quaternion",
     "Pose3D",
     "Twist3D",
+    "ImuFrame",
     "OdometryFrame",
+    "TransformFrame",
     "register_types",
 ]
 
-__version__ = "0.1.1"
+__version__ = "0.1.0"

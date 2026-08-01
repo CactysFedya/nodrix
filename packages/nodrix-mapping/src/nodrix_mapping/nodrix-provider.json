@@ -1,19 +1,20 @@
 {
   "metadata": {
-    "description": "Mapping domain contracts and typed payloads",
+    "description": "Mapping domain contracts with alpha spatial compatibility aliases",
     "features": [
       "domain.mapping.contracts",
-      "mapping.point_cloud.v1",
-      "geometry.odometry.v1"
+      "compat.mapping.point_cloud.v1",
+      "compat.geometry.odometry.v1"
     ],
     "id": "nodrix.mapping",
     "name": "Nodrix Mapping Contracts",
     "provider_api": "1",
     "requires_features": [
-      "python-node-api.2"
+      "python-node-api.2",
+      "domain.spatial.contracts"
     ],
     "requires_nodrix": ">=2.1,<3",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "nodes": [],
   "probes": [

@@ -3,18 +3,12 @@ from __future__ import annotations
 from typing import Any
 
 from nodrix import ManagedBuffer
+from nodrix_spatial import PointCloudFrame, PointFieldSpec
+
+from ..common import message_frame_id, message_timestamp_ns
 
 
-def point_cloud2_to_frame(message: Any):
-    try:
-        from nodrix_mapping import PointCloudFrame, PointFieldSpec
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "ros2.point_cloud2_source requires the nodrix-mapping package"
-        ) from exc
-
-    from ..common import message_frame_id, message_timestamp_ns
-
+def point_cloud2_to_frame(message: Any) -> PointCloudFrame:
     data = getattr(message, "data")
     fields = tuple(
         PointFieldSpec(

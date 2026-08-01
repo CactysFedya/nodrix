@@ -1,0 +1,33 @@
+{
+  "metadata": {
+    "description": "Transport-neutral spatial contracts and typed payloads",
+    "features": [
+      "domain.spatial.contracts",
+      "spatial.point_cloud.v1",
+      "spatial.imu.v1",
+      "spatial.odometry.v1",
+      "spatial.transform.v1"
+    ],
+    "id": "nodrix.spatial",
+    "name": "Nodrix Spatial Contracts",
+    "provider_api": "1",
+    "requires_features": [
+      "python-node-api.2"
+    ],
+    "requires_nodrix": ">=2.1,<3",
+    "version": "0.1.0"
+  },
+  "nodes": [],
+  "probes": [
+    {
+      "callable": "nodrix_spatial.provider:safe_probe",
+      "cooldown_seconds": 0.0,
+      "depth": "safe",
+      "id": "nodrix.spatial.safe",
+      "permissions": [],
+      "timeout_seconds": 2.0
+    }
+  ],
+  "schema": "nodrix-provider/1",
+  "templates": []
+}

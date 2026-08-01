@@ -1,0 +1,126 @@
+from __future__ import annotations
+
+from collections import deque
+import threading
+import time
+from typing import Any
+
+from nodrix import Message, SourceNode
+
+from ..common import load_ros_message_type
+from ..context import RosNodeLease, shared_ros_runtime
+from ..qos import build_qos_profile
+
+
+class Ros2TopicMonitor(SourceNode):
+    """Readiness and freshness monitor that never converts the ROS payload."""
+
+    output_types = {"status": "core.object"}
+
+    def open(self, context: Any) -> None:
+        super().open(context)
+        self._context = context
+        self._topic = str(self.parameters.get("topic", "")).strip()
+        self._message_type_name = str(self.parameters.get("message_type", "")).strip()
+        if not self._topic or not self._message_type_name:
+            raise ValueError("ros2.topic_monitor requires topic and message_type")
+        self._message_class = load_ros_message_type(self._message_type_name)
+        self._lock = threading.Lock()
+        self._arrivals: deque[float] = deque()
+        self._received = 0
+        self._last_arrival: float | None = None
+        self._closed = False
+        self._sequence = 0
+        self._lease: RosNodeLease = shared_ros_runtime().acquire_node(
+            name=str(self.parameters.get("node_name", f"nodrix_monitor_{context.name}")),
+            namespace=str(self.parameters.get("namespace", "")),
+            executor_threads=int(self.parameters.get("executor_threads", 2)),
+        )
+
+        def callback(_: Any) -> None:
+            now = time.monotonic()
+            with self._lock:
+                self._received += 1
+                self._last_arrival = now
+                self._arrivals.append(now)
+
+        self._subscription = self._lease.node.create_subscription(
+            self._message_class,
+            self._topic,
+            callback,
+            build_qos_profile(self.parameters),
+        )
+
+    def _snapshot(self) -> dict[str, Any]:
+        now = time.monotonic()
+        window = max(float(self.parameters.get("window_s", 2.0)), 0.1)
+        with self._lock:
+            while self._arrivals and now - self._arrivals[0] > window:
+                self._arrivals.popleft()
+            arrivals = tuple(self._arrivals)
+            received = self._received
+            last = self._last_arrival
+        rate = 0.0
+        if len(arrivals) >= 2:
+            span = arrivals[-1] - arrivals[0]
+            if span > 0:
+                rate = (len(arrivals) - 1) / span
+        age = None if last is None else max(now - last, 0.0)
+        minimum = max(float(self.parameters.get("minimum_rate_hz", 0.0)), 0.0)
+        stale_timeout = max(float(self.parameters.get("stale_timeout_s", 2.0)), 0.05)
+        ready = received > 0 and age is not None and age <= stale_timeout
+        if minimum > 0 and len(arrivals) >= 2:
+            ready = ready and rate >= minimum
+        return {
+            "topic": self._topic,
+            "message_type": self._message_type_name,
+            "received": received,
+            "rate_hz": rate,
+            "age_s": age,
+            "ready": ready,
+        }
+
+    def produce(self):
+        startup_timeout = max(float(self.parameters.get("startup_timeout_s", 15.0)), 0.1)
+        interval = max(float(self.parameters.get("sample_interval_s", 0.5)), 0.05)
+        stale_timeout = max(float(self.parameters.get("stale_timeout_s", 2.0)), 0.05)
+        deadline = time.monotonic() + startup_timeout
+        was_ready = False
+        while not self._closed:
+            snapshot = self._snapshot()
+            if snapshot["received"] == 0 and time.monotonic() >= deadline:
+                raise RuntimeError(f"ROS 2 topic did not become ready: {self._topic}")
+            if was_ready and snapshot["age_s"] is not None and snapshot["age_s"] > stale_timeout:
+                raise RuntimeError(f"ROS 2 topic became stale: {self._topic}")
+            was_ready = was_ready or bool(snapshot["ready"])
+            yield {
+                "status": Message(
+                    type="core.object",
+                    payload=snapshot,
+                    sequence=self._sequence,
+                    timestamp_ns=time.time_ns(),
+                    stream_id=self._topic,
+                    trace_id=self._sequence,
+                )
+            }
+            self._sequence += 1
+            time.sleep(interval)
+
+    def health(self) -> dict[str, Any]:
+        value = dict(super().health())
+        if hasattr(self, "_lock"):
+            value.update(self._snapshot())
+        return value
+
+    def close(self) -> None:
+        self._closed = True
+        lease = getattr(self, "_lease", None)
+        subscription = getattr(self, "_subscription", None)
+        if lease is not None and subscription is not None:
+            try:
+                lease.node.destroy_subscription(subscription)
+            except Exception:
+                pass
+        if lease is not None:
+            lease.close()
+        self._lease = None

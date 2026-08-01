@@ -1,7 +1,7 @@
 from array import array
 from dataclasses import dataclass, field
 
-from nodrix_ros2.adapters import odometry_to_frame, point_cloud2_to_frame
+from nodrix_ros2.adapters import imu_to_frame, odometry_to_frame, point_cloud2_to_frame
 
 
 @dataclass
@@ -97,3 +97,20 @@ def test_odometry_adapter_is_typed() -> None:
     assert frame.frame_id == "map"
     assert frame.child_frame_id == "base_link"
     assert frame.pose.orientation.w == 1.0
+
+
+class Imu:
+    header = Header()
+    orientation = Q()
+    angular_velocity = V3(0.1, 0.2, 0.3)
+    linear_acceleration = V3(0.0, 0.0, 9.81)
+    orientation_covariance = [0.0] * 9
+    angular_velocity_covariance = [0.0] * 9
+    linear_acceleration_covariance = [0.0] * 9
+
+
+def test_imu_adapter_is_typed() -> None:
+    frame = imu_to_frame(Imu())
+    assert frame.frame_id == "map"
+    assert frame.angular_velocity.z == 0.3
+    assert frame.linear_acceleration.z == 9.81

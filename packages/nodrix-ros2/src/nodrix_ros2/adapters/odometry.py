@@ -2,28 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from nodrix_spatial import OdometryFrame, Pose3D, Quaternion, Twist3D, Vector3
 
-def _vector(value: Any):
-    from nodrix_mapping import Vector3
+from ..common import message_frame_id, message_timestamp_ns
 
+
+def _vector(value: Any) -> Vector3:
     return Vector3(float(value.x), float(value.y), float(value.z))
 
 
-def odometry_to_frame(message: Any):
-    try:
-        from nodrix_mapping import (
-            OdometryFrame,
-            Pose3D,
-            Quaternion,
-            Twist3D,
-        )
-    except ModuleNotFoundError as exc:
-        raise RuntimeError(
-            "ros2.odometry_source requires the nodrix-mapping package"
-        ) from exc
-
-    from ..common import message_frame_id, message_timestamp_ns
-
+def odometry_to_frame(message: Any) -> OdometryFrame:
     pose = message.pose.pose
     twist = message.twist.twist
     return OdometryFrame(

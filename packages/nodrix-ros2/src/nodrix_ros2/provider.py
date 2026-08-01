@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from nodrix import ProviderRuntime
-from nodrix_mapping import register_types
+from nodrix_spatial import register_types
 
 from .nodes import (
+    Ros2ImuSource,
+    Ros2LaunchProcess,
+    Ros2NodeProcess,
     Ros2OdometrySource,
     Ros2PointCloud2Source,
+    Ros2RvizProcess,
+    Ros2TopicMonitor,
     Ros2TopicSink,
     Ros2TopicSource,
 )
@@ -17,9 +22,14 @@ def provider() -> ProviderRuntime:
     return ProviderRuntime(
         provider_id="nodrix.ros2",
         nodes={
+            "ros2.node": Ros2NodeProcess,
+            "ros2.launch": Ros2LaunchProcess,
+            "ros2.rviz": Ros2RvizProcess,
+            "ros2.topic_monitor": Ros2TopicMonitor,
             "ros2.topic_source": Ros2TopicSource,
             "ros2.topic_sink": Ros2TopicSink,
             "ros2.point_cloud2_source": Ros2PointCloud2Source,
+            "ros2.imu_source": Ros2ImuSource,
             "ros2.odometry_source": Ros2OdometrySource,
         },
         probes={

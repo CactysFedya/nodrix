@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodrix-mapping"
-version = "0.1.0"
-description = "Mapping contracts and typed payloads for Nodrix"
+version = "0.1.1"
+description = "Mapping contracts and compatibility aliases for Nodrix"
 requires-python = ">=3.11"
-dependencies = ["nodrix>=2.1,<3"]
+dependencies = ["nodrix>=2.1,<3", "nodrix-spatial>=0.1,<0.2"]
 readme = "README.md"
 license = {text = "Apache-2.0"}
 

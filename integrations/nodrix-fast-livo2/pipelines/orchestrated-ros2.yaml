@@ -1,0 +1,153 @@
+apiVersion: nodrix.dev/v2
+kind: Pipeline
+
+metadata:
+  name: fast-livo2-ros2-orchestrated
+  description: Generic ROS 2 orchestration without algorithm-specific Nodrix plugins
+
+runtime:
+  engine: unified
+  mode: realtime
+  profile: realtime-low-latency
+
+nodes:
+  livox:
+    uses: ros2.launch
+    parameters:
+      workspace:
+        distro: jazzy
+        underlays:
+          - /opt/ros/jazzy
+          - ${LIVOX_WS}
+        path: ${ROBOT_WS}
+        build:
+          mode: if-needed
+          symlink_install: true
+      package: livox_ros_driver2
+      launch_file: msg_MID360s_launch.py
+      arguments:
+        rviz_enable: false
+      heartbeat_interval_s: 1.0
+
+  fast_livo2:
+    uses: ros2.launch
+    parameters:
+      workspace:
+        distro: jazzy
+        underlays:
+          - /opt/ros/jazzy
+          - ${LIVOX_WS}
+        path: ${ROBOT_WS}
+        build:
+          mode: if-needed
+          symlink_install: true
+      package: fast_livo
+      launch_file: mapping.launch.py
+      arguments:
+        rviz: false
+      requires_topics:
+        - name: /livox/lidar
+          message_type: livox_ros_driver2/msg/CustomMsg
+        - name: /livox/imu
+          message_type: sensor_msgs/msg/Imu
+      requirements_timeout_s: 30
+
+  lidar_health:
+    uses: ros2.topic_monitor
+    parameters:
+      topic: /livox/lidar
+      message_type: livox_ros_driver2/msg/CustomMsg
+      minimum_rate_hz: 8
+      startup_timeout_s: 20
+      stale_timeout_s: 2
+      qos:
+        preset: sensor_data
+        depth: 1
+
+  imu_health:
+    uses: ros2.topic_monitor
+    parameters:
+      topic: /livox/imu
+      message_type: sensor_msgs/msg/Imu
+      minimum_rate_hz: 100
+      startup_timeout_s: 20
+      stale_timeout_s: 1
+      qos:
+        preset: sensor_data
+        depth: 1
+
+  registered_cloud_health:
+    uses: ros2.topic_monitor
+    parameters:
+      topic: /cloud_registered
+      message_type: sensor_msgs/msg/PointCloud2
+      minimum_rate_hz: 8
+      startup_timeout_s: 40
+      stale_timeout_s: 2
+      qos:
+        preset: sensor_data
+        depth: 1
+
+  rviz:
+    uses: ros2.rviz
+    parameters:
+      workspace:
+        distro: jazzy
+        underlays:
+          - /opt/ros/jazzy
+          - ${LIVOX_WS}
+        path: ${ROBOT_WS}
+        build:
+          mode: if-needed
+      config: rviz/fast_livo2.rviz
+      requires_topics:
+        - name: /cloud_registered
+          message_type: sensor_msgs/msg/PointCloud2
+      requirements_timeout_s: 45
+
+  livox_status:
+    uses: core.counter_sink
+  fast_livo2_status:
+    uses: core.counter_sink
+  lidar_health_status:
+    uses: core.counter_sink
+  imu_health_status:
+    uses: core.counter_sink
+  cloud_health_status:
+    uses: core.counter_sink
+  rviz_status:
+    uses: core.counter_sink
+
+fragments: {}
+
+edges:
+  - from: livox.status
+    to: livox_status.input
+  - from: fast_livo2.status
+    to: fast_livo2_status.input
+  - from: lidar_health.status
+    to: lidar_health_status.input
+  - from: imu_health.status
+    to: imu_health_status.input
+  - from: registered_cloud_health.status
+    to: cloud_health_status.input
+  - from: rviz.status
+    to: rviz_status.input
+
+streams: {}
+recording:
+  enabled: false
+  streams: []
+  directory: recordings
+  checkpoint_records: 1024
+  durable: true
+security:
+  require_signed_plugins: false
+  allow_unsigned_local_plugins: true
+  native_plugin_allowlist: []
+  reject_world_writable_plugins: true
+  secret_providers:
+    - environment
+placement:
+  default: local
+  nodes: {}

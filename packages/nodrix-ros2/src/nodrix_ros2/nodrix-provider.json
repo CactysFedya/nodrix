@@ -1,24 +1,81 @@
 {
   "metadata": {
-    "description": "External ROS 2 transport and typed sensor adapters",
+    "description": "Universal ROS 2 orchestration, supervision and transport provider",
     "features": [
       "platform.ros2",
+      "ros2.workspace",
+      "ros2.colcon.if_needed",
+      "ros2.node",
+      "ros2.launch",
+      "ros2.rviz",
+      "ros2.topic_monitor",
       "ros2.topic_source",
       "ros2.topic_sink",
-      "ros2.point_cloud2",
-      "ros2.odometry",
       "ros2.shared_executor"
     ],
     "id": "nodrix.ros2",
     "name": "Nodrix ROS 2 Provider",
     "provider_api": "1",
     "requires_features": [
-      "python-node-api.2"
+      "python-node-api.2",
+      "domain.spatial.contracts"
     ],
     "requires_nodrix": ">=2.1,<3",
-    "version": "0.1.0"
+    "version": "0.2.0"
   },
   "nodes": [
+    {
+      "factory": "nodrix_ros2.nodes.process_nodes:Ros2NodeProcess",
+      "features": [
+        "ros2.node",
+        "ros2.process_supervision"
+      ],
+      "id": "ros2.node",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "status": "core.object"
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.process_nodes:Ros2LaunchProcess",
+      "features": [
+        "ros2.launch",
+        "ros2.process_supervision"
+      ],
+      "id": "ros2.launch",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "status": "core.object"
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.process_nodes:Ros2RvizProcess",
+      "features": [
+        "ros2.rviz",
+        "ros2.process_supervision"
+      ],
+      "id": "ros2.rviz",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "status": "core.object"
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_monitor:Ros2TopicMonitor",
+      "features": [
+        "ros2.topic_monitor",
+        "ros2.readiness"
+      ],
+      "id": "ros2.topic_monitor",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "status": "core.object"
+      }
+    },
     {
       "factory": "nodrix_ros2.nodes.topic_source:Ros2TopicSource",
       "features": [
@@ -52,7 +109,19 @@
       "inputs": {},
       "optional_inputs": [],
       "outputs": {
-        "cloud": "mapping.point_cloud/v1"
+        "cloud": "spatial.point_cloud/v1"
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_source:Ros2ImuSource",
+      "features": [
+        "ros2.imu"
+      ],
+      "id": "ros2.imu_source",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "imu": "spatial.imu/v1"
       }
     },
     {
@@ -64,7 +133,7 @@
       "inputs": {},
       "optional_inputs": [],
       "outputs": {
-        "odometry": "geometry.odometry/v1"
+        "odometry": "spatial.odometry/v1"
       }
     }
   ],

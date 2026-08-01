@@ -22,9 +22,7 @@ nodes:
         preset: sensor_data
         depth: 1
     failure:
-      policy: restart_node
-      max_restarts: 5
-      backoff_ms: 500
+      policy: stop_pipeline
     health:
       timeout_ms: 5000
 
@@ -40,9 +38,7 @@ nodes:
         durability: volatile
         depth: 4
     failure:
-      policy: restart_node
-      max_restarts: 5
-      backoff_ms: 500
+      policy: stop_pipeline
     health:
       timeout_ms: 5000
 
