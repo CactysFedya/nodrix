@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
-project(nodrix_native VERSION 2.1.0 LANGUAGES CXX)
+project(nodrix_native VERSION 2.2.0 LANGUAGES CXX)
+set(NODRIX_RELEASE_VERSION "2.2.0a3" CACHE STRING "Nodrix Python release version")
 
 option(NODRIX_NATIVE_LTO "Enable link-time optimization" ON)
 option(NODRIX_NATIVE_MARCH_NATIVE "Tune for the build machine" OFF)
@@ -71,7 +72,7 @@ target_link_libraries(
   nodrix-native-runner
   PRIVATE nodrix_native_sdk Threads::Threads ${CMAKE_DL_LIBS}
 )
-target_compile_definitions(nodrix-native-runner PRIVATE NODRIX_NATIVE_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(nodrix-native-runner PRIVATE NODRIX_NATIVE_VERSION="${NODRIX_RELEASE_VERSION}")
 nodrix_enable_sanitizers(nodrix-native-runner)
 target_compile_options(nodrix-native-runner PRIVATE
   $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-O3;-DNDEBUG;-fvisibility=hidden;-fno-omit-frame-pointer>

@@ -266,7 +266,7 @@ nodrix_status_v2 process(
             static_cast<std::uint8_t>(sequence & 0xFFU));
         nodrix_message_v2 message{};
         message.struct_size = sizeof(message);
-        message.type_id = 0x8d91246ac121e4bfULL;
+        message.type_id = nodrix_type_id_v2("core.bytes");
         message.sequence = sequence;
         message.source_timestamp_ns =
             static_cast<std::int64_t>(1000 + sequence * 100);

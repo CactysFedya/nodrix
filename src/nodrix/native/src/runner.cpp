@@ -210,6 +210,7 @@ struct EdgeDef {
   std::string source_memory{"any"};
   std::string target_memory{"any"};
   std::string resolved_memory{"any"};
+  std::string target_type{"core.any"};
 };
 
 struct Plan {
@@ -997,6 +998,12 @@ class Edge final {
 
   bool publish(vp::Message message) {
     if (message.end_of_stream) return publish_eos(std::move(message));
+    if (definition_.target_type != "core.any" &&
+        message.type_id != vp::fnv1a_64(definition_.target_type)) {
+      throw std::runtime_error(
+          "Message type does not match target port type " +
+          definition_.target_type);
+    }
     bool accepted = false;
     switch (definition_.policy) {
       case QueuePolicy::Block:
@@ -1136,6 +1143,14 @@ class NodeEmitter final : public vp::Emitter {
 
   void emit(std::size_t output_port, vp::Message message) override {
     if (output_port >= owner_.outputs.size()) throw std::runtime_error("Output port index out of range");
+    const auto& expected_type = owner_.node->output_ports()[output_port].type;
+    if (!message.end_of_stream && expected_type != "core.any" &&
+        message.type_id != vp::fnv1a_64(expected_type)) {
+      throw std::runtime_error(
+          "Node " + owner_.name + " emitted a message with the wrong type on " +
+          owner_.node->output_ports()[output_port].name +
+          "; expected " + expected_type);
+    }
     auto& edges = owner_.outputs[output_port];
     if (edges.empty()) return;
     ++owner_.stats.output_messages;
@@ -1245,6 +1260,7 @@ class Runtime final {
       resolved_definition.target_memory = input_memory;
       resolved_definition.resolved_memory =
           output_memory != "any" ? output_memory : input_memory;
+      resolved_definition.target_type = input_type;
       edges_.push_back(
           std::make_unique<Edge>(
               std::move(resolved_definition), stop_));

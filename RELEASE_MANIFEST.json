@@ -1,7 +1,8 @@
 {
   "schema": "nodrix-release/v1",
   "name": "Modular Integration Sessions",
-  "release": "2.2.0-alpha.3",
+  "release": "2.2.0a3",
+  "display_release": "2.2.0-alpha.3",
   "core_contracts": {
     "provider_api": ["1", "2"],
     "provider_schema": ["nodrix-provider/1", "nodrix-provider/2"],

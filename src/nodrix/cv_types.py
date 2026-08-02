@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+import threading
 from typing import Any, Callable, Mapping, Sequence
 
 from .memory import DmaBufHandle, dlpack_memory_type, infer_shape_dtype, object_dlpack_device
@@ -70,6 +71,45 @@ class CoordinateSpace(StrEnum):
     NORMALIZED = "normalized"
 
 
+class _SharedBufferResource:
+    """Release one external buffer resource after every shared view is gone."""
+
+    __slots__ = ("_lock", "_references", "_lease", "_handle")
+
+    def __init__(self, lease: Any | None, handle: Any | None) -> None:
+        self._lock = threading.Lock()
+        self._references = 1
+        self._lease = lease
+        self._handle = handle
+
+    def retain(self) -> None:
+        with self._lock:
+            if self._references <= 0:
+                raise RuntimeError("Cannot retain a released Nodrix buffer")
+            self._references += 1
+
+    @property
+    def descriptor(self) -> Any | None:
+        with self._lock:
+            return getattr(self._lease, "descriptor", None)
+
+    def release(self) -> None:
+        lease: Any | None = None
+        handle: Any | None = None
+        with self._lock:
+            if self._references <= 0:
+                return
+            self._references -= 1
+            if self._references:
+                return
+            lease, self._lease = self._lease, None
+            handle, self._handle = self._handle, None
+        if lease is not None and hasattr(lease, "release"):
+            lease.release()
+        if handle is not None and handle is not lease and hasattr(handle, "close"):
+            handle.close()
+
+
 @dataclass(slots=True)
 class ManagedBuffer:
     """Owning or non-owning handle for host and device memory.
@@ -90,6 +130,25 @@ class ManagedBuffer:
     handle: Any | None = None
     nbytes_hint: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    _shared_resource: _SharedBufferResource | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _released: bool = field(default=False, init=False, repr=False, compare=False)
+    _descriptor_hint: Any | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
+    _state_lock: threading.RLock = field(
+        default_factory=threading.RLock,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def host_accessible(self) -> bool:
@@ -174,21 +233,78 @@ class ManagedBuffer:
         return self.__dlpack__(stream=stream)
 
     def release(self) -> None:
-        owner = self.owner
-        self.owner = None
+        with self._state_lock:
+            if self._released:
+                return
+            self._released = True
+            owner = self.owner
+            self.owner = None
+            shared_resource = self._shared_resource
+            self._shared_resource = None
+            lease = self.lease
+            self.lease = None
+            handle = self.handle
+            self.handle = None
         if isinstance(owner, memoryview):
             try:
                 owner.release()
             except (BufferError, ValueError):
                 pass
-        lease = self.lease
-        self.lease = None
+        if shared_resource is not None:
+            shared_resource.release()
+            return
         if lease is not None and hasattr(lease, "release"):
             lease.release()
-        handle = self.handle
-        self.handle = None
         if handle is not None and handle is not owner and hasattr(handle, "close"):
             handle.close()
+
+    def share(self, *, readonly: bool = True) -> "ManagedBuffer":
+        """Return an independently releasable view over the same storage.
+
+        Fan-out queues must not share one mutable ``ManagedBuffer`` wrapper:
+        releasing one branch would invalidate every other consumer.  Shared
+        views retain the external lease/handle once and use distinct host
+        memoryviews, while the payload storage itself remains zero-copy.
+        """
+
+        with self._state_lock:
+            if self._released:
+                raise RuntimeError("Cannot share a released Nodrix buffer")
+            resource = self._shared_resource
+            if resource is None:
+                managed_handle = (
+                    self.handle
+                    if self.handle is not None and self.handle is not self.owner
+                    else None
+                )
+                resource = _SharedBufferResource(self.lease, managed_handle)
+                self._shared_resource = resource
+                self.lease = None
+            resource.retain()
+            try:
+                owner = (
+                    self.memoryview()
+                    if isinstance(self.owner, memoryview)
+                    else self.owner
+                )
+                clone = ManagedBuffer(
+                    owner=owner,
+                    readonly=bool(readonly or self.readonly),
+                    memory_type=self.memory_type,
+                    device=self.device,
+                    offset=0 if owner is not self.owner else self.offset,
+                    length=(owner.nbytes if isinstance(owner, memoryview) else self.length),
+                    lease=None,
+                    handle=self.handle,
+                    nbytes_hint=self.nbytes,
+                    metadata=dict(self.metadata),
+                )
+            except BaseException:
+                resource.release()
+                raise
+            clone._shared_resource = resource
+            clone._descriptor_hint = self._descriptor_hint
+            return clone
 
     def __del__(self) -> None:  # pragma: no cover - GC timing is implementation-specific
         try:
@@ -474,14 +590,16 @@ class Detections:
         self.box_format = BoxFormat(self.box_format)
         self.coordinate_space = CoordinateSpace(self.coordinate_space)
         if np is not None:
-            self.boxes = np.asarray(self.boxes, dtype=np.float32)
-            self.scores = np.asarray(self.scores, dtype=np.float32)
-            self.class_ids = np.asarray(self.class_ids, dtype=np.int32)
+            self.boxes = np.asarray(self.boxes, dtype=np.float32).view()
+            self.scores = np.asarray(self.scores, dtype=np.float32).view()
+            self.class_ids = np.asarray(self.class_ids, dtype=np.int32).view()
             if self.boxes.ndim != 2 or self.boxes.shape[1] != 4:
                 raise ValueError("Detections.boxes must have shape [N, 4]")
             count = int(self.boxes.shape[0])
             if self.scores.shape != (count,) or self.class_ids.shape != (count,):
                 raise ValueError("Detections scores/class_ids must have shape [N]")
+            for value in (self.boxes, self.scores, self.class_ids):
+                value.flags.writeable = False
         else:
             if not (len(self.boxes) == len(self.scores) == len(self.class_ids)):
                 raise ValueError("Detections arrays must have the same length")
@@ -505,15 +623,22 @@ class Tracks:
         self.box_format = BoxFormat(self.box_format)
         self.coordinate_space = CoordinateSpace(self.coordinate_space)
         if np is not None:
-            self.boxes = np.asarray(self.boxes, dtype=np.float32)
-            self.track_ids = np.asarray(self.track_ids, dtype=np.int64)
-            self.scores = np.asarray(self.scores, dtype=np.float32)
-            self.class_ids = np.asarray(self.class_ids, dtype=np.int32)
+            self.boxes = np.asarray(self.boxes, dtype=np.float32).view()
+            self.track_ids = np.asarray(self.track_ids, dtype=np.int64).view()
+            self.scores = np.asarray(self.scores, dtype=np.float32).view()
+            self.class_ids = np.asarray(self.class_ids, dtype=np.int32).view()
             if self.boxes.ndim != 2 or self.boxes.shape[1] != 4:
                 raise ValueError("Tracks.boxes must have shape [N, 4]")
             count = int(self.boxes.shape[0])
             if any(value.shape != (count,) for value in (self.track_ids, self.scores, self.class_ids)):
                 raise ValueError("Tracks arrays must have shape [N]")
+            for value in (
+                self.boxes,
+                self.track_ids,
+                self.scores,
+                self.class_ids,
+            ):
+                value.flags.writeable = False
         else:
             lengths = {len(self.boxes), len(self.track_ids), len(self.scores), len(self.class_ids)}
             if len(lengths) != 1:
@@ -531,13 +656,15 @@ class Embeddings:
 
     def __post_init__(self) -> None:
         if np is not None:
-            self.values = np.asarray(self.values, dtype=np.float32)
+            self.values = np.asarray(self.values, dtype=np.float32).view()
             if self.values.ndim != 2:
                 raise ValueError("Embeddings.values must have shape [N, D]")
             if self.object_ids is not None:
-                self.object_ids = np.asarray(self.object_ids, dtype=np.int64)
+                self.object_ids = np.asarray(self.object_ids, dtype=np.int64).view()
                 if self.object_ids.shape != (self.values.shape[0],):
                     raise ValueError("Embeddings.object_ids must have shape [N]")
+                self.object_ids.flags.writeable = False
+            self.values.flags.writeable = False
 
 
 @dataclass(slots=True)
@@ -548,11 +675,13 @@ class Identities:
 
     def __post_init__(self) -> None:
         if np is not None:
-            self.track_ids = np.asarray(self.track_ids, dtype=np.int64)
-            self.object_ids = np.asarray(self.object_ids, dtype=np.int64)
-            self.similarities = np.asarray(self.similarities, dtype=np.float32)
+            self.track_ids = np.asarray(self.track_ids, dtype=np.int64).view()
+            self.object_ids = np.asarray(self.object_ids, dtype=np.int64).view()
+            self.similarities = np.asarray(self.similarities, dtype=np.float32).view()
             if not (self.track_ids.shape == self.object_ids.shape == self.similarities.shape):
                 raise ValueError("Identity arrays must have matching shapes")
+            for value in (self.track_ids, self.object_ids, self.similarities):
+                value.flags.writeable = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -579,6 +708,7 @@ class TypeDefinition:
 class TypeRegistry:
     def __init__(self) -> None:
         self._definitions: dict[str, TypeDefinition] = {}
+        self._lock = threading.RLock()
 
     def register(
         self,
@@ -591,23 +721,27 @@ class TypeRegistry:
         compatible_versions: tuple[int, ...] | None = None,
         replace: bool = False,
     ) -> None:
-        if name in self._definitions and not replace:
-            raise ValueError(f"Message type is already registered: {name}")
         version = int(version)
         if version <= 0:
             raise ValueError("Message schema version must be positive")
         compatible = tuple(sorted(set(compatible_versions or (version,))))
-        self._definitions[name] = TypeDefinition(
+        definition = TypeDefinition(
             name, payload_type, validator, description, version, compatible
         )
+        with self._lock:
+            if name in self._definitions and not replace:
+                raise ValueError(f"Message type is already registered: {name}")
+            self._definitions[name] = definition
 
     def definition(self, name: str) -> TypeDefinition | None:
-        return self._definitions.get(name)
+        with self._lock:
+            return self._definitions.get(name)
 
     def validate(self, name: str, payload: Any) -> None:
         if name in {"core.any", "core.object"}:
             return
-        definition = self._definitions.get(name)
+        with self._lock:
+            definition = self._definitions.get(name)
         if definition is None:
             # User-defined types are allowed; the graph still enforces exact
             # producer/consumer type names. Register a validator for deeper checks.
@@ -615,7 +749,8 @@ class TypeRegistry:
         definition.validate(payload)
 
     def names(self) -> tuple[str, ...]:
-        return tuple(sorted(self._definitions))
+        with self._lock:
+            return tuple(sorted(self._definitions))
 
 
 TYPE_REGISTRY = TypeRegistry()

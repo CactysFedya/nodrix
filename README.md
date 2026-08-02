@@ -1,4 +1,4 @@
-# Nodrix 2.1.0
+# Nodrix 2.2.0 alpha.3
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)

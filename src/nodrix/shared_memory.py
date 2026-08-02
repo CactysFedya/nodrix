@@ -254,8 +254,12 @@ class OneShotSharedBuffer:
 
 
 def descriptor_for_buffer(buffer: ManagedBuffer) -> SharedBufferDescriptor | None:
+    descriptor = getattr(buffer, "_descriptor_hint", None)
     lease = getattr(buffer, "lease", None)
-    descriptor = getattr(lease, "descriptor", None)
+    if descriptor is None:
+        descriptor = getattr(lease, "descriptor", None)
+    if descriptor is None:
+        descriptor = getattr(getattr(buffer, "_shared_resource", None), "descriptor", None)
     if buffer.memory_type == MemoryType.SHARED and isinstance(descriptor, SharedBufferDescriptor):
         return SharedBufferDescriptor(
             name=descriptor.name,

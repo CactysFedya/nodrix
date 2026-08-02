@@ -316,6 +316,7 @@ class RecordingConfig(StrictModel):
     directory: str = "recordings"
     checkpoint_records: int = Field(default=1024, ge=1, le=1_000_000)
     durable: bool = True
+    queue_capacity: int = Field(default=256, ge=1, le=1_000_000)
 
 
 class SecurityConfig(StrictModel):
@@ -451,6 +452,16 @@ _NODE_RESERVED = {
     "execution", "failure", "health", "resources", "memory", "bindings",
     "placement",
 }
+_COMPACT_TOP_LEVEL = {
+    "apiVersion", "kind", "metadata", "name", "description", "profile",
+    "runtime", "sessions", "nodes", "blocks", "flow", "edges", "links",
+    "streams", "publish", "fragments", "recording", "security", "placement",
+}
+_FRAGMENT_FIELDS = {
+    "uses", "version", "description", "documentation", "tests", "parameters",
+    "inputs", "outputs", "nodes", "blocks", "flow", "edges", "fragments",
+    "hardware_requirements",
+}
 
 
 def _deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
@@ -585,6 +596,12 @@ def _normalize_compact(
         for path in _flatten_paths(canonical):
             sources[path] = "pipeline.yaml"
         return canonical, sources, block_files
+
+    unknown_fields = sorted(set(raw) - _COMPACT_TOP_LEVEL)
+    if unknown_fields:
+        raise ManifestError(
+            "Unknown compact manifest fields: " + ", ".join(unknown_fields)
+        )
 
     name = raw.get("name") or dict(raw.get("metadata") or {}).get("name")
     if not name:
@@ -776,6 +793,12 @@ def _load_fragment_value(
         raw = reference
         fragment_base = base_dir
         next_stack = stack
+    unknown_fields = sorted(set(raw) - _FRAGMENT_FIELDS)
+    if unknown_fields:
+        raise ManifestError(
+            f"Fragment {name!r} has unknown fields: "
+            + ", ".join(unknown_fields)
+        )
     raw_nodes = raw.get("nodes") or {}
     raw_blocks = raw.get("blocks") or {}
     if not isinstance(raw_nodes, dict) or not isinstance(raw_blocks, dict):
@@ -849,12 +872,16 @@ def _load_fragment_value(
         return True
 
     for dotted, parameter_value in parameters.items():
-        set_fragment_parameter(
+        if not set_fragment_parameter(
             nodes,
             nested,
             str(dotted).split("."),
             parameter_value,
-        )
+        ):
+            raise ManifestError(
+                f"Fragment {name!r} parameter override references an unknown "
+                f"node or nested fragment: {dotted!r}"
+            )
     return {
         "version": str(raw.get("version", "1.0.0")),
         "description": raw.get("description"),

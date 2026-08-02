@@ -6,6 +6,7 @@ import json
 import ssl
 import socket
 import struct
+import threading
 from typing import Any, Callable, Iterable
 
 from .cv_types import (
@@ -75,12 +76,14 @@ class WirePacket:
 Encoder = Callable[[Any], tuple[dict[str, Any], Iterable[memoryview]]]
 Decoder = Callable[[memoryview, dict[str, Any]], Any]
 _CUSTOM_CODECS: dict[str, tuple[Encoder, Decoder]] = {}
+_CUSTOM_CODECS_LOCK = threading.RLock()
 
 
 def register_wire_codec(type_name: str, encoder: Encoder, decoder: Decoder) -> None:
     if not type_name:
         raise ValueError("type_name must not be empty")
-    _CUSTOM_CODECS[type_name] = (encoder, decoder)
+    with _CUSTOM_CODECS_LOCK:
+        _CUSTOM_CODECS[type_name] = (encoder, decoder)
 
 
 def _trace_u64(value: int | str) -> tuple[int, str | None]:
@@ -140,7 +143,8 @@ def _array_segment(array: Any) -> tuple[Any, memoryview, dict[str, Any]]:
 
 
 def _encode_payload(message: Message) -> tuple[dict[str, Any], tuple[memoryview, ...]]:
-    custom = _CUSTOM_CODECS.get(message.type)
+    with _CUSTOM_CODECS_LOCK:
+        custom = _CUSTOM_CODECS.get(message.type)
     if custom is not None:
         metadata, parts = custom[0](message.payload)
         return {"codec": "custom", "custom": metadata}, tuple(_byte_view(part) for part in parts)
@@ -366,7 +370,8 @@ def _decode_payload(type_name: str, payload: memoryview, metadata: dict[str, Any
     codec_meta = metadata["codec"]
     codec = codec_meta["codec"]
     if codec == "custom":
-        custom = _CUSTOM_CODECS.get(type_name)
+        with _CUSTOM_CODECS_LOCK:
+            custom = _CUSTOM_CODECS.get(type_name)
         if custom is None:
             raise WireProtocolError(f"No custom wire codec registered for {type_name!r}")
         return custom[1](payload, codec_meta.get("custom", {}))

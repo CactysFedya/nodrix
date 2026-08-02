@@ -10,7 +10,6 @@ import os
 import platform
 import sys
 from pathlib import Path
-import queue as pyqueue
 import threading
 import time
 from typing import Any, Callable
@@ -42,7 +41,9 @@ from .metrics import MetricsRecorder
 from .lockfile import build_lock
 from .lifecycle import HealthStatus, LifecycleState
 from .packages import resolve_package_node
+from .queueing import PythonBoundedQueue
 from .resources import ResourceSampler, system_snapshot
+from .validation import configured_security_issues
 
 try:
     from ._native_queue import BoundedQueue as _NativeBoundedQueue
@@ -114,78 +115,8 @@ class NodeStats:
         }
 
 
-class _PythonQueueFallback:
-    def __init__(self, capacity: int, policy: str) -> None:
-        self._queue: pyqueue.Queue[Any] = pyqueue.Queue(capacity)
-        self._policy = policy
-        self._closed = False
-        self._stats = {"enqueued": 0, "dequeued": 0, "dropped": 0, "max_depth": 0}
-
-    def put(self, item: Any) -> bool:
-        if self._closed:
-            return False
-        if self._policy == "block":
-            self._queue.put(item)
-        elif self._policy == "drop_newest":
-            try:
-                self._queue.put_nowait(item)
-            except pyqueue.Full:
-                self._stats["dropped"] += 1
-                return False
-        else:
-            if self._policy == "latest":
-                while True:
-                    try:
-                        self._queue.get_nowait()
-                        self._stats["dropped"] += 1
-                    except pyqueue.Empty:
-                        break
-            elif self._queue.full():
-                try:
-                    self._queue.get_nowait()
-                    self._stats["dropped"] += 1
-                except pyqueue.Empty:
-                    pass
-            self._queue.put(item)
-        self._stats["enqueued"] += 1
-        self._stats["max_depth"] = max(self._stats["max_depth"], self._queue.qsize())
-        return True
-
-    def put_control(self, item: Any) -> bool:
-        if self._closed:
-            return False
-        self._queue.put(item)
-        self._stats["enqueued"] += 1
-        self._stats["max_depth"] = max(self._stats["max_depth"], self._queue.qsize())
-        return True
-
-    def get(self) -> Any:
-        while True:
-            if self._closed and self._queue.empty():
-                return None
-            try:
-                item = self._queue.get(timeout=0.1)
-                self._stats["dequeued"] += 1
-                return item
-            except pyqueue.Empty:
-                continue
-
-    def try_get(self) -> Any:
-        try:
-            item = self._queue.get_nowait()
-        except pyqueue.Empty:
-            return None
-        self._stats["dequeued"] += 1
-        return item
-
-    def close(self) -> None:
-        self._closed = True
-
-    def qsize(self) -> int:
-        return self._queue.qsize()
-
-    def stats(self) -> dict[str, int]:
-        return {**self._stats, "depth": self._queue.qsize()}
+class _PythonQueueFallback(PythonBoundedQueue):
+    """Compatibility name retained for tests and third-party diagnostics."""
 
 
 def _message_managed_buffer(message: Message) -> ManagedBuffer | None:
@@ -363,7 +294,6 @@ class HybridPipelineRuntime:
         self._run_id = ""
         self._tracer: EventTracer | None = None
         self._recording_writer: Any | None = None
-        self._recording_lock = threading.Lock()
         self._recording_streams = set(self.manifest.recording.streams)
         self._metrics_recorder: MetricsRecorder | None = None
         self._worker_threads: list[threading.Thread] = []
@@ -416,6 +346,14 @@ class HybridPipelineRuntime:
         return cls(parameters)
 
     def build(self) -> None:
+        security_issues = configured_security_issues(self.manifest)
+        if security_issues:
+            raise RuntimeGraphError(
+                "; ".join(
+                    f"{issue.code} {issue.location}: {issue.message}"
+                    for issue in security_issues
+                )
+            )
         self.nodes.clear()
         self.sessions.clear()
         self.edges.clear()
@@ -515,6 +453,7 @@ class HybridPipelineRuntime:
                     backoff_ms=config.failure.backoff_ms,
                     cpu_affinity=config.execution.cpu_affinity,
                     device=config.execution.device,
+                    max_message_bytes=config.resources.max_message_bytes,
                     memory_limit_mb=config.resources.memory_limit_mb,
                     cpu_limit=config.resources.cpu_limit,
                 )
@@ -860,14 +799,14 @@ class HybridPipelineRuntime:
         self._open_sessions(run_dir)
         recording_path: Path | None = None
         if self.manifest.recording.enabled:
-            from .recording import NdrxWriter
+            from .recording import AsyncNdrxWriter
 
             recording_dir = Path(self.manifest.recording.directory)
             if not recording_dir.is_absolute():
                 recording_dir = run_dir / recording_dir
             recording_dir.mkdir(parents=True, exist_ok=True)
             recording_path = recording_dir / f"{self.manifest.metadata.name}.ndrx"
-            self._recording_writer = NdrxWriter(
+            self._recording_writer = AsyncNdrxWriter(
                 recording_path,
                 metadata={
                     "pipeline": self.manifest.metadata.name,
@@ -876,6 +815,7 @@ class HybridPipelineRuntime:
                 },
                 checkpoint_records=self.manifest.recording.checkpoint_records,
                 durable=self.manifest.recording.durable,
+                queue_capacity=self.manifest.recording.queue_capacity,
             )
         dump_source_manifest_redacted(self.manifest_path, run_dir / "manifest.yaml")
         dump_manifest_redacted(self.manifest, run_dir / "resolved-manifest.yaml")
@@ -1037,9 +977,11 @@ class HybridPipelineRuntime:
             for name, loaded in self.sessions.items()
         }
         self._close_sessions()
+        recording_report: dict[str, Any] = {}
         if self._recording_writer is not None:
             try:
                 self._recording_writer.close()
+                recording_report = self._recording_writer.report()
             except BaseException as exc:
                 self._record_error("recording", exc)
             finally:
@@ -1084,6 +1026,7 @@ class HybridPipelineRuntime:
                 "enabled": self.manifest.recording.enabled,
                 "path": None if recording_path is None else str(recording_path),
                 "streams": sorted(self._recording_streams),
+                **recording_report,
             },
             "system": system_snapshot(),
         }
@@ -1535,7 +1478,7 @@ class HybridPipelineRuntime:
             if port not in loaded.node.output_types:
                 raise RuntimeGraphError(f"Node {loaded.name!r} emitted unknown port {port!r}")
             expected = loaded.node.output_types[port]
-            if not self._types_compatible(message.type, expected):
+            if expected != "core.any" and message.type != expected:
                 raise RuntimeGraphError(
                     f"Node {loaded.name!r} emitted {message.type!r} on {port!r}; expected {expected!r}"
                 )
@@ -1565,10 +1508,16 @@ class HybridPipelineRuntime:
                     or source_name in self._recording_streams
                 )
             ):
-                with self._recording_lock:
-                    self._recording_writer.write(outgoing)
+                self._recording_writer.write(outgoing)
             for edge in loaded.outputs.get(port, ()):
-                edge.put(outgoing)
+                target_node, target_port = edge.edge.target.split(".", 1)
+                target_type = self.nodes[target_node].node.input_types[target_port]
+                if target_type != "core.any" and outgoing.type != target_type:
+                    raise RuntimeGraphError(
+                        f"Message {outgoing.type!r} from {source_name!r} cannot enter "
+                        f"{edge.edge.target!r}; expected {target_type!r}"
+                    )
+                edge.put(outgoing.fork())
             if self._stream_publisher is not None:
                 self._stream_publisher.publish(source_name, outgoing)
 

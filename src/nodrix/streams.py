@@ -6,7 +6,6 @@ import json
 import hmac
 import ipaddress
 import os
-import queue
 import random
 import socket
 import ssl
@@ -18,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .discovery import DiscoveryAdvertiser, resolve_stream
 from .messages import Message
+from .queueing import PythonBoundedQueue
 from .wire import encode_message, recv_message, send_packet
 
 _HANDSHAKE_LENGTH = struct.Struct("!I")
@@ -77,7 +77,9 @@ except Exception:  # pragma: no cover
 class _PacketQueue:
     def __init__(self, capacity: int, policy: str) -> None:
         self._native = _NativeBoundedQueue(capacity, policy) if _NativeBoundedQueue is not None else None
-        self._queue: queue.Queue[Any] | None = None if self._native is not None else queue.Queue(capacity)
+        self._queue: PythonBoundedQueue | None = (
+            None if self._native is not None else PythonBoundedQueue(capacity, policy)
+        )
         self.policy = policy
         self.closed = False
         self.dropped = 0
@@ -88,53 +90,28 @@ class _PacketQueue:
         if self._native is not None:
             return bool(self._native.put(item))
         assert self._queue is not None
-        if self.policy == "block":
-            self._queue.put(item)
-            return True
-        if self.policy == "drop_newest":
-            try:
-                self._queue.put_nowait(item)
-                return True
-            except queue.Full:
-                self.dropped += 1
-                return False
-        if self.policy == "latest":
-            while True:
-                try:
-                    self._queue.get_nowait()
-                    self.dropped += 1
-                except queue.Empty:
-                    break
-        elif self._queue.full():
-            try:
-                self._queue.get_nowait()
-                self.dropped += 1
-            except queue.Empty:
-                pass
-        self._queue.put_nowait(item)
-        return True
+        accepted = self._queue.put(item)
+        self.dropped = int(self._queue.stats().get("dropped", 0))
+        return accepted
 
     def get(self) -> Any:
         if self._native is not None:
             return self._native.get()
         assert self._queue is not None
-        while not self.closed:
-            try:
-                return self._queue.get(timeout=0.1)
-            except queue.Empty:
-                continue
-        return None
+        return self._queue.get()
 
     def stats(self) -> dict[str, int]:
         if self._native is not None:
             return {key: int(value) for key, value in dict(self._native.stats()).items()}
         assert self._queue is not None
-        return {"depth": self._queue.qsize(), "dropped": self.dropped}
+        return self._queue.stats()
 
     def close(self) -> None:
         self.closed = True
         if self._native is not None:
             self._native.close()
+        elif self._queue is not None:
+            self._queue.close()
 
 
 @dataclass(slots=True)
@@ -544,7 +521,7 @@ class StreamPublisher:
 
     def publish(self, source: str, message: Message) -> None:
         for name in self._by_source.get(source, ()):
-            self.server.publish(name, message)
+            self.server.publish(name, message.fork())
 
     def report(self) -> dict[str, Any]:
         return self.server.report()

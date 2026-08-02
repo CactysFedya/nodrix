@@ -52,6 +52,16 @@ CORE_PROVIDER_FEATURES = frozenset(
 )
 MAX_PROVIDER_METADATA_BYTES = 1024 * 1024
 DEFAULT_TRUST_STORE = Path.home() / ".config" / "nodrix" / "trust" / "providers"
+_PROVIDER_CACHE_LOCK = threading.RLock()
+_DISCOVERY_CACHE_TTL_SECONDS = 1.0
+_DISCOVERY_CACHE: dict[
+    tuple[str, ...] | None,
+    tuple[
+        float,
+        tuple["ProviderCandidate", ...],
+        tuple[tuple[str, int, int], ...],
+    ],
+] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -816,6 +826,22 @@ def _legacy_ros2_probe() -> dict[str, Any]:
     }
 
 
+def _provider_file_fingerprint(
+    candidates: Iterable[ProviderCandidate],
+) -> tuple[tuple[str, int, int], ...]:
+    values: list[tuple[str, int, int]] = []
+    for candidate in candidates:
+        for path in (candidate.metadata_path, candidate.signature_path):
+            if path is None:
+                continue
+            try:
+                info = path.stat()
+                values.append((str(path), info.st_mtime_ns, info.st_size))
+            except OSError:
+                values.append((str(path), -1, -1))
+    return tuple(sorted(values))
+
+
 def discover_providers(
     *,
     include_legacy: bool = True,
@@ -823,7 +849,36 @@ def discover_providers(
 ) -> list[ProviderCandidate]:
     """Discover provider metadata without importing provider modules."""
 
-    candidates = _external_candidates(paths)
+    path_key = (
+        None
+        if paths is None
+        else tuple(os.path.abspath(os.fspath(path)) for path in paths)
+    )
+    now = time.monotonic()
+    cache_hit = False
+    with _PROVIDER_CACHE_LOCK:
+        cached = _DISCOVERY_CACHE.get(path_key)
+        if (
+            path_key is None
+            and cached is not None
+            and now - cached[0] <= _DISCOVERY_CACHE_TTL_SECONDS
+            and cached[2] == _provider_file_fingerprint(cached[1])
+        ):
+            external = list(cached[1])
+            cache_hit = True
+        else:
+            external = []
+    if not cache_hit:
+        external = _external_candidates(path_key)
+        if path_key is None:
+            with _PROVIDER_CACHE_LOCK:
+                selected = tuple(external)
+                _DISCOVERY_CACHE[path_key] = (
+                    now,
+                    selected,
+                    _provider_file_fingerprint(selected),
+                )
+    candidates = list(external)
     if include_legacy:
         external_ids = {candidate.id for candidate in candidates}
         candidates.extend(
@@ -951,8 +1006,9 @@ def verify_candidate(
     metadata_sha256 = hashlib.sha256(document_bytes).hexdigest()
     compatible = True
     try:
-        compatible = Version(__version__) in SpecifierSet(
-            metadata.requires_nodrix
+        compatible = SpecifierSet(metadata.requires_nodrix).contains(
+            Version(__version__),
+            prereleases=True,
         )
     except (InvalidSpecifier, InvalidVersion) as exc:
         compatible = False
@@ -1075,8 +1131,9 @@ def _installed_provider_features(
         if item.error is not None or item.metadata is None:
             continue
         try:
-            compatible = Version(__version__) in SpecifierSet(
-                item.metadata.requires_nodrix
+            compatible = SpecifierSet(item.metadata.requires_nodrix).contains(
+                Version(__version__),
+                prereleases=True,
             )
         except (InvalidSpecifier, InvalidVersion):
             compatible = False
@@ -1238,7 +1295,9 @@ _LOADED_PROVIDERS: dict[tuple[str, str], LoadedProvider] = {}
 def reset_provider_cache() -> None:
     """Clear process-local imports; intended for installers and tests."""
 
-    _LOADED_PROVIDERS.clear()
+    with _PROVIDER_CACHE_LOCK:
+        _LOADED_PROVIDERS.clear()
+        _DISCOVERY_CACHE.clear()
 
 
 def load_provider(
@@ -1260,24 +1319,25 @@ def load_provider(
             + "; ".join(verification.errors)
         )
     key = (candidate.id, verification.metadata_sha256 or "internal")
-    cached = _LOADED_PROVIDERS.get(key)
-    if cached is not None:
-        return cached
-    try:
-        runtime = _runtime_from_entry_point(candidate)
-    except ProviderError:
-        raise
-    except Exception as exc:
-        raise ProviderError(
-            f"Cannot import provider {candidate.id!r}: {exc}"
-        ) from exc
-    loaded = LoadedProvider(
-        candidate=candidate,
-        runtime=runtime,
-        verification=verification,
-    )
-    _LOADED_PROVIDERS[key] = loaded
-    return loaded
+    with _PROVIDER_CACHE_LOCK:
+        cached = _LOADED_PROVIDERS.get(key)
+        if cached is not None:
+            return cached
+        try:
+            runtime = _runtime_from_entry_point(candidate)
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise ProviderError(
+                f"Cannot import provider {candidate.id!r}: {exc}"
+            ) from exc
+        loaded = LoadedProvider(
+            candidate=candidate,
+            runtime=runtime,
+            verification=verification,
+        )
+        _LOADED_PROVIDERS[key] = loaded
+        return loaded
 
 
 def provider_for_node(

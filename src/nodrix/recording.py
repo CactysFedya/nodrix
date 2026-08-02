@@ -13,6 +13,7 @@ from typing import Any, BinaryIO, Iterable, Iterator
 
 from .messages import Message
 from .node import SinkNode, SourceNode
+from .queueing import PythonBoundedQueue
 from .streams import StreamClient, StreamPublisher
 from .wire import encode_message, read_message
 
@@ -284,6 +285,109 @@ class NdrxWriter:
         self.closed = True
 
     def __enter__(self) -> NdrxWriter:
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        self.close()
+
+
+_ASYNC_WRITER_EOS = object()
+
+
+class AsyncNdrxWriter:
+    """Single-writer recording service that keeps disk I/O off graph workers."""
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        metadata: dict[str, Any] | None = None,
+        checkpoint_records: int = 1024,
+        durable: bool = True,
+        queue_capacity: int = 256,
+    ) -> None:
+        self.writer = NdrxWriter(
+            path,
+            metadata=metadata,
+            checkpoint_records=checkpoint_records,
+            durable=durable,
+        )
+        self._queue = PythonBoundedQueue(queue_capacity, "block")
+        self._error: BaseException | None = None
+        self._closed = False
+        self._thread = threading.Thread(
+            target=self._run,
+            name="nodrix-recording-writer",
+            daemon=False,
+        )
+        self._thread.start()
+
+    def write(self, message: Message, *, arrival_ns: int | None = None) -> None:
+        if self._error is not None:
+            raise RecordingError(f"Asynchronous recording failed: {self._error}")
+        if self._closed:
+            raise RecordingError("Nodrix recording is closed")
+        delivery = (message.fork(), arrival_ns)
+        if not self._queue.put(delivery):
+            if self._error is not None:
+                raise RecordingError(
+                    f"Asynchronous recording failed: {self._error}"
+                ) from self._error
+            raise RecordingError("Nodrix recording queue is closed")
+
+    def _run(self) -> None:
+        try:
+            while True:
+                item = self._queue.get()
+                if item is None or item is _ASYNC_WRITER_EOS:
+                    break
+                message, arrival_ns = item
+                self.writer.write(message, arrival_ns=arrival_ns)
+        except BaseException as exc:
+            self._error = exc
+            self._queue.close()
+        finally:
+            try:
+                if self._error is None:
+                    self.writer.close()
+                else:
+                    self.writer.abort()
+            except BaseException as exc:
+                if self._error is None:
+                    self._error = exc
+                try:
+                    self.writer.abort()
+                except BaseException:
+                    pass
+            self._queue.close()
+            if self._error is not None:
+                self._queue.discard_pending()
+
+    def report(self) -> dict[str, Any]:
+        return {
+            "messages": self.writer.messages,
+            "payload_bytes": self.writer.payload_bytes,
+            "chunks": self.writer.chunks,
+            "queue": self._queue.stats(),
+            "error": None if self._error is None else str(self._error),
+        }
+
+    def close(self) -> None:
+        if self._closed:
+            if self._error is not None:
+                raise RecordingError(
+                    f"Asynchronous recording failed: {self._error}"
+                ) from self._error
+            return
+        self._closed = True
+        self._queue.put_control(_ASYNC_WRITER_EOS)
+        self._thread.join()
+        if self._error is not None:
+            raise RecordingError(
+                f"Asynchronous recording failed: {self._error}"
+            ) from self._error
+
+    def __enter__(self) -> AsyncNdrxWriter:
         return self
 
     def __exit__(self, *_: Any) -> None:

@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import shutil
 import platform
+import signal
 import sys
 import subprocess
 from typing import Any
@@ -16,6 +17,7 @@ from .errors import RuntimeGraphError
 from .manifest import PipelineManifest, dump_manifest_redacted, dump_source_manifest_redacted
 from .packages import resolve_package_node
 from .lockfile import build_lock
+from .validation import configured_security_issues
 from . import __version__
 
 
@@ -166,6 +168,14 @@ class NativePipelineRuntime:
         self.toolchain = NativeToolchain(_find_project_root(self.base_dir))
 
     def build(self) -> None:
+        security_issues = configured_security_issues(self.manifest)
+        if security_issues:
+            raise RuntimeGraphError(
+                "; ".join(
+                    f"{issue.code} {issue.location}: {issue.message}"
+                    for issue in security_issues
+                )
+            )
         self.specs.clear()
         for name, config in self.manifest.nodes.items():
             resolved_uses = self._resolve_uses(
@@ -322,35 +332,96 @@ class NativePipelineRuntime:
         plan = run_dir / "native-plan.vpp"
         plan.write_text(self._plan_text(run_dir), encoding="utf-8")
         runner = self.toolchain.ensure_runner()
-        process = await asyncio.create_subprocess_exec(
-            str(runner),
-            "--plan",
-            str(plan),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-        (run_dir / "native.stdout.log").write_bytes(stdout)
-        (run_dir / "native.stderr.log").write_bytes(stderr)
+        stdout_path = run_dir / "native.stdout.log"
+        stderr_path = run_dir / "native.stderr.log"
+        subprocess_options: dict[str, Any] = {}
+        if os.name == "nt":
+            subprocess_options["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            subprocess_options["start_new_session"] = True
+        with stdout_path.open("wb", buffering=0) as stdout_log, stderr_path.open(
+            "wb", buffering=0
+        ) as stderr_log:
+            process = await asyncio.create_subprocess_exec(
+                str(runner),
+                "--plan",
+                str(plan),
+                stdout=stdout_log,
+                stderr=stderr_log,
+                **subprocess_options,
+            )
+            try:
+                await process.wait()
+            except asyncio.CancelledError:
+                await asyncio.shield(self._stop_process_tree(process))
+                raise
         report_path = run_dir / "native-run.json"
         if not report_path.exists():
-            detail = stderr.decode("utf-8", errors="replace").strip()
+            detail = self._tail_text(stderr_path)
             raise RuntimeGraphError(
                 f"Native runner exited with {process.returncode} without a report: {detail}"
             )
         report = json.loads(report_path.read_text(encoding="utf-8"))
         report["mode"] = self.manifest.runtime.mode
         report["native_runner"] = str(runner)
-        report["stdout_log"] = str(run_dir / "native.stdout.log")
-        report["stderr_log"] = str(run_dir / "native.stderr.log")
+        report["stdout_log"] = str(stdout_path)
+        report["stderr_log"] = str(stderr_path)
         report.setdefault("run_dir", str(run_dir))
         encoded = json.dumps(report, indent=2, ensure_ascii=False)
         (run_dir / "run.json").write_text(encoded, encoding="utf-8")
         (run_dir / "summary.json").write_text(encoded, encoding="utf-8")
         if process.returncode != 0:
-            detail = stderr.decode("utf-8", errors="replace").strip()
+            detail = self._tail_text(stderr_path)
             raise RuntimeGraphError(detail or f"Native runner exited with {process.returncode}")
         return report
+
+    async def _stop_process_tree(
+        self,
+        process: asyncio.subprocess.Process,
+    ) -> None:
+        if process.returncode is not None:
+            return
+        grace = min(
+            10.0,
+            max(0.5, self.manifest.runtime.shutdown.timeout_ms / 1000.0),
+        )
+        try:
+            if os.name == "nt":
+                process.send_signal(signal.CTRL_BREAK_EVENT)
+            else:
+                os.killpg(process.pid, signal.SIGINT)
+            await asyncio.wait_for(process.wait(), timeout=grace)
+            return
+        except (ProcessLookupError, asyncio.TimeoutError):
+            pass
+        try:
+            if os.name == "nt":
+                process.terminate()
+            else:
+                os.killpg(process.pid, signal.SIGTERM)
+            await asyncio.wait_for(process.wait(), timeout=2.0)
+            return
+        except (ProcessLookupError, asyncio.TimeoutError):
+            pass
+        try:
+            if os.name == "nt":
+                process.kill()
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            return
+        await process.wait()
+
+    @staticmethod
+    def _tail_text(path: Path, limit: int = 64 * 1024) -> str:
+        try:
+            with path.open("rb") as stream:
+                stream.seek(0, os.SEEK_END)
+                size = stream.tell()
+                stream.seek(max(0, size - int(limit)))
+                return stream.read().decode("utf-8", errors="replace").strip()
+        except OSError:
+            return ""
 
     def _plan_text(self, run_dir: Path) -> str:
         lines = [

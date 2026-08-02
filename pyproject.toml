@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodrix"
-version = "2.1.0"
+version = "2.2.0a3"
 description = "High-performance typed runtime for local and distributed streaming graphs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -124,7 +124,7 @@ build = "cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux*"
 build-verbosity = 1
 environment = { NODRIX_BUILD_NCNN_PLUGIN = "1", NODRIX_FETCH_NCNN = "1" }
-test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix; from nodrix.native_runtime import NativeToolchain; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == 'nodrix-native-runner 2.1.0'; root=Path(nodrix.__file__).resolve().parent/'bin'; assert any(root.glob('*ncnn_detector*')), root\" && nodrix --version"
+test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix; from nodrix.native_runtime import NativeToolchain; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == 'nodrix-native-runner 2.2.0a3'; root=Path(nodrix.__file__).resolve().parent/'bin'; assert any(root.glob('*ncnn_detector*')), root\" && nodrix --version"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"

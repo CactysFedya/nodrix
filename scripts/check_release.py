@@ -31,7 +31,7 @@ def check_versions() -> list[str]:
         "src/nodrix/__init__.py": extract(r'^__version__\s*=\s*["\']([^"\']+)["\']', ROOT / "src/nodrix/__init__.py"),
         "CITATION.cff": extract(r"^version:\s*([^\s]+)", ROOT / "CITATION.cff"),
         "src/nodrix/native/CMakeLists.txt": extract(
-            r"project\(nodrix_native VERSION ([0-9]+\.[0-9]+\.[0-9]+)",
+            r'NODRIX_RELEASE_VERSION\s+"([^"]+)"',
             ROOT / "src/nodrix/native/CMakeLists.txt",
         ),
     }

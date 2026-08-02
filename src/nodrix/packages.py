@@ -109,7 +109,10 @@ def _validate_runtime_compatibility(manifest: dict[str, Any]) -> None:
     requirement = str(manifest.get("nodrix", "")).strip()
     if requirement:
         try:
-            compatible = Version(__version__) in SpecifierSet(requirement)
+            compatible = SpecifierSet(requirement).contains(
+                Version(__version__),
+                prereleases=True,
+            )
         except (InvalidSpecifier, InvalidVersion) as exc:
             raise ValueError(
                 f"Invalid Nodrix compatibility requirement: {requirement!r}"

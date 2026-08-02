@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 from typing import Type
@@ -15,6 +16,7 @@ from .packages import resolve_package_node
 BUILTINS: dict[str, type[Node]] = {}
 _CORE_LOADED = False
 _LOADED_PROVIDERS: set[str] = set()
+_REGISTRY_LOCK = threading.RLock()
 _BUILTIN_PROVIDERS = {
     "vision.": "nodrix.vision.nodes",
     "media.": "nodrix.media",
@@ -25,27 +27,30 @@ _BUILTIN_PROVIDERS = {
 
 def register_builtin(name: str):
     def decorator(cls: type[Node]) -> type[Node]:
-        BUILTINS[name] = cls
+        with _REGISTRY_LOCK:
+            BUILTINS[name] = cls
         return cls
     return decorator
 
 
 def _load_core_builtins() -> None:
     global _CORE_LOADED
-    if _CORE_LOADED:
-        return
-    importlib.import_module("nodrix.builtin_nodes")
-    _CORE_LOADED = True
+    with _REGISTRY_LOCK:
+        if _CORE_LOADED:
+            return
+        importlib.import_module("nodrix.builtin_nodes")
+        _CORE_LOADED = True
 
 
 def _load_provider(prefix: str) -> None:
-    if prefix in _LOADED_PROVIDERS:
-        return
-    module = importlib.import_module(_BUILTIN_PROVIDERS[prefix])
-    if prefix == "record.":
-        register_builtin("record.ndrx_source")(module.NdrxSourceNode)
-        register_builtin("record.ndrx_writer")(module.NdrxWriterNode)
-    _LOADED_PROVIDERS.add(prefix)
+    with _REGISTRY_LOCK:
+        if prefix in _LOADED_PROVIDERS:
+            return
+        module = importlib.import_module(_BUILTIN_PROVIDERS[prefix])
+        if prefix == "record.":
+            register_builtin("record.ndrx_source")(module.NdrxSourceNode)
+            register_builtin("record.ndrx_writer")(module.NdrxWriterNode)
+        _LOADED_PROVIDERS.add(prefix)
 
 
 def load_builtin_providers() -> None:
@@ -91,8 +96,10 @@ def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
                 ) from exc
             break
 
-    if reference in BUILTINS:
-        return BUILTINS[reference]
+    with _REGISTRY_LOCK:
+        builtin = BUILTINS.get(reference)
+    if builtin is not None:
+        return builtin
 
     if ":" not in reference:
         # Provider API discovery is metadata-only.  The selected provider is
