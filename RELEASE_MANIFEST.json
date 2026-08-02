@@ -1,8 +1,8 @@
 {
   "schema": "nodrix-release/v1",
-  "name": "Modular Integration Sessions",
-  "release": "2.2.0a3",
-  "display_release": "2.2.0-alpha.3",
+  "name": "Core Boundaries",
+  "release": "2.2.0a4",
+  "display_release": "2.2.0-alpha.4",
   "core_contracts": {
     "provider_api": ["1", "2"],
     "provider_schema": ["nodrix-provider/1", "nodrix-provider/2"],
@@ -10,23 +10,27 @@
     "features": [
       "provider-sessions.1",
       "external-links.1",
+      "managed-resources.1",
+      "managed-applications.1",
+      "edge-transports.1",
       "provider-templates.1"
     ]
   },
   "packages": {
     "nodrix-spatial": "0.1.0",
     "nodrix-mapping": "0.1.1",
-    "nodrix-ros2": "0.3.1",
+    "nodrix-ros2": "0.4.0",
     "nodrix-spatial-ros2": "0.1.0"
   },
   "compatibility": {
     "provider_api_1": true,
-    "pipelines_without_sessions_or_links": true,
+    "pipelines_without_integrations": true,
+    "use_and_links_aliases": true,
     "ros2_source_sink_aliases": true,
     "ros2_spatial_adapter_import_shims": true
   },
   "validation": {
-    "offline_contract_tests": "52 passed, 3 skipped in clean modular environment",
+    "offline_contract_tests": "covered by core and modular CI",
     "python_compile": "passed",
     "provider_discovery": "passed in isolated metadata path",
     "provider_template_generation": "passed",

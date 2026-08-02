@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.2.0-alpha.4 — Core Boundaries
+
+- Split manifest, provider, CLI, and unified-runtime implementation into
+  focused modules while preserving the established import facades.
+- Added transport-neutral managed Resources and Applications.
+- Kept Edge as the logical connection and attached external provider
+  Transports through `edges[].transport`.
+- Kept `use`, top-level `links`, sessions, and ROS process Nodes readable as
+  Nodrix 2.x compatibility paths with migration/strict diagnostics.
+- Added canonical JSON Schema generation and editor mappings to every new
+  Core or provider-owned project.
+- Moved ROS process supervision to managed Applications and retained DDS/RMW
+  as the data plane for ROS-to-ROS transported Edges.
+- Isolated modular provider tests from stale global editable installs and
+  included API contract fixtures in the source distribution.
+
 ## 2.2.0-alpha.3 — Modular Integration Sessions
 
 - Added Provider API 2 sessions, external links, parameter schemas, and

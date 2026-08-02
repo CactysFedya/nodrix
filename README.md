@@ -1,4 +1,4 @@
-# Nodrix 2.2.0 alpha.3
+# Nodrix 2.2.0 alpha.4
 
 [![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
 [![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
@@ -8,7 +8,34 @@
 Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
 
 
-## Nodrix 2.1 highlights
+## Nodrix 2.2 alpha.4 highlights
+
+Core Boundaries separates manifest parsing, provider discovery/loading, CLI
+commands, and runtime lifecycle into focused modules without changing the 2.x
+facades. Integrations now use transport-neutral Resources and managed
+Applications, while physical/external Transports attach to logical Edges.
+
+```yaml
+applications:
+  driver:
+    uses: ros2.launch
+    bindings: {session: ros}
+    package: example_driver
+    launch_file: driver.launch.py
+nodes: {}
+edges:
+  - from: driver.points
+    to: mapping.points
+    transport:
+      uses: ros2.topic
+      parameters: {topic: /points, message_type: sensor_msgs/msg/PointCloud2}
+```
+
+Compact provider parameters stay available as shown above. Canonical resolved
+YAML nests them under `parameters`. Old `use` and top-level `links` remain
+readable in 2.x and can be rewritten with `nodrix migrate`.
+
+## Provider security
 
 Nodrix 2.1 adds Provider API 1: independently installed providers are
 discovered from signed metadata, checked for API/version/features and trust,
@@ -28,7 +55,7 @@ membership before executing provider import-time code.
 The official Vision provider adds a native NCNN production block:
 
 ```yaml
-use: vision.ncnn_detector_native
+uses: vision.ncnn_detector_native
 model: models/yolo26n_ncnn_model
 imgsz: 320
 threads: 4
