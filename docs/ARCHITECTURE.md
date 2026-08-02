@@ -18,9 +18,11 @@ Domain SDKs define payload contracts and reusable nodes:
 ```text
 Nodrix Core
 ├── Nodrix Vision
-├── Nodrix LiDAR      planned
+├── nodrix-spatial
+├── nodrix-mapping
+├── nodrix-ros2
+├── nodrix-spatial-ros2
 ├── Nodrix Audio      planned
-├── Nodrix ROS        planned
 └── user packages
 ```
 
@@ -33,6 +35,8 @@ Nodrix Core
 | Node | Processing component |
 | Port | Typed input or output |
 | Edge | Local connection between ports |
+| Session | Provider resource shared for one pipeline run |
+| Link | External connection that creates no local data queue |
 | Stream | Named output available to other processes/devices |
 | Runtime | Graph executor and transport system |
 
@@ -241,6 +245,25 @@ edit .cpp → build that plugin → nodrix run
 ```
 
 There is no workspace-wide mandatory build or environment sourcing step.
+An optional platform provider may manage its own workspace through a Session;
+for example, `nodrix-ros2` prepares one colcon overlay per pipeline rather than
+once per Node.
+
+## Integration sessions and external links
+
+Provider API 2 keeps external systems out of the hot data plane:
+
+```text
+Provider Session
+├── environment / connection pool / graph watcher
+├── supervised integration Nodes
+└── external Links (DDS topics, broker routes, services)
+```
+
+Normal `edges` still carry typed Nodrix messages through bounded queues.
+External `links` express dependencies, routing, or remapping owned by an
+integration provider. They appear in the resolved plan with zero planned
+Nodrix copies. The same contract is transport-neutral and is not tied to ROS 2.
 
 ## Intentional limitations after 0.6.0
 
@@ -249,7 +272,8 @@ There is no workspace-wide mandatory build or environment sourcing step.
 - automatic certificate-based security is not included;
 - native source plugins still use the fully native executor;
 - LAN discovery requires multicast or an explicit `nodrix://` URI fallback;
-- ROS 2 bridge, record/play, CUDA IPC, and DMA-BUF are future packages.
+- advanced ROS 2 loaned-message bridges, CUDA IPC, and DMA-BUF remain
+  target-specific capabilities rather than implicit Core guarantees.
 
 ## Nodrix 0.8 data plane
 

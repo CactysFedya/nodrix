@@ -16,3 +16,10 @@ def test_provider_runtime_matches_metadata() -> None:
     assert runtime.provider_id == manifest.metadata.id
     assert set(runtime.nodes) == {node.id for node in manifest.nodes}
     assert set(runtime.probes) == {probe.id for probe in manifest.probes}
+    assert set(runtime.sessions) == {
+        session.id for session in manifest.sessions
+    }
+    assert {template.id for template in manifest.templates} >= {
+        "ros2",
+        "ros2-fast-livo2",
+    }

@@ -1,0 +1,118 @@
+name: fast-livo2-ros2
+description: Livox, FAST-LIVO2 and RViz supervised by one shared ROS 2 session
+
+runtime:
+  engine: unified
+  mode: realtime
+  profile: realtime-low-latency
+
+sessions:
+  ros:
+    uses: ros2.session
+    parameters:
+      distro: ${ROS_DISTRO:-jazzy}
+      underlays:
+        - /opt/ros/${ROS_DISTRO:-jazzy}
+        - ${LIVOX_WS}
+      path: ${ROBOT_WS}
+      trust: explicit
+      build:
+        mode: if-needed
+        symlink_install: true
+        parallel_workers: auto
+        timeout_s: 1800
+
+nodes:
+  livox:
+    use: ros2.launch
+    bindings:
+      session: ros
+    package: livox_ros_driver2
+    launch_file: msg_MID360s_launch.py
+    arguments:
+      rviz_enable: false
+
+  fast_livo2:
+    use: ros2.launch
+    bindings:
+      session: ros
+    package: fast_livo
+    launch_file: mapping.launch.py
+    arguments:
+      rviz: false
+    requirements_timeout_s: 30
+
+  lidar_ready:
+    use: ros2.topic_monitor
+    bindings:
+      session: ros
+    mode: graph
+    topic: /livox/lidar
+    message_type: livox_ros_driver2/msg/CustomMsg
+    startup_timeout_s: 20
+
+  imu_ready:
+    use: ros2.topic_monitor
+    bindings:
+      session: ros
+    mode: graph
+    topic: /livox/imu
+    message_type: sensor_msgs/msg/Imu
+    startup_timeout_s: 20
+
+  cloud_ready:
+    use: ros2.topic_monitor
+    bindings:
+      session: ros
+    mode: graph
+    topic: /cloud_registered
+    message_type: sensor_msgs/msg/PointCloud2
+    startup_timeout_s: 45
+
+  rviz:
+    use: ros2.rviz
+    bindings:
+      session: ros
+    config: ${RVIZ_CONFIG:-rviz/fast_livo2.rviz}
+    requirements_timeout_s: 45
+
+  livox_status:
+    use: core.counter_sink
+  fast_livo2_status:
+    use: core.counter_sink
+  lidar_status:
+    use: core.counter_sink
+  imu_status:
+    use: core.counter_sink
+  cloud_status:
+    use: core.counter_sink
+  rviz_status:
+    use: core.counter_sink
+
+flow:
+  - livox.status -> livox_status.input
+  - fast_livo2.status -> fast_livo2_status.input
+  - lidar_ready.status -> lidar_status.input
+  - imu_ready.status -> imu_status.input
+  - cloud_ready.status -> cloud_status.input
+  - rviz.status -> rviz_status.input
+
+links:
+  - from: livox.lidar
+    to: fast_livo2.lidar
+    uses: ros2.topic
+    parameters:
+      topic: /livox/lidar
+      message_type: livox_ros_driver2/msg/CustomMsg
+  - from: livox.imu
+    to: fast_livo2.imu
+    uses: ros2.topic
+    parameters:
+      topic: /livox/imu
+      message_type: sensor_msgs/msg/Imu
+  - from: fast_livo2.cloud_registered
+    to: rviz.cloud_registered
+    uses: ros2.topic
+    parameters:
+      topic: /cloud_registered
+      message_type: sensor_msgs/msg/PointCloud2

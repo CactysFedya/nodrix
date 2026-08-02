@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 import signal
 import subprocess
-import sys
 import time
 from typing import IO, Mapping, Sequence
 
@@ -17,6 +17,7 @@ class ProcessSnapshot:
     returncode: int | None
     started_ns: int | None
     uptime_s: float
+    command_sha256: str
 
 
 class ManagedProcess:
@@ -30,6 +31,8 @@ class ManagedProcess:
         environment: Mapping[str, str],
         stdout_path: Path,
         stderr_path: Path,
+        max_log_bytes: int = 50 * 1024 * 1024,
+        log_rotations: int = 3,
     ) -> None:
         if not command:
             raise ValueError("process command cannot be empty")
@@ -38,6 +41,11 @@ class ManagedProcess:
         self.environment = dict(environment)
         self.stdout_path = stdout_path
         self.stderr_path = stderr_path
+        self.max_log_bytes = max(int(max_log_bytes), 0)
+        self.log_rotations = max(int(log_rotations), 0)
+        self.command_sha256 = hashlib.sha256(
+            "\0".join(self.command).encode("utf-8")
+        ).hexdigest()
         self._process: subprocess.Popen[bytes] | None = None
         self._stdout: IO[bytes] | None = None
         self._stderr: IO[bytes] | None = None
@@ -48,6 +56,8 @@ class ManagedProcess:
             raise RuntimeError("process already started")
         self.stdout_path.parent.mkdir(parents=True, exist_ok=True)
         self.stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        self._rotate_log(self.stdout_path)
+        self._rotate_log(self.stderr_path)
         self._stdout = self.stdout_path.open("ab", buffering=0)
         self._stderr = self.stderr_path.open("ab", buffering=0)
         kwargs: dict[str, object] = {}
@@ -55,16 +65,39 @@ class ManagedProcess:
             kwargs["start_new_session"] = True
         elif os.name == "nt":
             kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-        self._process = subprocess.Popen(
-            list(self.command),
-            cwd=self.cwd,
-            env=self.environment,
-            stdin=subprocess.DEVNULL,
-            stdout=self._stdout,
-            stderr=self._stderr,
-            **kwargs,
-        )
+        try:
+            self._process = subprocess.Popen(
+                list(self.command),
+                cwd=self.cwd,
+                env=self.environment,
+                stdin=subprocess.DEVNULL,
+                stdout=self._stdout,
+                stderr=self._stderr,
+                **kwargs,
+            )
+        except BaseException:
+            self._close_logs()
+            raise
         self._started_ns = time.time_ns()
+
+    def _rotate_log(self, path: Path) -> None:
+        if (
+            self.max_log_bytes <= 0
+            or not path.is_file()
+            or path.stat().st_size < self.max_log_bytes
+        ):
+            return
+        if self.log_rotations <= 0:
+            path.unlink()
+            return
+        oldest = path.with_name(f"{path.name}.{self.log_rotations}")
+        if oldest.exists():
+            oldest.unlink()
+        for index in range(self.log_rotations - 1, 0, -1):
+            source = path.with_name(f"{path.name}.{index}")
+            if source.exists():
+                source.replace(path.with_name(f"{path.name}.{index + 1}"))
+        path.replace(path.with_name(f"{path.name}.1"))
 
     def poll(self) -> int | None:
         return None if self._process is None else self._process.poll()
@@ -81,7 +114,22 @@ class ManagedProcess:
             returncode=returncode,
             started_ns=self._started_ns,
             uptime_s=uptime,
+            command_sha256=self.command_sha256,
         )
+
+    def wait(self, timeout: float | None = None) -> int:
+        if self._process is None:
+            raise RuntimeError("process is not started")
+        return self._process.wait(timeout=timeout)
+
+    def stderr_tail(self, maximum_bytes: int = 8192) -> str:
+        try:
+            with self.stderr_path.open("rb") as stream:
+                size = stream.seek(0, os.SEEK_END)
+                stream.seek(max(size - max(int(maximum_bytes), 0), 0))
+                return stream.read().decode("utf-8", errors="replace")
+        except OSError:
+            return ""
 
     def _send_group_signal(self, sig: int) -> None:
         process = self._process

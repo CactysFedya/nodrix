@@ -1,4 +1,5 @@
 {
+  "schema": "nodrix-provider/2",
   "metadata": {
     "description": "Universal ROS 2 orchestration, supervision and transport provider",
     "features": [
@@ -11,17 +12,21 @@
       "ros2.topic_monitor",
       "ros2.topic_source",
       "ros2.topic_sink",
-      "ros2.shared_executor"
+      "ros2.shared_executor",
+      "ros2.session",
+      "ros2.graph.worker",
+      "ros2.external_links"
     ],
     "id": "nodrix.ros2",
     "name": "Nodrix ROS 2 Provider",
-    "provider_api": "1",
+    "provider_api": "2",
     "requires_features": [
       "python-node-api.2",
-      "domain.spatial.contracts"
+      "provider-sessions.1",
+      "external-links.1"
     ],
     "requires_nodrix": ">=2.1,<3",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "nodes": [
     {
@@ -35,6 +40,17 @@
       "optional_inputs": [],
       "outputs": {
         "status": "core.object"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": ["package", "executable"],
+        "properties": {
+          "package": {"type": "string", "minLength": 1},
+          "executable": {"type": "string", "minLength": 1},
+          "workspace": {"type": "object"},
+          "remappings": {"type": "object"},
+          "requires_topics": {"type": "array"}
+        }
       }
     },
     {
@@ -48,6 +64,17 @@
       "optional_inputs": [],
       "outputs": {
         "status": "core.object"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": ["package", "launch_file"],
+        "properties": {
+          "package": {"type": "string", "minLength": 1},
+          "launch_file": {"type": "string", "minLength": 1},
+          "workspace": {"type": "object"},
+          "arguments": {"type": "object"},
+          "requires_topics": {"type": "array"}
+        }
       }
     },
     {
@@ -61,6 +88,14 @@
       "optional_inputs": [],
       "outputs": {
         "status": "core.object"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "config": {"type": "string"},
+          "workspace": {"type": "object"},
+          "requires_topics": {"type": "array"}
+        }
       }
     },
     {
@@ -74,6 +109,17 @@
       "optional_inputs": [],
       "outputs": {
         "status": "core.object"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": ["topic", "message_type"],
+        "properties": {
+          "mode": {"enum": ["graph", "sample", "statistics"]},
+          "topic": {"type": "string", "minLength": 1},
+          "message_type": {"type": "string", "minLength": 1},
+          "startup_timeout_s": {"type": "number", "exclusiveMinimum": 0},
+          "sample_interval_s": {"type": "number", "exclusiveMinimum": 0}
+        }
       }
     },
     {
@@ -86,6 +132,15 @@
       "optional_inputs": [],
       "outputs": {
         "output": "core.any"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": ["topic", "message_type"],
+        "properties": {
+          "topic": {"type": "string", "minLength": 1},
+          "message_type": {"type": "string", "minLength": 1},
+          "capacity": {"type": "integer", "minimum": 1}
+        }
       }
     },
     {
@@ -98,42 +153,46 @@
         "input": "core.any"
       },
       "optional_inputs": [],
-      "outputs": {}
-    },
-    {
-      "factory": "nodrix_ros2.nodes.topic_source:Ros2PointCloud2Source",
-      "features": [
-        "ros2.point_cloud2"
-      ],
-      "id": "ros2.point_cloud2_source",
-      "inputs": {},
-      "optional_inputs": [],
-      "outputs": {
-        "cloud": "spatial.point_cloud/v1"
+      "outputs": {},
+      "parameters_schema": {
+        "type": "object",
+        "required": ["topic", "message_type"],
+        "properties": {
+          "topic": {"type": "string", "minLength": 1},
+          "message_type": {"type": "string", "minLength": 1}
+        }
       }
     },
     {
-      "factory": "nodrix_ros2.nodes.topic_source:Ros2ImuSource",
-      "features": [
-        "ros2.imu"
-      ],
-      "id": "ros2.imu_source",
+      "factory": "nodrix_ros2.nodes.topic_source:Ros2TopicSource",
+      "features": ["ros2.topic_source", "compatibility.alias"],
+      "id": "ros2.source",
       "inputs": {},
       "optional_inputs": [],
-      "outputs": {
-        "imu": "spatial.imu/v1"
+      "outputs": {"output": "core.any"},
+      "parameters_schema": {
+        "type": "object",
+        "required": ["topic", "message_type"],
+        "properties": {
+          "topic": {"type": "string", "minLength": 1},
+          "message_type": {"type": "string", "minLength": 1}
+        }
       }
     },
     {
-      "factory": "nodrix_ros2.nodes.topic_source:Ros2OdometrySource",
-      "features": [
-        "ros2.odometry"
-      ],
-      "id": "ros2.odometry_source",
-      "inputs": {},
+      "factory": "nodrix_ros2.nodes.topic_sink:Ros2TopicSink",
+      "features": ["ros2.topic_sink", "compatibility.alias"],
+      "id": "ros2.sink",
+      "inputs": {"input": "core.any"},
       "optional_inputs": [],
-      "outputs": {
-        "odometry": "spatial.odometry/v1"
+      "outputs": {},
+      "parameters_schema": {
+        "type": "object",
+        "required": ["topic", "message_type"],
+        "properties": {
+          "topic": {"type": "string", "minLength": 1},
+          "message_type": {"type": "string", "minLength": 1}
+        }
       }
     }
   ],
@@ -157,6 +216,49 @@
       "timeout_seconds": 5.0
     }
   ],
-  "schema": "nodrix-provider/1",
-  "templates": []
+  "templates": [
+    {
+      "id": "ros2",
+      "source": "templates/ros2-fast-livo2",
+      "description": "ROS 2 project with one shared workspace and graph session",
+      "features": ["platform.ros2", "ros2.session"]
+    },
+    {
+      "id": "ros2-fast-livo2",
+      "source": "templates/ros2-fast-livo2",
+      "description": "Livox and FAST-LIVO2 orchestration with one ROS session",
+      "features": ["platform.ros2", "ros2.session"]
+    }
+  ],
+  "sessions": [
+    {
+      "id": "ros2.session",
+      "factory": "nodrix_ros2.session:Ros2Session",
+      "features": ["ros2.workspace", "ros2.graph.worker"],
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "distro": {"type": "string", "default": "jazzy"},
+          "path": {"type": "string"},
+          "trust": {"enum": ["project", "explicit", "readonly"]},
+          "build": {"type": "object"}
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "ros2.topic",
+      "features": ["ros2.external_links"],
+      "parameters_schema": {
+        "type": "object",
+        "required": ["topic", "message_type"],
+        "properties": {
+          "topic": {"type": "string"},
+          "message_type": {"type": "string"},
+          "qos": {"type": "object"}
+        }
+      }
+    }
+  ]
 }

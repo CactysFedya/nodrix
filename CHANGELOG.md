@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.0-alpha.3 — Modular Integration Sessions
+
+- Added Provider API 2 sessions, external links, parameter schemas, and
+  provider-owned `nodrix init` templates.
+- Split typed ROS/Spatial bridges into `nodrix-spatial-ros2`.
+- Added one shared ROS workspace/graph session, persistent graph worker,
+  graph-only monitoring, inter-process build locking, bounded logs, and robust
+  startup cleanup.
+- Preserved Provider API 1 and existing pipeline YAML compatibility.
+
 ## 2.1.0 — Provider API 1 and Unified Doctor
 - Added the official `vision.ncnn_detector_native` Plugin C ABI 2 backend:
   NCNN preprocessing, inference, YOLO decoding, filtering, and NMS now run

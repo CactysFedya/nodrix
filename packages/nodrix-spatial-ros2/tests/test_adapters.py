@@ -1,7 +1,11 @@
 from array import array
 from dataclasses import dataclass, field
 
-from nodrix_ros2.adapters import imu_to_frame, odometry_to_frame, point_cloud2_to_frame
+from nodrix_spatial_ros2.adapters import (
+    imu_to_frame,
+    odometry_to_frame,
+    point_cloud2_to_frame,
+)
 
 
 @dataclass
@@ -84,7 +88,17 @@ class Odometry:
     twist = TwistWithCovariance()
 
 
-def test_point_cloud_adapter_does_not_copy_data() -> None:
+class Imu:
+    header = Header()
+    orientation = Q()
+    angular_velocity = V3(0.1, 0.2, 0.3)
+    linear_acceleration = V3(0.0, 0.0, 9.81)
+    orientation_covariance = [0.0] * 9
+    angular_velocity_covariance = [0.0] * 9
+    linear_acceleration_covariance = [0.0] * 9
+
+
+def test_point_cloud_adapter_does_not_make_an_adapter_copy() -> None:
     message = PointCloud()
     frame = point_cloud2_to_frame(message)
     assert frame.buffer.owner is message.data
@@ -97,16 +111,6 @@ def test_odometry_adapter_is_typed() -> None:
     assert frame.frame_id == "map"
     assert frame.child_frame_id == "base_link"
     assert frame.pose.orientation.w == 1.0
-
-
-class Imu:
-    header = Header()
-    orientation = Q()
-    angular_velocity = V3(0.1, 0.2, 0.3)
-    linear_acceleration = V3(0.0, 0.0, 9.81)
-    orientation_covariance = [0.0] * 9
-    angular_velocity_covariance = [0.0] * 9
-    linear_acceleration_covariance = [0.0] * 9
 
 
 def test_imu_adapter_is_typed() -> None:

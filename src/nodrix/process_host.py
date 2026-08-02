@@ -249,6 +249,7 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
             runtime_mode=config["runtime_mode"],
             engine="unified-process",
             device=config.get("device", "auto"),
+            external_links=tuple(config.get("external_links") or ()),
         )
         node.configure(context)
         affinity = config.get("cpu_affinity") or []
@@ -452,6 +453,9 @@ class ProcessNodeProxy(Node):
             "device": self.device,
             "memory_limit_mb": self.memory_limit_mb,
             "cpu_limit": self.cpu_limit,
+            "external_links": [
+                dict(item) for item in self.context.external_links
+            ],
         }
         process = self._ctx.Process(target=_child_main, args=(child, config), name=f"nodrix-process:{self.name}")
         process.start()

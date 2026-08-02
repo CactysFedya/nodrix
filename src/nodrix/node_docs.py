@@ -90,6 +90,17 @@ def validate_parameters(reference: str, parameters: dict[str, Any]) -> None:
     checks. This validator catches missing required values, enum typos and
     numeric range errors during ``nodrix validate``.
     """
+    from .provider_validation import validate_provider_parameters
+    from .providers import provider_for_node
+
+    resolved = provider_for_node(reference, include_legacy=False)
+    if resolved is not None:
+        _candidate, descriptor = resolved
+        validate_provider_parameters(
+            descriptor.parameters_schema,
+            parameters,
+            location=f"nodes[*].parameters ({reference})",
+        )
     if reference == "media.ffmpeg_source" and not parameters.get("uri") and not parameters.get("source"):
         raise ValueError("media.ffmpeg_source requires parameter 'uri'")
     if reference == "vision.ncnn_detector_native" and str(

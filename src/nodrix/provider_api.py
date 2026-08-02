@@ -1,4 +1,4 @@
-"""Stable public contracts for Nodrix Provider API 1.
+"""Stable public contracts for Nodrix Provider APIs 1 and 2.
 
 Provider metadata is deliberately made of plain, immutable dataclasses.  A
 provider distribution can therefore describe itself without importing its
@@ -15,6 +15,12 @@ from typing import Any, Callable, Mapping
 
 PROVIDER_API_VERSION = "1"
 PROVIDER_SCHEMA = "nodrix-provider/1"
+PROVIDER_API_VERSION_V2 = "2"
+PROVIDER_SCHEMA_V2 = "nodrix-provider/2"
+SUPPORTED_PROVIDER_API_VERSIONS = frozenset(
+    {PROVIDER_API_VERSION, PROVIDER_API_VERSION_V2}
+)
+SUPPORTED_PROVIDER_SCHEMAS = frozenset({PROVIDER_SCHEMA, PROVIDER_SCHEMA_V2})
 PROVIDER_ENTRY_POINT_GROUP = "nodrix.providers"
 
 _IDENTIFIER = re.compile(r"^[a-z0-9](?:[a-z0-9_.-]*[a-z0-9])?$")
@@ -78,10 +84,11 @@ class ProviderMetadata:
             raise ValueError("provider name is required")
         if not self.version.strip() or len(self.version) > 64:
             raise ValueError("provider version is required")
-        if self.provider_api != PROVIDER_API_VERSION:
+        if self.provider_api not in SUPPORTED_PROVIDER_API_VERSIONS:
             raise ValueError(
                 f"provider API {self.provider_api!r} is unsupported; "
-                f"expected {PROVIDER_API_VERSION!r}"
+                "expected one of "
+                + ", ".join(sorted(SUPPORTED_PROVIDER_API_VERSIONS))
             )
         object.__setattr__(
             self,
@@ -133,6 +140,10 @@ class NodeDescriptor:
     outputs: dict[str, str] = field(default_factory=dict)
     optional_inputs: tuple[str, ...] = ()
     features: tuple[str, ...] = ()
+    parameters_schema: dict[str, Any] = field(default_factory=dict)
+    bindings: dict[str, str] = field(default_factory=dict)
+    external_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    external_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "id", _identifier(self.id, "node id"))
@@ -148,6 +159,21 @@ class NodeDescriptor:
             "features",
             _string_tuple(self.features, "node features"),
         )
+        object.__setattr__(self, "parameters_schema", dict(self.parameters_schema))
+        object.__setattr__(
+            self,
+            "bindings",
+            {str(name): str(kind) for name, kind in self.bindings.items()},
+        )
+        for field_name in ("external_inputs", "external_outputs"):
+            value = getattr(self, field_name)
+            normalized = {
+                str(name): dict(spec)
+                for name, spec in value.items()
+            }
+            if any(not name for name in normalized):
+                raise ValueError(f"{field_name} contains an empty port")
+            object.__setattr__(self, field_name, normalized)
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> NodeDescriptor:
@@ -161,6 +187,19 @@ class NodeDescriptor:
                 "optional_inputs",
             ),
             features=_string_tuple(value.get("features"), "node features"),
+            parameters_schema=dict(value.get("parameters_schema") or {}),
+            bindings={
+                str(name): str(kind)
+                for name, kind in dict(value.get("bindings") or {}).items()
+            },
+            external_inputs={
+                str(name): dict(spec)
+                for name, spec in dict(value.get("external_inputs") or {}).items()
+            },
+            external_outputs={
+                str(name): dict(spec)
+                for name, spec in dict(value.get("external_outputs") or {}).items()
+            },
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -171,6 +210,86 @@ class NodeDescriptor:
             "outputs": dict(self.outputs),
             "optional_inputs": list(self.optional_inputs),
             "features": list(self.features),
+            "parameters_schema": dict(self.parameters_schema),
+            "bindings": dict(self.bindings),
+            "external_inputs": {
+                name: dict(spec) for name, spec in self.external_inputs.items()
+            },
+            "external_outputs": {
+                name: dict(spec) for name, spec in self.external_outputs.items()
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class SessionDescriptor:
+    """One lazily importable, pipeline-scoped provider session."""
+
+    id: str
+    factory: str
+    features: tuple[str, ...] = ()
+    parameters_schema: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _identifier(self.id, "session id"))
+        object.__setattr__(
+            self, "factory", _reference(self.factory, "session factory")
+        )
+        object.__setattr__(
+            self,
+            "features",
+            _string_tuple(self.features, "session features"),
+        )
+        object.__setattr__(self, "parameters_schema", dict(self.parameters_schema))
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "SessionDescriptor":
+        return cls(
+            id=value.get("id", ""),
+            factory=value.get("factory", ""),
+            features=_string_tuple(value.get("features"), "session features"),
+            parameters_schema=dict(value.get("parameters_schema") or {}),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "factory": self.factory,
+            "features": list(self.features),
+            "parameters_schema": dict(self.parameters_schema),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class LinkDescriptor:
+    """A provider-owned external link kind compiled outside the data plane."""
+
+    id: str
+    features: tuple[str, ...] = ()
+    parameters_schema: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _identifier(self.id, "link id"))
+        object.__setattr__(
+            self,
+            "features",
+            _string_tuple(self.features, "link features"),
+        )
+        object.__setattr__(self, "parameters_schema", dict(self.parameters_schema))
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "LinkDescriptor":
+        return cls(
+            id=value.get("id", ""),
+            features=_string_tuple(value.get("features"), "link features"),
+            parameters_schema=dict(value.get("parameters_schema") or {}),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "features": list(self.features),
+            "parameters_schema": dict(self.parameters_schema),
         }
 
 
@@ -282,18 +401,37 @@ class ProviderManifest:
     nodes: tuple[NodeDescriptor, ...] = ()
     probes: tuple[ProbeDescriptor, ...] = ()
     templates: tuple[TemplateDescriptor, ...] = ()
+    sessions: tuple[SessionDescriptor, ...] = ()
+    links: tuple[LinkDescriptor, ...] = ()
     schema: str = PROVIDER_SCHEMA
 
     def __post_init__(self) -> None:
-        if self.schema != PROVIDER_SCHEMA:
+        if self.schema not in SUPPORTED_PROVIDER_SCHEMAS:
             raise ValueError(
                 f"provider schema {self.schema!r} is unsupported; "
-                f"expected {PROVIDER_SCHEMA!r}"
+                "expected one of "
+                + ", ".join(sorted(SUPPORTED_PROVIDER_SCHEMAS))
+            )
+        if self.schema == PROVIDER_SCHEMA and (self.sessions or self.links):
+            raise ValueError(
+                "provider sessions and external links require nodrix-provider/2"
+            )
+        expected_api = (
+            PROVIDER_API_VERSION_V2
+            if self.schema == PROVIDER_SCHEMA_V2
+            else PROVIDER_API_VERSION
+        )
+        if self.metadata.provider_api != expected_api:
+            raise ValueError(
+                f"provider schema {self.schema!r} requires provider_api "
+                f"{expected_api!r}"
             )
         for field_name, values in (
             ("nodes", self.nodes),
             ("probes", self.probes),
             ("templates", self.templates),
+            ("sessions", self.sessions),
+            ("links", self.links),
         ):
             ids = [item.id for item in values]
             if len(ids) != len(set(ids)):
@@ -324,6 +462,14 @@ class ProviderManifest:
                 TemplateDescriptor.from_dict(item)
                 for item in array("templates")
             ),
+            sessions=tuple(
+                SessionDescriptor.from_dict(item)
+                for item in array("sessions")
+            ),
+            links=tuple(
+                LinkDescriptor.from_dict(item)
+                for item in array("links")
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -333,6 +479,8 @@ class ProviderManifest:
             "nodes": [item.to_dict() for item in self.nodes],
             "probes": [item.to_dict() for item in self.probes],
             "templates": [item.to_dict() for item in self.templates],
+            "sessions": [item.to_dict() for item in self.sessions],
+            "links": [item.to_dict() for item in self.links],
         }
 
 
@@ -356,11 +504,13 @@ class ProviderRuntime:
     provider_id: str
     nodes: Mapping[str, type[Any]] = field(default_factory=dict)
     probes: Mapping[str, Callable[[], Any]] = field(default_factory=dict)
+    sessions: Mapping[str, type[Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.provider_id = _identifier(self.provider_id, "provider runtime id")
         self.nodes = dict(self.nodes)
         self.probes = dict(self.probes)
+        self.sessions = dict(self.sessions)
 
 
 def negotiate_features(
@@ -384,11 +534,15 @@ def negotiate_features(
 __all__ = [
     "PROVIDER_API_VERSION",
     "PROVIDER_SCHEMA",
+    "PROVIDER_API_VERSION_V2",
+    "PROVIDER_SCHEMA_V2",
     "PROVIDER_ENTRY_POINT_GROUP",
     "ProviderMetadata",
     "NodeDescriptor",
     "ProbeDescriptor",
     "TemplateDescriptor",
+    "SessionDescriptor",
+    "LinkDescriptor",
     "ProviderManifest",
     "ProviderRuntime",
     "FeatureNegotiation",

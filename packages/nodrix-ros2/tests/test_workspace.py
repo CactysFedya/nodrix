@@ -7,7 +7,9 @@ from nodrix_ros2.workspace import (
     capture_sourced_environment,
     resolve_setup_file,
     workspace_fingerprint,
+    RosWorkspaceManager,
 )
+import pytest
 
 
 def test_setup_environment_is_captured_without_mutating_parent(tmp_path: Path) -> None:
@@ -53,3 +55,32 @@ def test_build_command_is_deterministic() -> None:
 def test_default_workspace_uses_ros_distro_underlay() -> None:
     spec = RosWorkspaceSpec.from_mapping({"distro": "jazzy"})
     assert str(spec.underlays[0]) == "/opt/ros/jazzy"
+
+
+def test_project_trust_rejects_workspace_outside_project(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    workspace = tmp_path / "outside"
+    project.mkdir()
+    workspace.mkdir()
+    spec = RosWorkspaceSpec.from_mapping(
+        {
+            "path": str(workspace),
+            "trust": "project",
+            "build": {"mode": "never"},
+        }
+    )
+    manager = RosWorkspaceManager(spec, project_dir=project)
+    with pytest.raises(PermissionError, match="outside the Nodrix project"):
+        manager.prepare()
+
+
+def test_readonly_workspace_cannot_build(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    spec = RosWorkspaceSpec.from_mapping(
+        {"path": str(workspace), "trust": "readonly"}
+    )
+    with pytest.raises(PermissionError, match="build.mode=never"):
+        RosWorkspaceManager(spec).prepare()

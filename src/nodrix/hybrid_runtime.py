@@ -27,6 +27,13 @@ from .process_host import ProcessNodeProxy, ProcessSourceProxy
 from .provenance import write_run_provenance
 from .observability import EventTracer
 from .registry import load_node_class
+from .providers import (
+    load_provider_session,
+    provider_for_link,
+    provider_for_session,
+)
+from .provider_validation import validate_provider_parameters
+from .session import SessionContext
 from .telemetry import LatencyWindow
 from .memory import MemoryPlan, MemoryRequirement, plan_memory, requirement_for_port
 from .cv_types import EncodedFrame, Frame, ManagedBuffer, Tensor
@@ -292,6 +299,14 @@ class LoadedNode:
     fallback_active: bool = False
 
 
+@dataclass(slots=True)
+class LoadedSession:
+    name: str
+    uses: str
+    instance: Any
+    opened: bool = False
+
+
 class _AsyncBridge:
     def __init__(self) -> None:
         self.loop: asyncio.AbstractEventLoop | None = None
@@ -328,6 +343,7 @@ class HybridPipelineRuntime:
         self.base_dir = self.manifest_path.parent
         self.run_root = (run_root or self.base_dir / ".nodrix" / "runs").resolve()
         self.nodes: dict[str, LoadedNode] = {}
+        self.sessions: dict[str, LoadedSession] = {}
         self.edges: list[EdgeQueue] = []
         self._start = threading.Event()
         self._stop = threading.Event()
@@ -349,6 +365,10 @@ class HybridPipelineRuntime:
         self._recording_writer: Any | None = None
         self._recording_lock = threading.Lock()
         self._recording_streams = set(self.manifest.recording.streams)
+        self._metrics_recorder: MetricsRecorder | None = None
+        self._worker_threads: list[threading.Thread] = []
+        self._watchdog_thread: threading.Thread | None = None
+        self._nodes_closed = False
 
     def _emit_event(self, kind: str, **payload: Any) -> None:
         event = {"kind": kind, "time_ns": time.time_ns(), **payload}
@@ -397,9 +417,54 @@ class HybridPipelineRuntime:
 
     def build(self) -> None:
         self.nodes.clear()
+        self.sessions.clear()
         self.edges.clear()
         self._stream_exports.clear()
         self._memory_plans.clear()
+        for name, config in self.manifest.sessions.items():
+            resolved_session = provider_for_session(
+                config.uses,
+                include_legacy=False,
+            )
+            if resolved_session is None:
+                raise RuntimeGraphError(
+                    f"Unknown provider session {config.uses!r}"
+                )
+            _candidate, session_descriptor = resolved_session
+            validate_provider_parameters(
+                session_descriptor.parameters_schema,
+                config.parameters,
+                location=f"sessions.{name}.parameters",
+            )
+            session_class = load_provider_session(config.uses)
+            if session_class is None:
+                raise RuntimeGraphError(
+                    f"Unknown provider session {config.uses!r}"
+                )
+            try:
+                instance = session_class(config.parameters)
+            except TypeError:
+                instance = session_class(parameters=config.parameters)
+            self.sessions[name] = LoadedSession(
+                name=name,
+                uses=config.uses,
+                instance=instance,
+            )
+        for index, link in enumerate(self.manifest.links):
+            resolved_link = provider_for_link(
+                link.uses,
+                include_legacy=False,
+            )
+            if resolved_link is None:
+                raise RuntimeGraphError(
+                    f"Unknown provider link {link.uses!r}"
+                )
+            _candidate, link_descriptor = resolved_link
+            validate_provider_parameters(
+                link_descriptor.parameters_schema,
+                link.parameters,
+                location=f"links[{index}].parameters",
+            )
         sample_capacity = self.manifest.runtime.telemetry_samples
         for name, config in self.manifest.nodes.items():
             validate_parameters(config.uses, config.parameters)
@@ -594,6 +659,14 @@ class HybridPipelineRuntime:
             "engine": "unified",
             "native_queue": self.native_queue_enabled,
             "type_validation": self.manifest.runtime.type_validation,
+            "sessions": {
+                name: {
+                    "uses": loaded.uses,
+                    "opened": loaded.opened,
+                    "health": self._session_health(loaded),
+                }
+                for name, loaded in self.sessions.items()
+            },
             "nodes": {
                 name: {
                     "class": f"{loaded.node.__class__.__module__}.{loaded.node.__class__.__name__}",
@@ -626,6 +699,10 @@ class HybridPipelineRuntime:
                     "memory": None if edge.memory_plan is None else edge.memory_plan.as_dict(),
                 }
                 for edge in self.edges
+            ],
+            "links": [
+                link.model_dump(by_alias=True, mode="json")
+                for link in self.manifest.links
             ],
             "streams": [
                 {key: value for key, value in item.items() if key != "token"}
@@ -756,8 +833,18 @@ class HybridPipelineRuntime:
             edge.close()
 
     def run_sync(self) -> dict[str, Any]:
+        """Run the graph and guarantee provider/control-plane cleanup."""
+
+        try:
+            return self._run_sync_impl()
+        except BaseException:
+            self._emergency_cleanup()
+            raise
+
+    def _run_sync_impl(self) -> dict[str, Any]:
         if not self.nodes:
             self.build()
+        self._nodes_closed = False
         run_dir = self._create_run_dir()
         self._run_id = run_dir.name
         tracing = self.manifest.runtime.tracing
@@ -770,6 +857,7 @@ class HybridPipelineRuntime:
         (run_dir / "logs").mkdir(exist_ok=True)
         (run_dir / "outputs").mkdir(exist_ok=True)
         self._events_path = run_dir / "events.jsonl"
+        self._open_sessions(run_dir)
         recording_path: Path | None = None
         if self.manifest.recording.enabled:
             from .recording import NdrxWriter
@@ -865,6 +953,7 @@ class HybridPipelineRuntime:
                 status_path=run_dir / "status.json",
             )
             metrics_recorder.start()
+            self._metrics_recorder = metrics_recorder
         threads = [
             threading.Thread(
                 target=self._node_worker,
@@ -874,6 +963,7 @@ class HybridPipelineRuntime:
             )
             for name, loaded in self.nodes.items()
         ]
+        self._worker_threads = threads
         for thread in threads:
             thread.start()
         while not all(node.ready.wait(0.01) for node in self.nodes.values()):
@@ -896,6 +986,7 @@ class HybridPipelineRuntime:
             self._emit_event("pipeline_running", pipeline=self.manifest.metadata.name)
         self._start.set()
         watchdog = threading.Thread(target=self._watchdog_loop, name="nodrix-watchdog", daemon=True)
+        self._watchdog_thread = watchdog
         watchdog.start()
         timeout_seconds = max(self.manifest.runtime.shutdown.timeout_ms / 1000.0, 0.0)
         interrupted = False
@@ -940,6 +1031,12 @@ class HybridPipelineRuntime:
         # Capture process RSS/CPU before isolated children and shared pools close.
         self.snapshot(max((time.perf_counter_ns() - started_ns) / 1e9, 1e-9))
         self._close_nodes()
+        self._nodes_closed = True
+        session_report = {
+            name: self._session_health(loaded)
+            for name, loaded in self.sessions.items()
+        }
+        self._close_sessions()
         if self._recording_writer is not None:
             try:
                 self._recording_writer.close()
@@ -949,6 +1046,7 @@ class HybridPipelineRuntime:
                 self._recording_writer = None
         if metrics_recorder is not None:
             metrics_recorder.close()
+            self._metrics_recorder = None
         finished_ns = time.perf_counter_ns()
         duration = (finished_ns - started_ns) / 1e9
         error = self._errors[0] if self._errors else None
@@ -979,6 +1077,7 @@ class HybridPipelineRuntime:
                 name: self._node_report(loaded, duration)
                 for name, loaded in self.nodes.items()
             },
+            "sessions": session_report,
             "edges": [edge.report() for edge in self.edges],
             "streams": stream_report,
             "recording": {
@@ -1002,9 +1101,64 @@ class HybridPipelineRuntime:
             self._tracer = None
         self._events_path = None
         self._run_started_ns = None
+        self._worker_threads = []
+        self._watchdog_thread = None
         if error is not None:
             raise error[1]
         return report
+
+    def _emergency_cleanup(self) -> None:
+        """Best-effort cleanup for failures during startup or report creation."""
+
+        self.request_stop()
+        for thread in tuple(self._worker_threads):
+            if thread.is_alive() and thread is not threading.current_thread():
+                thread.join(timeout=2.0)
+        watchdog = self._watchdog_thread
+        if (
+            watchdog is not None
+            and watchdog.is_alive()
+            and watchdog is not threading.current_thread()
+        ):
+            watchdog.join(timeout=1.0)
+        if not self._nodes_closed:
+            for loaded in reversed(tuple(self.nodes.values())):
+                if loaded.node.lifecycle_state == LifecycleState.CREATED.value:
+                    continue
+                try:
+                    loaded.node.close()
+                except BaseException:
+                    pass
+            self._nodes_closed = True
+        self._close_sessions()
+        if self._recording_writer is not None:
+            try:
+                self._recording_writer.close()
+            except BaseException:
+                pass
+            self._recording_writer = None
+        if self._metrics_recorder is not None:
+            try:
+                self._metrics_recorder.close()
+            except BaseException:
+                pass
+            self._metrics_recorder = None
+        if self._stream_publisher is not None:
+            try:
+                self._stream_publisher.close()
+            except BaseException:
+                pass
+            self._stream_publisher = None
+        if self._tracer is not None:
+            try:
+                self._tracer.close()
+            except BaseException:
+                pass
+            self._tracer = None
+        self._events_path = None
+        self._run_started_ns = None
+        self._worker_threads = []
+        self._watchdog_thread = None
 
     def _node_worker(self, loaded: LoadedNode, run_dir: Path) -> None:
         bridge = _AsyncBridge()
@@ -1016,6 +1170,16 @@ class HybridPipelineRuntime:
                 runtime_mode=self.manifest.runtime.mode,
                 engine="unified",
                 device=loaded.config.execution.device,
+                bindings={
+                    binding: self.sessions[session_name].instance
+                    for binding, session_name in loaded.config.bindings.items()
+                },
+                external_links=tuple(
+                    link.model_dump(by_alias=True, mode="json")
+                    for link in self.manifest.links
+                    if link.source.split(".", 1)[0] == loaded.name
+                    or link.target.split(".", 1)[0] == loaded.name
+                ),
             )
             bridge.resolve(loaded.node.configure(context))
             loaded.node._lifecycle.transition(LifecycleState.READY)
@@ -1080,6 +1244,79 @@ class HybridPipelineRuntime:
                 self._record_error(loaded.name, exc)
             finally:
                 bridge.close()
+
+    @staticmethod
+    def _session_health(loaded: LoadedSession) -> dict[str, Any]:
+        health = getattr(loaded.instance, "health", None)
+        if not callable(health):
+            return {"status": "ok", "open": loaded.opened}
+        try:
+            return dict(health() or {})
+        except Exception as exc:
+            return {
+                "status": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+    def _open_sessions(self, run_dir: Path) -> None:
+        bridge = _AsyncBridge()
+        opened: list[LoadedSession] = []
+        try:
+            for loaded in self.sessions.values():
+                opener = getattr(loaded.instance, "open", None)
+                if callable(opener):
+                    bridge.resolve(
+                        opener(
+                            SessionContext(
+                                name=loaded.name,
+                                run_dir=run_dir,
+                                project_dir=self.base_dir,
+                                runtime_mode=self.manifest.runtime.mode,
+                            )
+                        )
+                    )
+                loaded.opened = True
+                opened.append(loaded)
+                self._emit_event(
+                    "session_ready",
+                    session=loaded.name,
+                    uses=loaded.uses,
+                    health=self._session_health(loaded),
+                )
+        except BaseException:
+            for loaded in reversed(opened):
+                closer = getattr(loaded.instance, "close", None)
+                if callable(closer):
+                    try:
+                        bridge.resolve(closer())
+                    except Exception:
+                        pass
+                loaded.opened = False
+            raise
+        finally:
+            bridge.close()
+
+    def _close_sessions(self) -> None:
+        bridge = _AsyncBridge()
+        try:
+            for loaded in reversed(tuple(self.sessions.values())):
+                if not loaded.opened:
+                    continue
+                closer = getattr(loaded.instance, "close", None)
+                try:
+                    if callable(closer):
+                        bridge.resolve(closer())
+                    self._emit_event(
+                        "session_stopped",
+                        session=loaded.name,
+                        uses=loaded.uses,
+                    )
+                except BaseException as exc:
+                    self._record_error(loaded.name, exc)
+                finally:
+                    loaded.opened = False
+        finally:
+            bridge.close()
 
     def _run_source(self, loaded: LoadedNode, bridge: _AsyncBridge) -> None:
         produced = loaded.node.produce()

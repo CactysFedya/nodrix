@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from abc import ABC
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .cv_types import ManagedBuffer
 from .messages import Message
@@ -19,6 +19,8 @@ class NodeContext:
     runtime_mode: str
     engine: str = "unified"
     device: str = "auto"
+    bindings: Mapping[str, Any] = field(default_factory=dict)
+    external_links: tuple[Mapping[str, Any], ...] = ()
     _output_allocator: Callable[[int, bool], ManagedBuffer] | None = None
 
     def allocate_buffer(self, size: int, *, readonly: bool = False) -> ManagedBuffer:
@@ -40,6 +42,14 @@ class NodeContext:
     @property
     def has_output_allocator(self) -> bool:
         return self._output_allocator is not None
+
+    def binding(self, name: str = "session", *, required: bool = True) -> Any:
+        """Return a provider resource bound to this Node in the pipeline."""
+
+        value = self.bindings.get(name)
+        if value is None and required:
+            raise RuntimeError(f"Node {self.name!r} has no binding {name!r}")
+        return value
 
 
 class Node(ABC):

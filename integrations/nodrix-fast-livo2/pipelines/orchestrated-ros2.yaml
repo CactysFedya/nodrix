@@ -10,19 +10,28 @@ runtime:
   mode: realtime
   profile: realtime-low-latency
 
+sessions:
+  ros:
+    uses: ros2.session
+    parameters:
+      distro: ${ROS_DISTRO:-jazzy}
+      underlays:
+        - /opt/ros/${ROS_DISTRO:-jazzy}
+        - ${LIVOX_WS}
+      path: ${ROBOT_WS}
+      trust: explicit
+      build:
+        mode: if-needed
+        symlink_install: true
+        parallel_workers: auto
+        timeout_s: 1800
+
 nodes:
   livox:
     uses: ros2.launch
+    bindings:
+      session: ros
     parameters:
-      workspace:
-        distro: jazzy
-        underlays:
-          - /opt/ros/jazzy
-          - ${LIVOX_WS}
-        path: ${ROBOT_WS}
-        build:
-          mode: if-needed
-          symlink_install: true
       package: livox_ros_driver2
       launch_file: msg_MID360s_launch.py
       arguments:
@@ -31,78 +40,51 @@ nodes:
 
   fast_livo2:
     uses: ros2.launch
+    bindings:
+      session: ros
     parameters:
-      workspace:
-        distro: jazzy
-        underlays:
-          - /opt/ros/jazzy
-          - ${LIVOX_WS}
-        path: ${ROBOT_WS}
-        build:
-          mode: if-needed
-          symlink_install: true
       package: fast_livo
       launch_file: mapping.launch.py
       arguments:
         rviz: false
-      requires_topics:
-        - name: /livox/lidar
-          message_type: livox_ros_driver2/msg/CustomMsg
-        - name: /livox/imu
-          message_type: sensor_msgs/msg/Imu
       requirements_timeout_s: 30
 
   lidar_health:
     uses: ros2.topic_monitor
+    bindings:
+      session: ros
     parameters:
+      mode: graph
       topic: /livox/lidar
       message_type: livox_ros_driver2/msg/CustomMsg
-      minimum_rate_hz: 8
       startup_timeout_s: 20
-      stale_timeout_s: 2
-      qos:
-        preset: sensor_data
-        depth: 1
 
   imu_health:
     uses: ros2.topic_monitor
+    bindings:
+      session: ros
     parameters:
+      mode: graph
       topic: /livox/imu
       message_type: sensor_msgs/msg/Imu
-      minimum_rate_hz: 100
       startup_timeout_s: 20
-      stale_timeout_s: 1
-      qos:
-        preset: sensor_data
-        depth: 1
 
   registered_cloud_health:
     uses: ros2.topic_monitor
+    bindings:
+      session: ros
     parameters:
+      mode: graph
       topic: /cloud_registered
       message_type: sensor_msgs/msg/PointCloud2
-      minimum_rate_hz: 8
       startup_timeout_s: 40
-      stale_timeout_s: 2
-      qos:
-        preset: sensor_data
-        depth: 1
 
   rviz:
     uses: ros2.rviz
+    bindings:
+      session: ros
     parameters:
-      workspace:
-        distro: jazzy
-        underlays:
-          - /opt/ros/jazzy
-          - ${LIVOX_WS}
-        path: ${ROBOT_WS}
-        build:
-          mode: if-needed
       config: rviz/fast_livo2.rviz
-      requires_topics:
-        - name: /cloud_registered
-          message_type: sensor_msgs/msg/PointCloud2
       requirements_timeout_s: 45
 
   livox_status:
@@ -133,6 +115,26 @@ edges:
     to: cloud_health_status.input
   - from: rviz.status
     to: rviz_status.input
+
+links:
+  - from: livox.lidar
+    to: fast_livo2.lidar
+    uses: ros2.topic
+    parameters:
+      topic: /livox/lidar
+      message_type: livox_ros_driver2/msg/CustomMsg
+  - from: livox.imu
+    to: fast_livo2.imu
+    uses: ros2.topic
+    parameters:
+      topic: /livox/imu
+      message_type: sensor_msgs/msg/Imu
+  - from: fast_livo2.cloud_registered
+    to: rviz.cloud_registered
+    uses: ros2.topic
+    parameters:
+      topic: /cloud_registered
+      message_type: sensor_msgs/msg/PointCloud2
 
 streams: {}
 recording:

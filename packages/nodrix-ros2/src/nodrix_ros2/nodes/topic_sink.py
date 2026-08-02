@@ -17,6 +17,10 @@ class Ros2TopicSink(SinkNode):
 
     def open(self, context: Any) -> None:
         super().open(context)
+        session = context.binding("session", required=False)
+        activate = getattr(session, "activate_python_environment", None)
+        if callable(activate):
+            activate()
         topic = str(self.parameters.get("topic", "")).strip()
         message_type = str(self.parameters.get("message_type", "")).strip()
         if not topic:

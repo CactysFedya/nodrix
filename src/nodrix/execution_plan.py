@@ -16,7 +16,7 @@ EXECUTION_PLAN_SCHEMA = "nodrix.execution-plan/v1"
 def _topological_order(manifest: PipelineManifest) -> tuple[list[str], bool]:
     indegree = {name: 0 for name in manifest.nodes}
     outgoing: dict[str, list[str]] = defaultdict(list)
-    for edge in manifest.edges:
+    for edge in (*manifest.edges, *manifest.links):
         source = edge.source.split(".", 1)[0]
         target = edge.target.split(".", 1)[0]
         if source == target:
@@ -116,6 +116,7 @@ def compile_execution_plan(
                 "synchronization": config.synchronization.model_dump(mode="json"),
                 "failure": config.failure.model_dump(mode="json"),
                 "resources": config.resources.model_dump(mode="json"),
+                "bindings": dict(config.bindings),
                 "parameters": _redact(dict(config.parameters)),
             }
         )
@@ -147,10 +148,29 @@ def compile_execution_plan(
         "engine": description.get("engine", "unified"),
         "mode": manifest.runtime.mode,
         "profile": manifest.runtime.profile,
+        "sessions": [
+            {
+                "name": name,
+                "uses": config.uses,
+                "parameters": _redact(dict(config.parameters)),
+            }
+            for name, config in manifest.sessions.items()
+        ],
         "reproducible": reproducible,
         "topological_order": order,
         "nodes": nodes,
         "edges": edges,
+        "links": [
+            {
+                "ordinal": ordinal,
+                **_redact(
+                    link.model_dump(by_alias=True, exclude_none=True, mode="json")
+                ),
+                "data_plane": "external",
+                "planned_copies": 0,
+            }
+            for ordinal, link in enumerate(manifest.links)
+        ],
         "streams": [
             {
                 "name": export.name,
@@ -172,6 +192,8 @@ def compile_execution_plan(
         "summary": {
             "nodes": len(nodes),
             "edges": len(edges),
+            "links": len(manifest.links),
+            "sessions": len(manifest.sessions),
             "streams": len(manifest.streams.exports),
             "planned_copies": total_planned_copies,
         },
@@ -193,7 +215,7 @@ def validate_execution_plan(plan: dict[str, Any]) -> None:
     if not names or any(not name for name in names) or len(names) != len(set(names)):
         raise ValueError("Execution plan node names must be non-empty and unique")
     known = set(names)
-    for edge in plan.get("edges") or []:
+    for edge in [*(plan.get("edges") or []), *(plan.get("links") or [])]:
         source = str(edge.get("from", "")).split(".", 1)[0]
         target = str(edge.get("to", "")).split(".", 1)[0]
         if source not in known or target not in known:

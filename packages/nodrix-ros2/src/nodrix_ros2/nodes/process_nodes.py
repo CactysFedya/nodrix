@@ -9,7 +9,7 @@ from nodrix import Message, SourceNode
 
 from ..commands import build_ros2_launch_command, build_ros2_run_command, build_rviz_command
 from ..process import ManagedProcess
-from ..workspace import RosWorkspaceManager, RosWorkspaceSpec, WorkspacePreparation
+from ..workspace import RosWorkspaceManager, RosWorkspaceSpec
 
 
 def _context_log_directory(context: Any) -> Path:
@@ -55,14 +55,41 @@ class _Ros2ProcessSource(SourceNode):
         self._closed = False
         self._sequence = 0
         self._context = context
+        self._session = context.binding("session", required=False)
         workspace_value = self.parameters.get("workspace")
         if workspace_value is not None and not isinstance(workspace_value, Mapping):
             raise TypeError("parameters.workspace must be a mapping")
-        self._workspace = RosWorkspaceManager(
-            RosWorkspaceSpec.from_mapping(workspace_value)
-        ).prepare()
-        self._command = self.command_builder(self.parameters)
         log_directory = _context_log_directory(context)
+        if self._session is not None:
+            preparation = getattr(self._session, "preparation", None)
+            if preparation is None:
+                raise RuntimeError("Bound ROS 2 session is not prepared")
+            self._workspace = preparation
+        else:
+            self._workspace = RosWorkspaceManager(
+                RosWorkspaceSpec.from_mapping(workspace_value),
+                project_dir=Path(context.project_dir),
+                log_directory=log_directory,
+            ).prepare()
+        effective_parameters = dict(self.parameters)
+        if self.process_kind == "ros2.node":
+            remappings = dict(effective_parameters.get("remappings") or {})
+            for link in context.external_links:
+                if str(link.get("uses")) != "ros2.topic":
+                    continue
+                parameters = dict(link.get("parameters") or {})
+                topic = str(parameters.get("topic", "")).strip()
+                if not topic:
+                    continue
+                source_node, source_port = str(link.get("from", "")).split(".", 1)
+                target_node, target_port = str(link.get("to", "")).split(".", 1)
+                if source_node == context.name:
+                    remappings.setdefault(source_port, topic)
+                if target_node == context.name:
+                    remappings.setdefault(target_port, topic)
+            if remappings:
+                effective_parameters["remappings"] = remappings
+        self._command = self.command_builder(effective_parameters)
         name = str(getattr(context, "name", self.process_kind)).replace("/", "_")
         cwd_value = self.parameters.get("cwd")
         if cwd_value:
@@ -80,7 +107,12 @@ class _Ros2ProcessSource(SourceNode):
             environment=self._workspace.environment,
             stdout_path=log_directory / f"{name}.stdout.log",
             stderr_path=log_directory / f"{name}.stderr.log",
+            max_log_bytes=int(self.parameters.get("maximum_log_bytes", 50 * 1024 * 1024)),
+            log_rotations=int(self.parameters.get("log_rotations", 3)),
         )
+        register = getattr(self._session, "register_process", None)
+        if callable(register):
+            register(self._process)
         self._started = False
 
     def _requirements(self) -> tuple[dict[str, Any], ...]:
@@ -93,6 +125,21 @@ class _Ros2ProcessSource(SourceNode):
                 result.append(dict(item))
             else:
                 raise TypeError("requires_topics entries must be strings or mappings")
+        for link in self._context.external_links:
+            if str(link.get("uses")) != "ros2.topic":
+                continue
+            target_node = str(link.get("to", "")).split(".", 1)[0]
+            if target_node != self._context.name:
+                continue
+            parameters = dict(link.get("parameters") or {})
+            topic = str(parameters.get("topic", "")).strip()
+            if topic:
+                result.append(
+                    {
+                        "name": topic,
+                        "message_type": str(parameters.get("message_type", "")),
+                    }
+                )
         return tuple(result)
 
     def _wait_requirements(self) -> None:
@@ -100,6 +147,14 @@ class _Ros2ProcessSource(SourceNode):
         if not requirements:
             return
         timeout = max(float(self.parameters.get("requirements_timeout_s", 30.0)), 0.1)
+        graph = getattr(self._session, "graph", None)
+        if graph is not None:
+            graph.wait_topics(
+                requirements,
+                timeout_s=timeout,
+                cancelled=lambda: self._closed,
+            )
+            return
         interval = max(float(self.parameters.get("requirements_poll_s", 0.25)), 0.05)
         deadline = time.monotonic() + timeout
         while not self._closed:
@@ -143,6 +198,12 @@ class _Ros2ProcessSource(SourceNode):
                 "uptime_s": snapshot.uptime_s,
                 "workspace_built": self._workspace.built,
                 "workspace_fingerprint": self._workspace.fingerprint,
+                "command_sha256": snapshot.command_sha256,
+                "session": (
+                    None
+                    if self._session is None
+                    else str(getattr(getattr(self._session, "context", None), "name", "ros"))
+                ),
             }
             yield {
                 "status": Message(
@@ -189,6 +250,9 @@ class _Ros2ProcessSource(SourceNode):
                 interrupt_timeout_s=float(self.parameters.get("interrupt_timeout_s", 8.0)),
                 terminate_timeout_s=float(self.parameters.get("terminate_timeout_s", 3.0)),
             )
+            unregister = getattr(self._session, "unregister_process", None)
+            if callable(unregister):
+                unregister(process)
 
 
 class Ros2NodeProcess(_Ros2ProcessSource):

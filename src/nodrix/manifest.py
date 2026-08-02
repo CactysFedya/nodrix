@@ -230,6 +230,13 @@ class NodeMemoryConfig(StrictModel):
     outputs: dict[str, Any] = Field(default_factory=dict)
 
 
+class SessionConfig(StrictModel):
+    """One provider-owned resource shared by multiple pipeline Nodes."""
+
+    uses: str = Field(min_length=1)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+
 class NodeConfig(StrictModel):
     uses: str = Field(min_length=1)
     parameters: dict[str, Any] = Field(default_factory=dict)
@@ -241,6 +248,7 @@ class NodeConfig(StrictModel):
     health: HealthConfig = Field(default_factory=HealthConfig)
     resources: ResourceConfig = Field(default_factory=ResourceConfig)
     memory: NodeMemoryConfig = Field(default_factory=NodeMemoryConfig)
+    bindings: dict[str, str] = Field(default_factory=dict)
     placement: str | None = None
 
 
@@ -260,6 +268,30 @@ class EdgeConfig(StrictModel):
         for field_name, ref in (("from", self.source), ("to", self.target)):
             if ref.count(".") < 1:
                 raise ValueError(f"{field_name} must be in node.port form: {ref!r}")
+        return self
+
+
+class ExternalLinkConfig(StrictModel):
+    """A control-plane link compiled by an optional integration provider.
+
+    Unlike ``edges``, external links do not create a Nodrix queue or move a
+    payload through the Nodrix runtime.  A provider can use them to describe
+    DDS topics, broker routes, service bindings, or equivalent external data
+    paths while keeping the ordinary node.port notation.
+    """
+
+    source: str = Field(alias="from")
+    target: str = Field(alias="to")
+    uses: str = Field(min_length=1)
+    parameters: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_refs(self) -> "ExternalLinkConfig":
+        for field_name, ref in (("from", self.source), ("to", self.target)):
+            if ref.count(".") < 1:
+                raise ValueError(
+                    f"external link {field_name} must use node.port: {ref!r}"
+                )
         return self
 
 
@@ -307,8 +339,10 @@ class PipelineManifest(StrictModel):
     kind: Literal["Pipeline"] = "Pipeline"
     metadata: MetadataConfig
     runtime: RuntimeConfig = Field(default_factory=RuntimeConfig)
+    sessions: dict[str, SessionConfig] = Field(default_factory=dict)
     nodes: dict[str, NodeConfig]
     edges: list[EdgeConfig]
+    links: list[ExternalLinkConfig] = Field(default_factory=list)
     streams: StreamsConfig = Field(default_factory=StreamsConfig)
     fragments: dict[str, FragmentConfig] = Field(default_factory=dict)
     recording: RecordingConfig = Field(default_factory=RecordingConfig)
@@ -363,9 +397,47 @@ class PipelineManifest(StrictModel):
                     )
         if not self.nodes:
             raise ValueError("At least one node is required")
+        if self.sessions and self.runtime.engine == "native":
+            raise ValueError(
+                "Pipeline sessions require runtime.engine: unified"
+            )
+        for name in self.sessions:
+            if not name or not name.strip() or "." in name:
+                raise ValueError(
+                    f"Session name must be non-empty and cannot contain '.': {name!r}"
+                )
         for name in self.nodes:
-            if "." in name:
-                raise ValueError(f"Node name cannot contain '.': {name!r}")
+            if not name or not name.strip() or "." in name:
+                raise ValueError(
+                    f"Node name must be non-empty and cannot contain '.': {name!r}"
+                )
+        for node_name, node in self.nodes.items():
+            if any(not name.strip() for name in node.bindings):
+                raise ValueError(
+                    f"Node {node_name!r} contains an empty binding name"
+                )
+            unknown = sorted(set(node.bindings.values()) - set(self.sessions))
+            if unknown:
+                raise ValueError(
+                    f"Node {node_name!r} references unknown sessions: "
+                    + ", ".join(unknown)
+                )
+            if node.bindings and node.execution.isolation != "in_process":
+                raise ValueError(
+                    f"Node {node_name!r} uses session bindings and must run "
+                    "in_process"
+                )
+        for link in self.links:
+            source_name = link.source.split(".", 1)[0]
+            target_name = link.target.split(".", 1)[0]
+            unknown_nodes = sorted(
+                {source_name, target_name} - set(self.nodes)
+            )
+            if unknown_nodes:
+                raise ValueError(
+                    "External link references unknown nodes: "
+                    + ", ".join(unknown_nodes)
+                )
         stream_names: set[str] = set()
         for export in self.streams.exports:
             if export.name in stream_names:
@@ -376,7 +448,8 @@ class PipelineManifest(StrictModel):
 
 _NODE_RESERVED = {
     "use", "uses", "parameters", "inputs", "outputs", "synchronization",
-    "execution", "failure", "health", "resources", "memory", "placement",
+    "execution", "failure", "health", "resources", "memory", "bindings",
+    "placement",
 }
 
 
@@ -397,7 +470,7 @@ def canonical_config_path(dotted: str, node_names: Iterable[str] | None = None) 
         parts.insert(0, "nodes")
     if len(parts) >= 3 and parts[0] == "nodes" and parts[2] not in {
         "uses", "parameters", "inputs", "outputs", "synchronization", "execution",
-        "failure", "health", "resources", "memory",
+        "failure", "health", "resources", "memory", "bindings",
     }:
         parts.insert(2, "parameters")
     return ".".join(parts)
@@ -521,8 +594,10 @@ def _normalize_compact(
         "kind": raw.get("kind", "Pipeline"),
         "metadata": {"name": name},
         "runtime": deepcopy(raw.get("runtime") or {}),
+        "sessions": deepcopy(raw.get("sessions") or {}),
         "nodes": {},
         "edges": [],
+        "links": deepcopy(raw.get("links") or []),
         "streams": deepcopy(raw.get("streams") or {}),
         "fragments": deepcopy(raw.get("fragments") or {}),
         "recording": deepcopy(raw.get("recording") or {}),

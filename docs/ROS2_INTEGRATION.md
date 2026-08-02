@@ -1,35 +1,92 @@
 # ROS 2 integration
 
-ROS 2 is an adapter, not a Core dependency. `ros2.source` subscribes to a topic
-and `ros2.sink` publishes Nodrix messages:
+ROS 2 is an optional Provider API 2 package, not a Core dependency. Existing
+ROS launch files, drivers, SLAM algorithms, and RViz configurations can be
+supervised directly; an algorithm-specific Nodrix plugin is unnecessary.
+
+## Shared session
+
+Use one `ros2.session` per compatible ROS environment. It sources underlays,
+builds an overlay once when needed, owns supervised processes, and starts one
+persistent ROS graph worker only when graph information is requested.
 
 ```yaml
-nodes:
-  camera:
-    uses: ros2.source
+sessions:
+  ros:
+    uses: ros2.session
     parameters:
-      topic: /camera/image
-      message_type: sensor_msgs.msg.Image
-      reliability: best_effort
-      durability: volatile
-      depth: 1
-      map_timestamp: true
+      distro: jazzy
+      underlays: [/opt/ros/jazzy]
+      path: ${ROBOT_WS}
+      trust: explicit
+      build:
+        mode: if-needed
+        symlink_install: true
+        timeout_s: 1800
+
+nodes:
+  driver:
+    use: ros2.launch
+    bindings: {session: ros}
+    package: example_driver
+    launch_file: driver.launch.py
 ```
 
-`message_type` may be `Image`, `CompressedImage`, `PointCloud2`,
-`Detection2DArray`, or another installed ROS message class. Nodrix imports
-`rclpy` only when the adapter opens, so non-ROS deployments do not install or
-initialize ROS.
+`if-needed` fingerprints source metadata and content policy together with the
+underlay setup files, colcon command, compiler/toolchain identity, Python, and
+selected environment. An inter-process lock prevents concurrent Nodrix runs
+from building the same workspace at once. Every process has separate bounded,
+rotated stdout and stderr logs and shuts down with
+`SIGINT → SIGTERM → SIGKILL` fallback.
 
-For custom conversions, set `mapper` to `module.Symbol`. Source mappers receive
-the ROS message; sink mappers receive a Nodrix `Message`. Without a mapper,
-standard ROS fields are converted recursively and header timestamps are mapped
-from `timestamp_ns`.
+## External topic links
 
-QoS parameters map reliability, durability, and queue depth explicitly. The ROS
-environment and generated message packages remain the operator's responsibility.
+`ros2.topic` links express ROS dependencies without creating a Nodrix data
+queue:
 
-The 2.0 adapters are generic Python mappings. They do not claim ROS 2 loaned
-messages, intra-process image zero-copy, or a zero-copy `PointCloud2` fast path.
-Use a target-specific native package when those properties are required; the
-stable Plugin C ABI and memory-domain contracts are the integration boundary.
+```yaml
+links:
+  - from: driver.lidar
+    to: slam.lidar
+    uses: ros2.topic
+    parameters:
+      topic: /lidar/points
+      message_type: sensor_msgs/msg/PointCloud2
+```
+
+An incoming link delays the dependent supervised process until a publisher of
+the declared type appears. For `ros2.node`, logical ports can also become ROS
+remappings. The execution plan marks these links as external with zero planned
+Nodrix copies.
+
+## Monitoring modes
+
+- `graph` checks type and publisher presence through the shared worker and does
+  not subscribe to or deserialize payloads;
+- `sample` creates a subscription and measures arrival rate/staleness;
+- `statistics` is reserved for middleware statistics and currently reports
+  availability explicitly while using graph state.
+
+Use `graph` for large PointCloud2 readiness checks. Use `sample` only when the
+rate measurement is worth the subscription and deserialization cost.
+
+## Explicit bridges
+
+`ros2.topic_source` and `ros2.topic_sink` handle generic small messages. Install
+`nodrix-spatial-ros2` for typed PointCloud2, IMU, and Odometry sources:
+
+```bash
+python -m pip install nodrix-ros2
+python -m pip install nodrix-spatial-ros2  # optional
+```
+
+The PointCloud2 adapter retains and wraps the Python ROS message buffer without
+another adapter-level list conversion or byte copy. This does not claim
+end-to-end DDS loaned-message zero-copy: `rclpy` may already have deserialized
+the middleware sample.
+
+Generate the maintained project shape with:
+
+```bash
+nodrix init my-robot --template ros2
+```

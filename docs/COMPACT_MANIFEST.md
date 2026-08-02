@@ -33,6 +33,28 @@ Rules:
 - `publish` becomes `streams.exports`.
 - `access: token` uses `NODRIX_STREAM_TOKEN` unless `token_env` is explicitly supplied.
 - Canonical and compact manifests can coexist in one repository.
+- Optional `sessions`, node `bindings`, and external `links` keep their normal
+  Provider API 2 shape; only local queue edges use the `flow` shorthand.
+
+```yaml
+sessions:
+  ros:
+    uses: ros2.session
+    parameters: {distro: jazzy}
+nodes:
+  driver:
+    use: ros2.launch
+    bindings: {session: ros}
+    package: demo_driver
+    launch_file: driver.launch.py
+links:
+  - from: driver.points
+    to: mapping.points
+    uses: ros2.topic
+    parameters:
+      topic: /points
+      message_type: sensor_msgs/msg/PointCloud2
+```
 
 Inspect the exact canonical form:
 

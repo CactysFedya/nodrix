@@ -22,24 +22,31 @@ from .errors import (
 )
 from .manifest import (
     EdgeConfig,
+    ExternalLinkConfig,
     NodeConfig,
     PipelineManifest,
     QueueConfig,
+    SessionConfig,
     load_manifest,
     load_manifest_details,
     load_fragment,
 )
 from .shared_memory import SharedBufferDescriptor, SharedBufferPool
 from .node import Node, NodeContext, SinkNode, SourceNode
+from .session import Session, SessionContext
 from .lifecycle import HealthStatus, LifecycleState
 from .wire import register_wire_codec
 from .provider_api import (
     PROVIDER_API_VERSION,
     PROVIDER_ENTRY_POINT_GROUP,
     PROVIDER_SCHEMA,
+    PROVIDER_API_VERSION_V2,
+    PROVIDER_SCHEMA_V2,
     FeatureNegotiation,
     NodeDescriptor,
     ProbeDescriptor,
+    SessionDescriptor,
+    LinkDescriptor,
     ProviderManifest,
     ProviderMetadata,
     ProviderRuntime,
@@ -53,6 +60,8 @@ __all__ = [
     "NodeContext",
     "SourceNode",
     "SinkNode",
+    "Session",
+    "SessionContext",
     "BufferPool",
     "SharedBufferPool",
     "SharedBufferDescriptor",
@@ -74,7 +83,9 @@ __all__ = [
     "PipelineManifest",
     "NodeConfig",
     "EdgeConfig",
+    "ExternalLinkConfig",
     "QueueConfig",
+    "SessionConfig",
     "load_manifest",
     "load_manifest_details",
     "load_fragment",
@@ -86,9 +97,13 @@ __all__ = [
     "PROVIDER_API_VERSION",
     "PROVIDER_ENTRY_POINT_GROUP",
     "PROVIDER_SCHEMA",
+    "PROVIDER_API_VERSION_V2",
+    "PROVIDER_SCHEMA_V2",
     "ProviderMetadata",
     "NodeDescriptor",
     "ProbeDescriptor",
+    "SessionDescriptor",
+    "LinkDescriptor",
     "TemplateDescriptor",
     "ProviderManifest",
     "ProviderRuntime",

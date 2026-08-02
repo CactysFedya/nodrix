@@ -28,6 +28,7 @@ be pinned by the deployment because upstream variants differ.
 python -m pip install -e packages/nodrix-spatial --no-deps
 python -m pip install -e packages/nodrix-mapping --no-deps
 python -m pip install -e packages/nodrix-ros2 --no-deps
+python -m pip install -e packages/nodrix-spatial-ros2 --no-deps  # only for typed bridges
 ```
 
 ## Run
@@ -39,6 +40,7 @@ nodrix validate integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml
 nodrix run integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml
 ```
 
-`nodrix-ros2` captures ROS setup environments for child processes and performs
-`colcon build --symlink-install` only when the overlay source fingerprint has
-changed.
+`nodrix-ros2` prepares one shared session for the complete graph, then performs
+`colcon build --symlink-install` only when the source, underlay, toolchain or
+build command identity has changed. The default health nodes use graph mode,
+so PointCloud2 payloads are not deserialized merely to check readiness.

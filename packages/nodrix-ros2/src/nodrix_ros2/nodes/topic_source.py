@@ -6,7 +6,6 @@ from typing import Any, Callable
 
 from nodrix import Message, SourceNode
 
-from ..adapters import imu_to_frame, odometry_to_frame, point_cloud2_to_frame
 from ..common import (
     load_ros_message_type,
     message_frame_id,
@@ -17,7 +16,7 @@ from ..context import RosNodeLease, shared_ros_runtime
 from ..qos import build_qos_profile
 
 
-class _TopicSourceBase(SourceNode):
+class Ros2TopicSourceBase(SourceNode):
     output_types = {"output": "core.any"}
     output_port = "output"
     nodrix_type = "core.object"
@@ -26,6 +25,10 @@ class _TopicSourceBase(SourceNode):
 
     def open(self, context: Any) -> None:
         super().open(context)
+        session = context.binding("session", required=False)
+        activate = getattr(session, "activate_python_environment", None)
+        if callable(activate):
+            activate()
         topic = str(self.parameters.get("topic", "")).strip()
         if not topic:
             raise ValueError(f"{type(self).__name__} requires parameters.topic")
@@ -145,7 +148,7 @@ class _TopicSourceBase(SourceNode):
         self._lease = None
 
 
-class Ros2TopicSource(_TopicSourceBase):
+class Ros2TopicSource(Ros2TopicSourceBase):
     """Generic source for small ROS messages or an explicit custom mapper."""
 
     output_types = {"output": "core.any"}
@@ -153,31 +156,6 @@ class Ros2TopicSource(_TopicSourceBase):
     nodrix_type = "core.object"
 
 
-class Ros2PointCloud2Source(_TopicSourceBase):
-    """Typed PointCloud2 source preserving the ROS data buffer by reference."""
-
-    output_types = {"cloud": "spatial.point_cloud/v1"}
-    output_port = "cloud"
-    nodrix_type = "spatial.point_cloud/v1"
-    default_message_type = "sensor_msgs/msg/PointCloud2"
-    adapter = staticmethod(point_cloud2_to_frame)
-
-
-class Ros2OdometrySource(_TopicSourceBase):
-    """Typed nav_msgs/Odometry source."""
-
-    output_types = {"odometry": "spatial.odometry/v1"}
-    output_port = "odometry"
-    nodrix_type = "spatial.odometry/v1"
-    default_message_type = "nav_msgs/msg/Odometry"
-    adapter = staticmethod(odometry_to_frame)
-
-
-class Ros2ImuSource(_TopicSourceBase):
-    """Typed sensor_msgs/Imu source."""
-
-    output_types = {"imu": "spatial.imu/v1"}
-    output_port = "imu"
-    nodrix_type = "spatial.imu/v1"
-    default_message_type = "sensor_msgs/msg/Imu"
-    adapter = staticmethod(imu_to_frame)
+# Compatibility for alpha.1/alpha.2 extensions that subclassed the private
+# base before it became a public bridge SDK surface.
+_TopicSourceBase = Ros2TopicSourceBase

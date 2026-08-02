@@ -26,6 +26,29 @@ All nine sections shown above are explicit and required. Unknown fields are
 rejected. `runtime.engine` must be `unified` or `native`; v2 does not make an
 implicit executor choice.
 
+Provider API 2 integrations may add optional `sessions` and `links` without
+changing the meaning of the nine stable sections:
+
+```yaml
+sessions:
+  bus:
+    uses: example.session
+    parameters: {}
+nodes:
+  source:
+    uses: example.source
+    bindings: {session: bus}
+links:
+  - from: source.events
+    to: sink.events
+    uses: example.topic
+    parameters: {topic: /events}
+```
+
+Bindings currently require `runtime.engine: unified` and in-process Nodes.
+External links do not allocate a Nodrix queue or transfer a payload through
+Core.
+
 ## Compatibility
 
 - Nodrix 2.x continues to read `nodrix.dev/v1` pipelines.

@@ -9,12 +9,32 @@ on:
       - "packages/**"
       - "integrations/**"
       - "tests/test_v220_provider_discovery.py"
+      - "tests/test_v220_sessions.py"
+      - "src/nodrix/cli.py"
+      - "src/nodrix/execution_plan.py"
+      - "src/nodrix/hybrid_runtime.py"
+      - "src/nodrix/manifest.py"
+      - "src/nodrix/node.py"
+      - "src/nodrix/process_host.py"
+      - "src/nodrix/provider*.py"
+      - "src/nodrix/session.py"
+      - "scripts/*modular_ros2*"
       - ".github/workflows/modular-packages.yml"
   pull_request:
     paths:
       - "packages/**"
       - "integrations/**"
       - "tests/test_v220_provider_discovery.py"
+      - "tests/test_v220_sessions.py"
+      - "src/nodrix/cli.py"
+      - "src/nodrix/execution_plan.py"
+      - "src/nodrix/hybrid_runtime.py"
+      - "src/nodrix/manifest.py"
+      - "src/nodrix/node.py"
+      - "src/nodrix/process_host.py"
+      - "src/nodrix/provider*.py"
+      - "src/nodrix/session.py"
+      - "scripts/*modular_ros2*"
       - ".github/workflows/modular-packages.yml"
   workflow_dispatch:
 
@@ -40,15 +60,19 @@ jobs:
           python -m pip install -e packages/nodrix-spatial --no-deps
           python -m pip install -e packages/nodrix-mapping --no-deps
           python -m pip install -e packages/nodrix-ros2 --no-deps
+          python -m pip install -e packages/nodrix-spatial-ros2 --no-deps
           python -m pip install build twine
 
       - name: Test Provider API and package contracts
         run: |
           python -m pytest -q \
+            tests/test_v210.py \
             tests/test_v220_provider_discovery.py \
+            tests/test_v220_sessions.py \
             packages/nodrix-spatial/tests \
             packages/nodrix-mapping/tests \
-            packages/nodrix-ros2/tests
+            packages/nodrix-ros2/tests \
+            packages/nodrix-spatial-ros2/tests
 
       - name: Validate provider discovery and ROS graphs
         env:
@@ -59,16 +83,22 @@ jobs:
           nodrix provider info nodrix.spatial
           nodrix provider info nodrix.mapping
           nodrix provider info nodrix.ros2
+          nodrix provider info nodrix.ros2.spatial
           nodrix validate integrations/nodrix-fast-livo2/pipelines/input.yaml
           nodrix validate integrations/nodrix-fast-livo2/pipelines/generic-topic-smoke.yaml
           nodrix validate integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml
+          template_root="$(mktemp -d)"
+          nodrix init "${template_root}/ros2-project" --template ros2
+          nodrix validate "${template_root}/ros2-project/pipeline.yaml"
 
       - name: Build independent distributions
         run: |
           python -m build packages/nodrix-spatial --outdir dist/nodrix-spatial
           python -m build packages/nodrix-mapping --outdir dist/nodrix-mapping
           python -m build packages/nodrix-ros2 --outdir dist/nodrix-ros2
+          python -m build packages/nodrix-spatial-ros2 --outdir dist/nodrix-spatial-ros2
           python -m twine check \
             dist/nodrix-spatial/* \
             dist/nodrix-mapping/* \
-            dist/nodrix-ros2/*
+            dist/nodrix-ros2/* \
+            dist/nodrix-spatial-ros2/*

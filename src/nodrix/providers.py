@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import shutil
 import threading
 import time
 from typing import Any, Iterable, Mapping
@@ -23,11 +24,14 @@ from . import __version__
 from .errors import ProviderError
 from .provider_api import (
     PROVIDER_ENTRY_POINT_GROUP,
+    LinkDescriptor,
     NodeDescriptor,
     ProbeDescriptor,
     ProviderManifest,
     ProviderMetadata,
     ProviderRuntime,
+    SessionDescriptor,
+    TemplateDescriptor,
     negotiate_features,
 )
 
@@ -40,6 +44,10 @@ CORE_PROVIDER_FEATURES = frozenset(
         "ndrx2",
         "native-runner",
         "provider-api.1",
+        "provider-api.2",
+        "provider-sessions.1",
+        "external-links.1",
+        "provider-templates.1",
     }
 )
 MAX_PROVIDER_METADATA_BYTES = 1024 * 1024
@@ -919,6 +927,7 @@ def verify_candidate(
     candidate: ProviderCandidate,
     *,
     policy: ProviderPolicy | None = None,
+    available_features: Iterable[str] | None = None,
 ) -> ProviderVerification:
     selected_policy = policy or ProviderPolicy.from_environment()
     errors: list[str] = []
@@ -955,7 +964,12 @@ def verify_candidate(
             f"provider requires Nodrix {metadata.requires_nodrix}, "
             f"runtime is {__version__}"
         )
-    negotiation = negotiate_features(metadata, CORE_PROVIDER_FEATURES)
+    negotiation = negotiate_features(
+        metadata,
+        _installed_provider_features()
+        if available_features is None
+        else frozenset(available_features),
+    )
     if negotiation.missing:
         errors.append(
             "provider requires unavailable features: "
@@ -1041,12 +1055,47 @@ def verify_provider(
     )
 
 
+def _installed_provider_features(
+    candidates: Iterable[ProviderCandidate] | None = None,
+) -> frozenset[str]:
+    """Return Core capabilities plus capabilities advertised by installed providers.
+
+    This keeps feature negotiation metadata-first: optional packages can depend
+    on another provider capability without importing either distribution.
+    Broken or duplicate candidates never contribute capabilities.
+    """
+
+    available = set(CORE_PROVIDER_FEATURES)
+    selected = (
+        discover_providers(include_legacy=True)
+        if candidates is None
+        else tuple(candidates)
+    )
+    for item in selected:
+        if item.error is not None or item.metadata is None:
+            continue
+        try:
+            compatible = Version(__version__) in SpecifierSet(
+                item.metadata.requires_nodrix
+            )
+        except (InvalidSpecifier, InvalidVersion):
+            compatible = False
+        if compatible:
+            available.update(item.metadata.features)
+    return frozenset(available)
+
+
 def provider_record(
     candidate: ProviderCandidate,
     *,
     policy: ProviderPolicy | None = None,
+    available_features: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    verification = verify_candidate(candidate, policy=policy)
+    verification = verify_candidate(
+        candidate,
+        policy=policy,
+        available_features=available_features,
+    )
     metadata = candidate.metadata
     return {
         "id": candidate.id,
@@ -1077,6 +1126,14 @@ def provider_record(
             [] if candidate.manifest is None
             else [item.to_dict() for item in candidate.manifest.templates]
         ),
+        "sessions": (
+            [] if candidate.manifest is None
+            else [item.to_dict() for item in candidate.manifest.sessions]
+        ),
+        "links": (
+            [] if candidate.manifest is None
+            else [item.to_dict() for item in candidate.manifest.links]
+        ),
         "metadata_path": (
             None
             if candidate.metadata_path is None
@@ -1097,12 +1154,18 @@ def provider_records(
     include_legacy: bool = True,
     paths: Iterable[str | os.PathLike[str]] | None = None,
 ) -> list[dict[str, Any]]:
+    candidates = discover_providers(
+        include_legacy=include_legacy,
+        paths=paths,
+    )
+    available = _installed_provider_features(candidates)
     return [
-        provider_record(candidate, policy=policy)
-        for candidate in discover_providers(
-            include_legacy=include_legacy,
-            paths=paths,
+        provider_record(
+            candidate,
+            policy=policy,
+            available_features=available,
         )
+        for candidate in candidates
     ]
 
 
@@ -1133,6 +1196,7 @@ def _runtime_from_entry_point(candidate: ProviderCandidate) -> ProviderRuntime:
                 ),
                 nodes=dict(produced.get("nodes") or {}),
                 probes=dict(produced.get("probes") or {}),
+                sessions=dict(produced.get("sessions") or {}),
             )
         else:
             try:
@@ -1140,6 +1204,7 @@ def _runtime_from_entry_point(candidate: ProviderCandidate) -> ProviderRuntime:
                     provider_id=str(produced.provider_id),
                     nodes=dict(produced.nodes),
                     probes=dict(produced.probes),
+                    sessions=dict(getattr(produced, "sessions", {})),
                 )
             except (AttributeError, TypeError, ValueError) as exc:
                 raise ProviderError(
@@ -1154,12 +1219,15 @@ def _runtime_from_entry_point(candidate: ProviderCandidate) -> ProviderRuntime:
     assert candidate.manifest is not None
     declared_nodes = {item.id for item in candidate.manifest.nodes}
     declared_probes = {item.id for item in candidate.manifest.probes}
+    declared_sessions = {item.id for item in candidate.manifest.sessions}
     undeclared_nodes = sorted(set(runtime.nodes) - declared_nodes)
     undeclared_probes = sorted(set(runtime.probes) - declared_probes)
-    if undeclared_nodes or undeclared_probes:
+    undeclared_sessions = sorted(set(runtime.sessions) - declared_sessions)
+    if undeclared_nodes or undeclared_probes or undeclared_sessions:
         raise ProviderError(
             "Provider runtime attempted to register undeclared ids; "
-            f"nodes={undeclared_nodes}, probes={undeclared_probes}"
+            f"nodes={undeclared_nodes}, probes={undeclared_probes}, "
+            f"sessions={undeclared_sessions}"
         )
     return runtime
 
@@ -1257,10 +1325,211 @@ def load_provider_node(node_id: str) -> type[Any] | None:
     return value
 
 
+def provider_for_session(
+    session_id: str,
+    *,
+    include_legacy: bool = False,
+) -> tuple[ProviderCandidate, SessionDescriptor] | None:
+    matches: list[tuple[ProviderCandidate, SessionDescriptor]] = []
+    for candidate in discover_providers(include_legacy=include_legacy):
+        if candidate.manifest is None:
+            continue
+        for descriptor in candidate.manifest.sessions:
+            if descriptor.id == session_id:
+                matches.append((candidate, descriptor))
+    if not matches:
+        return None
+    if len(matches) != 1:
+        providers = ", ".join(candidate.id for candidate, _ in matches)
+        raise ProviderError(
+            f"Session id {session_id!r} is declared by multiple providers: "
+            f"{providers}"
+        )
+    candidate, descriptor = matches[0]
+    if candidate.error:
+        raise ProviderError(
+            f"Provider {candidate.id!r} was rejected: {candidate.error}"
+        )
+    return candidate, descriptor
+
+
+def load_provider_session(session_id: str) -> type[Any] | None:
+    resolved = provider_for_session(session_id, include_legacy=False)
+    if resolved is None:
+        return None
+    candidate, descriptor = resolved
+    loaded = load_provider(candidate.id, include_legacy=False)
+    value = loaded.runtime.sessions.get(session_id)
+    if value is None:
+        value = _load_symbol(descriptor.factory)
+    if not isinstance(value, type):
+        raise ProviderError(
+            f"Provider session factory {descriptor.factory!r} did not resolve "
+            "to a class"
+        )
+    return value
+
+
+def provider_for_link(
+    link_id: str,
+    *,
+    include_legacy: bool = False,
+) -> tuple[ProviderCandidate, LinkDescriptor] | None:
+    matches: list[tuple[ProviderCandidate, LinkDescriptor]] = []
+    for candidate in discover_providers(include_legacy=include_legacy):
+        if candidate.manifest is None:
+            continue
+        for descriptor in candidate.manifest.links:
+            if descriptor.id == link_id:
+                matches.append((candidate, descriptor))
+    if not matches:
+        return None
+    if len(matches) != 1:
+        providers = ", ".join(candidate.id for candidate, _ in matches)
+        raise ProviderError(
+            f"Link id {link_id!r} is declared by multiple providers: {providers}"
+        )
+    return matches[0]
+
+
+def provider_for_template(
+    template_id: str,
+    *,
+    include_legacy: bool = False,
+) -> tuple[ProviderCandidate, TemplateDescriptor] | None:
+    matches: list[tuple[ProviderCandidate, TemplateDescriptor]] = []
+    for candidate in discover_providers(include_legacy=include_legacy):
+        if candidate.manifest is None:
+            continue
+        for descriptor in candidate.manifest.templates:
+            if descriptor.id == template_id:
+                matches.append((candidate, descriptor))
+    if not matches:
+        return None
+    if len(matches) != 1:
+        providers = ", ".join(candidate.id for candidate, _ in matches)
+        raise ProviderError(
+            f"Template id {template_id!r} is declared by multiple providers: "
+            f"{providers}"
+        )
+    candidate, descriptor = matches[0]
+    if candidate.error:
+        raise ProviderError(
+            f"Provider {candidate.id!r} was rejected: {candidate.error}"
+        )
+    return candidate, descriptor
+
+
+def provider_template_ids() -> tuple[str, ...]:
+    result: set[str] = set()
+    duplicates: set[str] = set()
+    for candidate in discover_providers(include_legacy=False):
+        if candidate.error is not None or candidate.manifest is None:
+            continue
+        for descriptor in candidate.manifest.templates:
+            if descriptor.id in result:
+                duplicates.add(descriptor.id)
+            result.add(descriptor.id)
+    return tuple(sorted(result - duplicates))
+
+
+def create_provider_project(
+    directory: str | Path,
+    template_id: str,
+    *,
+    force: bool = False,
+) -> list[Path]:
+    """Copy a provider-owned project template without importing its package."""
+
+    resolved = provider_for_template(template_id, include_legacy=False)
+    if resolved is None:
+        raise ProviderError(f"Provider template {template_id!r} is not installed")
+    candidate, descriptor = resolved
+    verification = verify_candidate(candidate)
+    if verification.errors:
+        raise ProviderError(
+            f"Provider {candidate.id!r} was rejected: "
+            + "; ".join(verification.errors)
+        )
+    if candidate.metadata_path is None:
+        raise ProviderError(
+            f"Provider {candidate.id!r} has no template resource location"
+        )
+    relative = Path(descriptor.source)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ProviderError(
+            f"Provider template {template_id!r} has an unsafe source path"
+        )
+    package_root = candidate.metadata_path.parent.resolve()
+    source = (package_root / relative).resolve()
+    if package_root != source and package_root not in source.parents:
+        raise ProviderError(
+            f"Provider template {template_id!r} escapes its package"
+        )
+    if not source.is_dir() or source.is_symlink():
+        raise ProviderError(
+            f"Provider template {template_id!r} is not a regular directory"
+        )
+
+    target_root = Path(directory).expanduser().resolve()
+    target_root.mkdir(parents=True, exist_ok=True)
+    created: list[Path] = []
+    for item in sorted(source.rglob("*")):
+        if item.is_symlink():
+            raise ProviderError(
+                f"Provider template {template_id!r} contains a symbolic link: "
+                f"{item.relative_to(source)}"
+            )
+        relative_item = item.relative_to(source)
+        target = target_root / relative_item
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            resolved_target = target.resolve()
+            if (
+                resolved_target != target_root
+                and target_root not in resolved_target.parents
+            ):
+                raise ProviderError(
+                    f"Provider template target escapes through a symbolic link: "
+                    f"{target}"
+                )
+            continue
+        if not item.is_file():
+            raise ProviderError(
+                f"Provider template {template_id!r} contains a non-file entry"
+            )
+        if target.is_symlink():
+            raise ProviderError(
+                f"Refusing to write a provider template through a symbolic link: "
+                f"{target}"
+            )
+        if target.exists() and not force:
+            raise FileExistsError(
+                f"Refusing to overwrite existing template file: {target}"
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        resolved_parent = target.parent.resolve()
+        if (
+            resolved_parent != target_root
+            and target_root not in resolved_parent.parents
+        ):
+            raise ProviderError(
+                f"Provider template target escapes through a symbolic link: "
+                f"{target.parent}"
+            )
+        shutil.copyfile(item, target)
+        source_mode = item.stat().st_mode
+        target.chmod(0o755 if source_mode & stat.S_IXUSR else 0o644)
+        created.append(target)
+    return created
+
+
 def verify_provider_nodes(
     references: Iterable[str],
     *,
     policy: ProviderPolicy,
+    session_references: Iterable[str] = (),
+    link_references: Iterable[str] = (),
 ) -> list[ProviderVerification]:
     """Verify every external provider referenced by a pipeline before import."""
 
@@ -1270,8 +1539,50 @@ def verify_provider_nodes(
         if resolved is not None:
             candidate, _descriptor = resolved
             selected[candidate.id] = candidate
+    for reference in session_references:
+        resolved_session = provider_for_session(reference, include_legacy=False)
+        if resolved_session is not None:
+            candidate, _descriptor = resolved_session
+            selected[candidate.id] = candidate
+    for reference in link_references:
+        resolved_link = provider_for_link(reference, include_legacy=False)
+        if resolved_link is not None:
+            candidate, _descriptor = resolved_link
+            selected[candidate.id] = candidate
+    if policy.production:
+        # A selected provider may import contracts or services supplied by
+        # another provider. Verify every installed provider that advertises a
+        # required non-Core capability before any selected entry point imports.
+        candidates = discover_providers(include_legacy=False)
+        changed = True
+        while changed:
+            changed = False
+            required = {
+                feature
+                for candidate in selected.values()
+                if candidate.metadata is not None
+                for feature in candidate.metadata.requires_features
+                if feature not in CORE_PROVIDER_FEATURES
+            }
+            for candidate in candidates:
+                if (
+                    candidate.id in selected
+                    or candidate.error is not None
+                    or candidate.metadata is None
+                    or not required.intersection(candidate.metadata.features)
+                ):
+                    continue
+                selected[candidate.id] = candidate
+                changed = True
+    available = _installed_provider_features(
+        discover_providers(include_legacy=True)
+    )
     verifications = [
-        verify_candidate(candidate, policy=policy)
+        verify_candidate(
+            candidate,
+            policy=policy,
+            available_features=available,
+        )
         for candidate in selected.values()
     ]
     failures = [
@@ -1402,7 +1713,13 @@ __all__ = [
     "provider_records",
     "load_provider",
     "load_provider_node",
+    "load_provider_session",
     "provider_for_node",
+    "provider_for_session",
+    "provider_for_link",
+    "provider_for_template",
+    "provider_template_ids",
+    "create_provider_project",
     "verify_provider_nodes",
     "run_provider_probe",
     "reset_provider_cache",
