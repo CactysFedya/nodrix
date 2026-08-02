@@ -4,7 +4,7 @@ include CONTRIBUTING.md SECURITY.md SUPPORT.md CODE_OF_CONDUCT.md CITATION.cff
 recursive-include docs *.md
 recursive-include examples *.py *.cpp *.yaml *.yml *.toml *.json *.md
 recursive-include benchmarks *.yaml *.yml *.md
-recursive-include tests *.py
+recursive-include tests *.py *.json
 recursive-include src/nodrix/native *.h *.hpp *.cpp CMakeLists.txt
 recursive-include wiki *.md
 recursive-include scripts *.py *.sh

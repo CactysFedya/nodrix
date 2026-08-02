@@ -9,6 +9,11 @@ from .nodes import (
 )
 from .provider import provider
 from .session import Ros2Session
+from .applications import (
+    Ros2LaunchApplication,
+    Ros2NodeApplication,
+    Ros2RvizApplication,
+)
 from .workspace import RosBuildSpec, RosWorkspaceManager, RosWorkspaceSpec
 
 
@@ -36,7 +41,10 @@ __all__ = [
     "Ros2TopicSource",
     "Ros2TopicSink",
     "Ros2Session",
+    "Ros2LaunchApplication",
+    "Ros2NodeApplication",
+    "Ros2RvizApplication",
     "provider",
 ]
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"

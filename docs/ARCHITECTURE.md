@@ -34,9 +34,11 @@ Nodrix Core
 | Graph | Resolved executable structure |
 | Node | Processing component |
 | Port | Typed input or output |
-| Edge | Local connection between ports |
-| Session | Provider resource shared for one pipeline run |
-| Link | External connection that creates no local data queue |
+| Edge | Logical connection between ports |
+| Transport | Physical/local/external mechanism used by an Edge |
+| Resource | Provider-owned dependency shared for one pipeline run |
+| Session | 2.x-compatible specialized Resource |
+| Application | Supervised external work outside the Nodrix data plane |
 | Stream | Named output available to other processes/devices |
 | Runtime | Graph executor and transport system |
 
@@ -249,21 +251,23 @@ An optional platform provider may manage its own workspace through a Session;
 for example, `nodrix-ros2` prepares one colcon overlay per pipeline rather than
 once per Node.
 
-## Integration sessions and external links
+## Integration resources, applications, and transports
 
 Provider API 2 keeps external systems out of the hot data plane:
 
 ```text
-Provider Session
+Provider Resource / Session
 ├── environment / connection pool / graph watcher
-├── supervised integration Nodes
-└── external Links (DDS topics, broker routes, services)
+├── managed Applications
+└── Edge Transports (DDS topics, broker routes, services)
 ```
 
-Normal `edges` still carry typed Nodrix messages through bounded queues.
-External `links` express dependencies, routing, or remapping owned by an
-integration provider. They appear in the resolved plan with zero planned
-Nodrix copies. The same contract is transport-neutral and is not tied to ROS 2.
+An Edge is always the logical connection. Without an explicit `transport`, it
+carries typed Nodrix messages through a bounded local queue. With a provider
+Transport, it expresses external routing or remapping and appears in the
+resolved plan with zero planned Nodrix copies. `Session` and top-level `links`
+remain compatibility vocabulary through 2.x; new providers can use the generic
+`Resource`, `Application`, and `Transport` contracts. None is tied to ROS 2.
 
 ## Intentional limitations after 0.6.0
 

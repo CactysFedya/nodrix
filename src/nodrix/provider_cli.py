@@ -137,6 +137,16 @@ def provider_info_command(
         table.add_row("probe", probe["id"], probe["callable"])
     for session in record["sessions"]:
         table.add_row("session", session["id"], session["factory"])
+    for resource in record["resources"]:
+        table.add_row("resource", resource["id"], resource["factory"])
+    for application in record["applications"]:
+        table.add_row(
+            "application",
+            application["id"],
+            application["factory"],
+        )
+    for transport in record["transports"]:
+        table.add_row("transport", transport["id"], "edge transport")
     for link in record["links"]:
         table.add_row("link", link["id"], "external compiler binding")
     for template in record["templates"]:

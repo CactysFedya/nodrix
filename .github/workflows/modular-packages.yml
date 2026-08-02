@@ -129,7 +129,7 @@ jobs:
             dist/nodrix-ros2/*.whl \
             dist/nodrix-spatial-ros2/*.whl
           wheel-smoke/bin/python -c \
-            "import nodrix_ros2; assert nodrix_ros2.__version__ == '0.3.1'"
+            "import nodrix_ros2; assert nodrix_ros2.__version__ == '0.4.0'"
           wheel-smoke/bin/nodrix provider info nodrix.ros2
           wheel-smoke/bin/nodrix provider info nodrix.ros2.spatial
 

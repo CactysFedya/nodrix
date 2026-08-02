@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
   "nodrix>=2.2.0a3,<3",
   "nodrix-spatial>=0.1,<0.2",
-  "nodrix-ros2>=0.3,<0.4",
+  "nodrix-ros2>=0.3,<0.5",
 ]
 readme = "README.md"
 license = {text = "Apache-2.0"}

@@ -26,7 +26,7 @@ sessions:
         parallel_workers: auto
         timeout_s: 1800
 
-nodes:
+applications:
   livox:
     uses: ros2.launch
     bindings:
@@ -36,7 +36,6 @@ nodes:
       launch_file: msg_MID360s_launch.py
       arguments:
         rviz_enable: false
-      heartbeat_interval_s: 1.0
 
   fast_livo2:
     uses: ros2.launch
@@ -49,6 +48,15 @@ nodes:
         rviz: false
       requirements_timeout_s: 30
 
+  rviz:
+    uses: ros2.rviz
+    bindings:
+      session: ros
+    parameters:
+      config: rviz/fast_livo2.rviz
+      requirements_timeout_s: 45
+
+nodes:
   lidar_health:
     uses: ros2.topic_monitor
     bindings:
@@ -79,37 +87,30 @@ nodes:
       message_type: sensor_msgs/msg/PointCloud2
       startup_timeout_s: 40
 
-  rviz:
-    uses: ros2.rviz
-    bindings:
-      session: ros
-    parameters:
-      config: rviz/fast_livo2.rviz
-      requirements_timeout_s: 45
-
 fragments: {}
 
-edges: []
-
-links:
+edges:
   - from: livox.lidar
     to: fast_livo2.lidar
-    uses: ros2.topic
-    parameters:
-      topic: /livox/lidar
-      message_type: livox_ros_driver2/msg/CustomMsg
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /livox/lidar
+        message_type: livox_ros_driver2/msg/CustomMsg
   - from: livox.imu
     to: fast_livo2.imu
-    uses: ros2.topic
-    parameters:
-      topic: /livox/imu
-      message_type: sensor_msgs/msg/Imu
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /livox/imu
+        message_type: sensor_msgs/msg/Imu
   - from: fast_livo2.cloud_registered
     to: rviz.cloud_registered
-    uses: ros2.topic
-    parameters:
-      topic: /cloud_registered
-      message_type: sensor_msgs/msg/PointCloud2
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /cloud_registered
+        message_type: sensor_msgs/msg/PointCloud2
 
 streams: {}
 recording:

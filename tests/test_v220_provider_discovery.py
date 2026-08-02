@@ -139,6 +139,26 @@ def test_external_provider_replaces_legacy_provider_id(
     assert ros2[0].distribution == "editable-provider"
 
 
+def test_provider_path_environment_limits_metadata_discovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _editable_provider(
+        tmp_path,
+        provider_id="acme.environment",
+        node_id="acme.environment_node",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setenv("NODRIX_PROVIDER_PATH", str(tmp_path))
+
+    candidates = discover_providers(include_legacy=False)
+
+    assert [candidate.id for candidate in candidates] == [
+        "acme.environment"
+    ]
+    assert candidates[0].error is None
+
+
 def test_node_resolver_uses_deduplicated_editable_provider(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

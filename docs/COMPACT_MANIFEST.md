@@ -8,11 +8,11 @@ profile: realtime-low-latency
 
 nodes:
   camera:
-    use: media.ffmpeg_source
+    uses: media.ffmpeg_source
     uri: ${RTSP_URL}
 
   encoder:
-    use: media.ffmpeg_encoder
+    uses: media.ffmpeg_encoder
     codec: h264
     encoder: auto
 
@@ -27,33 +27,42 @@ publish:
 
 Rules:
 
-- `use` is the compact alias of `uses`.
+- `uses` is canonical. The old `use` spelling remains readable in Nodrix 2.x
+  and is reported as deprecated by validation.
 - Node keys other than lifecycle/execution fields become `parameters`.
 - `flow` accepts `source.port -> target.port` strings or full edge mappings.
 - `publish` becomes `streams.exports`.
 - `access: token` uses `NODRIX_STREAM_TOKEN` unless `token_env` is explicitly supplied.
 - Canonical and compact manifests can coexist in one repository.
-- Optional `sessions`, node `bindings`, and external `links` keep their normal
-  Provider API 2 shape; only local queue edges use the `flow` shorthand.
+- Optional `sessions`, `resources`, `applications`, bindings, and transported
+  Edges keep their normal Provider API 2 shape; only local queue edges use the
+  `flow` shorthand.
 
 ```yaml
 sessions:
   ros:
     uses: ros2.session
     parameters: {distro: jazzy}
-nodes:
+applications:
   driver:
-    use: ros2.launch
+    uses: ros2.launch
     bindings: {session: ros}
     package: demo_driver
     launch_file: driver.launch.py
-links:
+  mapping:
+    uses: ros2.launch
+    bindings: {session: ros}
+    package: demo_mapping
+    launch_file: mapping.launch.py
+nodes: {}
+edges:
   - from: driver.points
     to: mapping.points
-    uses: ros2.topic
-    parameters:
-      topic: /points
-      message_type: sensor_msgs/msg/PointCloud2
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /points
+        message_type: sensor_msgs/msg/PointCloud2
 ```
 
 Inspect the exact canonical form:

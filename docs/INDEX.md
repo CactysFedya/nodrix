@@ -1,4 +1,4 @@
-# Nodrix 2.1 documentation
+# Nodrix 2.x documentation
 
 - Architecture: `ARCHITECTURE.md`
 - Manifest v2 and migration: `MANIFEST_V2.md`, `MIGRATION_2.0.md`
@@ -13,4 +13,5 @@
   `../benchmarks/PERFORMANCE_GATES.md`
 - Production and observability: `PRODUCTION_RUNTIME.md`, `OBSERVABILITY.md`
 - ROS 2 and platforms: `ROS2_INTEGRATION.md`, `PLATFORM_CAPABILITIES.md`
-- Release notes: `RELEASE_2.2.0-alpha.3.md`, `RELEASE_2.1.0.md`, `RELEASE_2.0.0.md`
+- Release notes: `RELEASE_2.2.0-alpha.4.md`, `RELEASE_2.2.0-alpha.3.md`,
+  `RELEASE_2.1.0.md`, `RELEASE_2.0.0.md`

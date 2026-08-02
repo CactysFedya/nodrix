@@ -261,6 +261,129 @@ class SessionDescriptor:
 
 
 @dataclass(frozen=True, slots=True)
+class ResourceDescriptor:
+    """One lazily importable pipeline-scoped managed resource.
+
+    ``SessionDescriptor`` remains supported throughout Nodrix 2.x.  New
+    providers should prefer this transport-neutral name when the object is not
+    specifically a connection/session.
+    """
+
+    id: str
+    factory: str
+    features: tuple[str, ...] = ()
+    parameters_schema: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _identifier(self.id, "resource id"))
+        object.__setattr__(
+            self,
+            "factory",
+            _reference(self.factory, "resource factory"),
+        )
+        object.__setattr__(
+            self,
+            "features",
+            _string_tuple(self.features, "resource features"),
+        )
+        object.__setattr__(self, "parameters_schema", dict(self.parameters_schema))
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ResourceDescriptor":
+        return cls(
+            id=value.get("id", ""),
+            factory=value.get("factory", ""),
+            features=_string_tuple(value.get("features"), "resource features"),
+            parameters_schema=dict(value.get("parameters_schema") or {}),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "factory": self.factory,
+            "features": list(self.features),
+            "parameters_schema": dict(self.parameters_schema),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ApplicationDescriptor:
+    """One externally managed application supplied by a provider."""
+
+    id: str
+    factory: str
+    features: tuple[str, ...] = ()
+    parameters_schema: dict[str, Any] = field(default_factory=dict)
+    bindings: dict[str, str] = field(default_factory=dict)
+    external_inputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    external_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "id", _identifier(self.id, "application id"))
+        object.__setattr__(
+            self,
+            "factory",
+            _reference(self.factory, "application factory"),
+        )
+        object.__setattr__(
+            self,
+            "features",
+            _string_tuple(self.features, "application features"),
+        )
+        object.__setattr__(self, "parameters_schema", dict(self.parameters_schema))
+        object.__setattr__(
+            self,
+            "bindings",
+            {str(name): str(kind) for name, kind in self.bindings.items()},
+        )
+        for field_name in ("external_inputs", "external_outputs"):
+            value = getattr(self, field_name)
+            normalized = {str(name): dict(spec) for name, spec in value.items()}
+            if any(not name for name in normalized):
+                raise ValueError(f"{field_name} contains an empty port")
+            object.__setattr__(self, field_name, normalized)
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, Any]) -> "ApplicationDescriptor":
+        return cls(
+            id=value.get("id", ""),
+            factory=value.get("factory", ""),
+            features=_string_tuple(
+                value.get("features"),
+                "application features",
+            ),
+            parameters_schema=dict(value.get("parameters_schema") or {}),
+            bindings={
+                str(name): str(kind)
+                for name, kind in dict(value.get("bindings") or {}).items()
+            },
+            external_inputs={
+                str(name): dict(spec)
+                for name, spec in dict(value.get("external_inputs") or {}).items()
+            },
+            external_outputs={
+                str(name): dict(spec)
+                for name, spec in dict(value.get("external_outputs") or {}).items()
+            },
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "factory": self.factory,
+            "features": list(self.features),
+            "parameters_schema": dict(self.parameters_schema),
+            "bindings": dict(self.bindings),
+            "external_inputs": {
+                name: dict(spec) for name, spec in self.external_inputs.items()
+            },
+            "external_outputs": {
+                name: dict(spec) for name, spec in self.external_outputs.items()
+            },
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class LinkDescriptor:
     """A provider-owned external link kind compiled outside the data plane."""
 
@@ -291,6 +414,11 @@ class LinkDescriptor:
             "features": list(self.features),
             "parameters_schema": dict(self.parameters_schema),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class TransportDescriptor(LinkDescriptor):
+    """Transport backend attached to a logical pipeline Edge."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -402,6 +530,9 @@ class ProviderManifest:
     probes: tuple[ProbeDescriptor, ...] = ()
     templates: tuple[TemplateDescriptor, ...] = ()
     sessions: tuple[SessionDescriptor, ...] = ()
+    resources: tuple[ResourceDescriptor, ...] = ()
+    applications: tuple[ApplicationDescriptor, ...] = ()
+    transports: tuple[TransportDescriptor, ...] = ()
     links: tuple[LinkDescriptor, ...] = ()
     schema: str = PROVIDER_SCHEMA
 
@@ -412,9 +543,16 @@ class ProviderManifest:
                 "expected one of "
                 + ", ".join(sorted(SUPPORTED_PROVIDER_SCHEMAS))
             )
-        if self.schema == PROVIDER_SCHEMA and (self.sessions or self.links):
+        if self.schema == PROVIDER_SCHEMA and (
+            self.sessions
+            or self.resources
+            or self.applications
+            or self.transports
+            or self.links
+        ):
             raise ValueError(
-                "provider sessions and external links require nodrix-provider/2"
+                "provider sessions, resources, applications, and external "
+                "links require nodrix-provider/2"
             )
         expected_api = (
             PROVIDER_API_VERSION_V2
@@ -431,6 +569,9 @@ class ProviderManifest:
             ("probes", self.probes),
             ("templates", self.templates),
             ("sessions", self.sessions),
+            ("resources", self.resources),
+            ("applications", self.applications),
+            ("transports", self.transports),
             ("links", self.links),
         ):
             ids = [item.id for item in values]
@@ -466,6 +607,18 @@ class ProviderManifest:
                 SessionDescriptor.from_dict(item)
                 for item in array("sessions")
             ),
+            resources=tuple(
+                ResourceDescriptor.from_dict(item)
+                for item in array("resources")
+            ),
+            applications=tuple(
+                ApplicationDescriptor.from_dict(item)
+                for item in array("applications")
+            ),
+            transports=tuple(
+                TransportDescriptor.from_dict(item)
+                for item in array("transports")
+            ),
             links=tuple(
                 LinkDescriptor.from_dict(item)
                 for item in array("links")
@@ -480,6 +633,9 @@ class ProviderManifest:
             "probes": [item.to_dict() for item in self.probes],
             "templates": [item.to_dict() for item in self.templates],
             "sessions": [item.to_dict() for item in self.sessions],
+            "resources": [item.to_dict() for item in self.resources],
+            "applications": [item.to_dict() for item in self.applications],
+            "transports": [item.to_dict() for item in self.transports],
             "links": [item.to_dict() for item in self.links],
         }
 
@@ -505,12 +661,16 @@ class ProviderRuntime:
     nodes: Mapping[str, type[Any]] = field(default_factory=dict)
     probes: Mapping[str, Callable[[], Any]] = field(default_factory=dict)
     sessions: Mapping[str, type[Any]] = field(default_factory=dict)
+    resources: Mapping[str, type[Any]] = field(default_factory=dict)
+    applications: Mapping[str, type[Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         self.provider_id = _identifier(self.provider_id, "provider runtime id")
         self.nodes = dict(self.nodes)
         self.probes = dict(self.probes)
         self.sessions = dict(self.sessions)
+        self.resources = dict(self.resources)
+        self.applications = dict(self.applications)
 
 
 def negotiate_features(
@@ -542,7 +702,10 @@ __all__ = [
     "ProbeDescriptor",
     "TemplateDescriptor",
     "SessionDescriptor",
+    "ResourceDescriptor",
+    "ApplicationDescriptor",
     "LinkDescriptor",
+    "TransportDescriptor",
     "ProviderManifest",
     "ProviderRuntime",
     "FeatureNegotiation",

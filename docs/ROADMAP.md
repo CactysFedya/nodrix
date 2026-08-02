@@ -12,6 +12,15 @@ Manifest v2, the Python Node API, Plugin C ABI 2, existing Node ids,
 remain supported throughout 2.x. Published tags are immutable; release fixes
 use patch versions.
 
+## Current alpha sequence
+
+- **2.2.0-alpha.4 — Core Boundaries:** generic Resources, Applications, and
+  Edge Transports; canonical schema/migration; internal module boundaries.
+- **Next:** physically extract remaining domain implementations only after
+  package APIs and compatibility shims are characterized. ROS services,
+  actions, TF2, lifecycle components, and native/loaned-message bridges remain
+  separate provider milestones with target-host qualification.
+
 ## Milestones
 
 - **2.0 — Universal Runtime Core:** stable graph runtime, native/plugin data

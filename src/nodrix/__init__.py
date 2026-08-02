@@ -23,10 +23,13 @@ from .errors import (
 from .manifest import (
     EdgeConfig,
     ExternalLinkConfig,
+    ApplicationConfig,
     NodeConfig,
     PipelineManifest,
     QueueConfig,
     SessionConfig,
+    ProviderResourceConfig,
+    TransportConfig,
     load_manifest,
     load_manifest_details,
     load_fragment,
@@ -34,6 +37,12 @@ from .manifest import (
 from .shared_memory import SharedBufferDescriptor, SharedBufferPool
 from .node import Node, NodeContext, SinkNode, SourceNode
 from .session import Session, SessionContext
+from .integration import (
+    ApplicationContext,
+    ManagedApplication,
+    ManagedResource,
+    ResourceContext,
+)
 from .lifecycle import HealthStatus, LifecycleState
 from .wire import register_wire_codec
 from .provider_api import (
@@ -46,7 +55,10 @@ from .provider_api import (
     NodeDescriptor,
     ProbeDescriptor,
     SessionDescriptor,
+    ResourceDescriptor,
+    ApplicationDescriptor,
     LinkDescriptor,
+    TransportDescriptor,
     ProviderManifest,
     ProviderMetadata,
     ProviderRuntime,
@@ -62,6 +74,10 @@ __all__ = [
     "SinkNode",
     "Session",
     "SessionContext",
+    "ApplicationContext",
+    "ManagedApplication",
+    "ManagedResource",
+    "ResourceContext",
     "BufferPool",
     "SharedBufferPool",
     "SharedBufferDescriptor",
@@ -84,8 +100,11 @@ __all__ = [
     "NodeConfig",
     "EdgeConfig",
     "ExternalLinkConfig",
+    "ApplicationConfig",
     "QueueConfig",
     "SessionConfig",
+    "ProviderResourceConfig",
+    "TransportConfig",
     "load_manifest",
     "load_manifest_details",
     "load_fragment",
@@ -103,7 +122,10 @@ __all__ = [
     "NodeDescriptor",
     "ProbeDescriptor",
     "SessionDescriptor",
+    "ResourceDescriptor",
+    "ApplicationDescriptor",
     "LinkDescriptor",
+    "TransportDescriptor",
     "TemplateDescriptor",
     "ProviderManifest",
     "ProviderRuntime",
@@ -111,4 +133,4 @@ __all__ = [
     "negotiate_features",
 ]
 
-__version__ = "2.2.0a3"
+__version__ = "2.2.0a4"

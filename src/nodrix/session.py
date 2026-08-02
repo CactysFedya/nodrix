@@ -9,36 +9,19 @@ provider-specific code to Nodrix Core.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Mapping
 
-
-@dataclass(frozen=True, slots=True)
-class SessionContext:
-    name: str
-    run_dir: Path
-    project_dir: Path
-    runtime_mode: str
+from .integration import ManagedResource, ResourceContext
 
 
-class Session:
-    """Base class for one pipeline-scoped provider resource."""
+SessionContext = ResourceContext
+
+
+class Session(ManagedResource):
+    """Compatibility name for a pipeline-scoped managed resource."""
 
     def __init__(self, parameters: Mapping[str, Any] | None = None) -> None:
-        self.parameters = dict(parameters or {})
-        self.context: SessionContext | None = None
-
-    def open(self, context: SessionContext) -> Any:
-        self.context = context
-        return None
-
-    def close(self) -> Any:
-        self.context = None
-        return None
-
-    def health(self) -> dict[str, Any]:
-        return {"status": "ok", "open": self.context is not None}
+        super().__init__(parameters)
 
 
 __all__ = ["Session", "SessionContext"]
