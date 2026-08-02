@@ -9,6 +9,7 @@ from typing import Any
 
 import yaml
 
+from .branding import MANIFEST_API_V1, MANIFEST_API_V2
 from .manifest import PipelineManifest, load_manifest_details
 
 
@@ -92,14 +93,14 @@ def prepare_v2_manifest(source: str | Path) -> tuple[dict[str, Any], list[dict[s
                 "reason": "Canonical provider reference field",
             }
         )
-    old_api = canonical.get("apiVersion", "nodrix.dev/v1")
-    canonical["apiVersion"] = "nodrix.dev/v2"
+    old_api = canonical.get("apiVersion", MANIFEST_API_V1)
+    canonical["apiVersion"] = MANIFEST_API_V2
     if old_api != canonical["apiVersion"]:
         changes.append(
             {
                 "path": "apiVersion",
                 "from": str(old_api),
-                "to": "nodrix.dev/v2",
+                "to": MANIFEST_API_V2,
                 "reason": "Stable Manifest v2 contract",
             }
         )

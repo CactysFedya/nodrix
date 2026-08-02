@@ -215,7 +215,7 @@ class DiscoveryAdvertiser:
         self.endpoint_port = int(endpoint_port)
         self.streams = streams
         if endpoint_scheme not in {"nodrix", "nodrix+tls"}:
-            raise ValueError(f"Unsupported Nodrix endpoint scheme: {endpoint_scheme}")
+            raise ValueError(f"Unsupported Plyctl endpoint scheme: {endpoint_scheme}")
         self.endpoint_scheme = endpoint_scheme
         self.interval = max(0.2, float(interval))
         self.instance_id = uuid.uuid4().hex
@@ -349,8 +349,8 @@ def discover_streams(timeout: float = 1.2, name: str | None = None) -> list[Disc
 def resolve_stream(name: str, timeout: float = 3.0) -> DiscoveredStream:
     streams = discover_streams(timeout=timeout, name=name)
     if not streams:
-        raise LookupError(f"Nodrix stream not found on LAN: {name}")
+        raise LookupError(f"Plyctl stream not found on LAN: {name}")
     if len(streams) > 1:
         endpoints = ", ".join(item.endpoint for item in streams)
-        raise LookupError(f"Multiple Nodrix streams named {name!r}; use an explicit URI: {endpoints}")
+        raise LookupError(f"Multiple Plyctl streams named {name!r}; use an explicit URI: {endpoints}")
     return streams[0]

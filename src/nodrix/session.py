@@ -4,7 +4,7 @@ Sessions keep expensive control-plane resources (workspace preparation,
 connections, graph watchers, process registries) out of individual Nodes.
 They are deliberately small and transport-neutral so optional providers can
 implement ROS 2, MQTT, Kafka, Zenoh, or other integrations without adding
-provider-specific code to Nodrix Core.
+provider-specific code to Plyctl Core.
 """
 
 from __future__ import annotations

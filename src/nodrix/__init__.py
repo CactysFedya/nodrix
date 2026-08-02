@@ -1,4 +1,4 @@
-"""Nodrix Core public SDK."""
+"""Legacy-compatible import path for the Plyctl public SDK."""
 
 from .buffers import BufferPool
 from .cv_types import ManagedBuffer, MemoryType, register_message_type
@@ -16,6 +16,7 @@ from .messages import Message
 from .errors import (
     ManifestError,
     NodrixError,
+    PlyctlError,
     PluginError,
     ProviderError,
     RuntimeGraphError,
@@ -51,6 +52,10 @@ from .provider_api import (
     PROVIDER_SCHEMA,
     PROVIDER_API_VERSION_V2,
     PROVIDER_SCHEMA_V2,
+    PLYCTL_PROVIDER_ENTRY_POINT_GROUP,
+    PLYCTL_PROVIDER_SCHEMA,
+    PLYCTL_PROVIDER_SCHEMA_V2,
+    SUPPORTED_PROVIDER_ENTRY_POINT_GROUPS,
     FeatureNegotiation,
     NodeDescriptor,
     ProbeDescriptor,
@@ -65,6 +70,7 @@ from .provider_api import (
     TemplateDescriptor,
     negotiate_features,
 )
+from .branding import MANIFEST_API_V1, MANIFEST_API_V2
 
 __all__ = [
     "Message",
@@ -109,6 +115,7 @@ __all__ = [
     "load_manifest_details",
     "load_fragment",
     "NodrixError",
+    "PlyctlError",
     "ManifestError",
     "PluginError",
     "ProviderError",
@@ -118,6 +125,12 @@ __all__ = [
     "PROVIDER_SCHEMA",
     "PROVIDER_API_VERSION_V2",
     "PROVIDER_SCHEMA_V2",
+    "PLYCTL_PROVIDER_ENTRY_POINT_GROUP",
+    "PLYCTL_PROVIDER_SCHEMA",
+    "PLYCTL_PROVIDER_SCHEMA_V2",
+    "SUPPORTED_PROVIDER_ENTRY_POINT_GROUPS",
+    "MANIFEST_API_V1",
+    "MANIFEST_API_V2",
     "ProviderMetadata",
     "NodeDescriptor",
     "ProbeDescriptor",
@@ -133,4 +146,4 @@ __all__ = [
     "negotiate_features",
 ]
 
-__version__ = "2.2.0a4"
+__version__ = "2.2.0a5"

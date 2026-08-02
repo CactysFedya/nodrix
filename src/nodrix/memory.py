@@ -7,7 +7,7 @@ from typing import Any, Mapping, Sequence
 
 
 class DLPackDeviceType(IntEnum):
-    """Subset of the DLPack DLDeviceType ABI used by Nodrix."""
+    """Subset of the DLPack DLDeviceType ABI used by Plyctl."""
 
     CPU = 1
     CUDA = 2
@@ -48,7 +48,7 @@ class DmaBufPlane:
 class DmaBufHandle:
     """Linux DMA-BUF descriptor.
 
-    Nodrix owns duplicated file descriptors when ``owns_fds`` is true. The
+    Plyctl owns duplicated file descriptors when ``owns_fds`` is true. The
     descriptor can be imported by a V4L2, DRM, VAAPI, Vulkan, CUDA or vendor
     backend without first materialising a CPU array.
     """
@@ -159,7 +159,7 @@ class MemoryRequirement:
                 access=MemoryAccess(value.get("access", "read")),
                 contiguous=bool(value.get("contiguous", True)),
             )
-        raise TypeError(f"Unsupported Nodrix memory requirement: {value!r}")
+        raise TypeError(f"Unsupported Plyctl memory requirement: {value!r}")
 
     def accepts(self, memory_type: str) -> bool:
         return "any" in self.allowed or memory_type in self.allowed

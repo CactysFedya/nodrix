@@ -223,6 +223,7 @@ def doctor_report(
         "mode": "deep" if deep else "safe",
         "production": production,
         "runtime": {
+            "plyctl": __version__,
             "nodrix": __version__,
             "python": platform.python_version(),
             "implementation": platform.python_implementation(),

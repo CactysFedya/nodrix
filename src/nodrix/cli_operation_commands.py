@@ -485,7 +485,7 @@ def view(
     headless: Annotated[bool, typer.Option("--headless")] = False,
     max_frames: Annotated[int, typer.Option("--max-frames", min=0)] = 0,
 ) -> None:
-    """Open the low-latency Nodrix Viewer."""
+    """Open the low-latency Plyctl Viewer."""
     from .viewer import ViewerError, run_viewer
 
     try:

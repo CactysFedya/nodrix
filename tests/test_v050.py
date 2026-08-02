@@ -30,7 +30,7 @@ def test_init_creates_populated_runnable_project(tmp_path: Path) -> None:
     assert (project / "nodes/sink.py").read_text().strip()
     assert (project / "tests/test_nodes.py").read_text().strip()
     manifest = load_manifest(project / "pipeline.yaml")
-    assert manifest.api_version == "nodrix.dev/v2"
+    assert manifest.api_version == "plyctl.dev/v2"
     assert manifest.streams.exports[0].name == "/demo/values"
 
 

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Validate Nodrix release metadata and repository cleanliness."""
+"""Validate Plyctl release metadata and repository cleanliness."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -34,17 +35,34 @@ def check_versions() -> list[str]:
             r'NODRIX_RELEASE_VERSION\s+"([^"]+)"',
             ROOT / "src/nodrix/native/CMakeLists.txt",
         ),
+        "packages/nodrix-compat/pyproject.toml": extract(
+            r'^version\s*=\s*["\']([^"\']+)["\']',
+            ROOT / "packages/nodrix-compat/pyproject.toml",
+        ),
     }
     errors = [f"{path}: {value} != {expected}" for path, value in observed.items() if value != expected]
 
     templates = (ROOT / "src/nodrix/project_templates.py").read_text(encoding="utf-8")
     for package_name in (
-        "nodrix",
-        "nodrix[media,viewer]",
-        "nodrix[vision,media,viewer]",
+        "plyctl",
+        "plyctl[media,viewer]",
+        "plyctl[vision,media,viewer]",
     ):
         if f"{package_name}=={expected}" not in templates:
             errors.append(f"project_templates.py does not pin {package_name}=={expected}")
+    release_manifest = json.loads(
+        (ROOT / "RELEASE_MANIFEST.json").read_text(encoding="utf-8")
+    )
+    if release_manifest.get("release") != expected:
+        errors.append(
+            "RELEASE_MANIFEST.json: "
+            f"{release_manifest.get('release')} != {expected}"
+        )
+    compat = (ROOT / "packages/nodrix-compat/pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+    if f'"plyctl=={expected}"' not in compat:
+        errors.append(f"nodrix compatibility package does not pin plyctl=={expected}")
     return errors
 
 
@@ -99,7 +117,7 @@ def main() -> int:
             print(f"ERROR: {error}", file=sys.stderr)
         return 1
 
-    print(f"Nodrix {version} release metadata is consistent")
+    print(f"Plyctl {version} release metadata is consistent")
     return 0
 
 

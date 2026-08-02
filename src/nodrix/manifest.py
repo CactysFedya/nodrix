@@ -1,8 +1,8 @@
-"""Stable Nodrix 2.x manifest facade.
+"""Stable Plyctl 2.x manifest facade.
 
 Implementation is split between immutable/validated models and parsing,
 normalization, diagnostics, and serialization services. Existing imports from
-``nodrix.manifest`` remain supported throughout Nodrix 2.x.
+``nodrix.manifest`` remain supported throughout Plyctl 2.x.
 """
 
 from .manifest_io import (

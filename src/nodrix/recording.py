@@ -168,7 +168,7 @@ class NdrxWriter:
 
     def write(self, message: Message, *, arrival_ns: int | None = None) -> None:
         if self.closed:
-            raise RecordingError("Nodrix recording is closed")
+            raise RecordingError("Plyctl recording is closed")
         self._start_chunk()
         packet = encode_message(message)
         packet_bytes = packet.nbytes
@@ -204,7 +204,7 @@ class NdrxWriter:
 
     def checkpoint(self) -> None:
         if self.closed:
-            raise RecordingError("Nodrix recording is closed")
+            raise RecordingError("Plyctl recording is closed")
         if self._chunk_offset is None:
             return
         index_data = {
@@ -326,14 +326,14 @@ class AsyncNdrxWriter:
         if self._error is not None:
             raise RecordingError(f"Asynchronous recording failed: {self._error}")
         if self._closed:
-            raise RecordingError("Nodrix recording is closed")
+            raise RecordingError("Plyctl recording is closed")
         delivery = (message.fork(), arrival_ns)
         if not self._queue.put(delivery):
             if self._error is not None:
                 raise RecordingError(
                     f"Asynchronous recording failed: {self._error}"
                 ) from self._error
-            raise RecordingError("Nodrix recording queue is closed")
+            raise RecordingError("Plyctl recording queue is closed")
 
     def _run(self) -> None:
         try:
@@ -428,24 +428,24 @@ class NdrxReader:
         self.handle: BinaryIO = self.path.open("rb")
         header = self.handle.read(_FILE_HEADER.size)
         if len(header) != _FILE_HEADER.size:
-            raise RecordingError("Truncated Nodrix recording header")
+            raise RecordingError("Truncated Plyctl recording header")
         magic, self.version, metadata_len = _FILE_HEADER.unpack(header)
         if magic != _FILE_MAGIC or self.version not in {
             _FILE_VERSION_V1,
             _FILE_VERSION_V2,
         }:
-            raise RecordingError("Unsupported Nodrix recording format")
+            raise RecordingError("Unsupported Plyctl recording format")
         if metadata_len > _MAX_METADATA_BYTES:
             raise RecordingError("NDRX metadata exceeds 16 MiB")
         metadata_bytes = self.handle.read(metadata_len)
         if len(metadata_bytes) != metadata_len:
-            raise RecordingError("Truncated Nodrix recording metadata")
+            raise RecordingError("Truncated Plyctl recording metadata")
         try:
             self.metadata = json.loads(metadata_bytes.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RecordingError("Invalid Nodrix recording metadata") from exc
+            raise RecordingError("Invalid Plyctl recording metadata") from exc
         if not isinstance(self.metadata, dict):
-            raise RecordingError("Nodrix recording metadata must be a mapping")
+            raise RecordingError("Plyctl recording metadata must be a mapping")
         self.data_offset = self.handle.tell()
         self.recovered = False
         self.finalized = False
@@ -578,7 +578,7 @@ class NdrxReader:
         self.handle.seek(entry.offset)
         raw = self.handle.read(_RECORD_HEADER.size)
         if len(raw) != _RECORD_HEADER.size:
-            raise RecordingError("Truncated Nodrix record")
+            raise RecordingError("Truncated Plyctl record")
         arrival_ns, packet_bytes = _RECORD_HEADER.unpack(raw)
         if packet_bytes != entry.packet_bytes:
             raise RecordingError("NDRX index packet size mismatch")
@@ -586,9 +586,9 @@ class NdrxReader:
         try:
             message = read_message(limited)
         except Exception as exc:
-            raise RecordingError("Invalid Nodrix wire packet in recording") from exc
+            raise RecordingError("Invalid Plyctl wire packet in recording") from exc
         if limited.tell() != packet_bytes:
-            raise RecordingError("Nodrix recording packet length mismatch")
+            raise RecordingError("Plyctl recording packet length mismatch")
         return arrival_ns, message
 
     def _recover_tail(

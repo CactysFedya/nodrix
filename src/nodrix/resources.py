@@ -120,7 +120,7 @@ def _windows_process(pid: int) -> dict[str, Any] | None:
         ]
         psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
 
-        # PROCESS_QUERY_INFORMATION | PROCESS_VM_READ. Nodrix owns the child,
+        # PROCESS_QUERY_INFORMATION | PROCESS_VM_READ. Plyctl owns the child,
         # so these rights do not require elevation.
         handle = kernel32.OpenProcess(0x0400 | 0x0010, False, int(pid))
         if not handle:

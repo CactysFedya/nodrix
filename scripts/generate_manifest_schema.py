@@ -8,7 +8,7 @@ from nodrix.manifest_schema import write_manifest_schema
 
 def main() -> None:
     parser = ArgumentParser(
-        description="Generate the canonical Nodrix pipeline JSON Schema."
+        description="Generate the canonical Plyctl pipeline JSON Schema."
     )
     parser.add_argument(
         "output",

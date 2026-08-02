@@ -1,11 +1,11 @@
-# Contributing to Nodrix
+# Contributing to Plyctl
 
-Nodrix accepts bug fixes, documentation improvements, performance work, new typed-message codecs, and carefully scoped runtime features.
+Plyctl accepts bug fixes, documentation improvements, performance work, new typed-message codecs, and carefully scoped runtime features.
 
 ## Development setup
 
 ```bash
-git clone https://github.com/CactysFedya/nodrix.git
+git clone https://github.com/CactysFedya/plyctl.git
 cd nodrix
 python3 -m venv .venv
 source .venv/bin/activate

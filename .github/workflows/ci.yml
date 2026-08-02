@@ -33,7 +33,7 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends cmake ffmpeg g++
 
-      - name: Install Nodrix and test dependencies
+      - name: Install Plyctl and test dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,all]"
@@ -46,8 +46,11 @@ jobs:
           import nodrix._native_device
           import nodrix._native_plugin
           import nodrix._native_tracking
+          import plyctl
 
-          print("All Nodrix native extensions loaded")
+          assert plyctl.Message is __import__("nodrix").Message
+
+          print("All Plyctl native extensions loaded")
           PY
 
       - name: Lint
@@ -59,6 +62,9 @@ jobs:
 
       - name: CLI smoke test
         run: |
+          plyctl --version
+          plyctl --help >/dev/null
+          plyctl-viewer --help >/dev/null
           nodrix --version
           nodrix --help >/dev/null
           nodrix-viewer --help >/dev/null
@@ -96,7 +102,7 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         run: choco install ffmpeg --no-progress -y
 
-      - name: Install Nodrix
+      - name: Install Plyctl
         run: python -m pip install -e ".[dev,all]"
 
       - name: Run portable test suite
@@ -105,6 +111,8 @@ jobs:
       - name: Smoke test CLI and native modules
         run: |
           python -c "import nodrix._native_queue, nodrix._native_buffer, nodrix._native_device, nodrix._native_plugin, nodrix._native_tracking"
+          python -c "import nodrix, plyctl; assert plyctl.Message is nodrix.Message"
+          plyctl --version
           nodrix --version
 
   native-tests:
@@ -256,7 +264,7 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install Nodrix
+      - name: Install Plyctl
         run: python -m pip install -e ".[dev,security]"
 
       - name: Run security regression tests
@@ -335,6 +343,7 @@ jobs:
           import subprocess
           import tempfile
           import nodrix
+          import plyctl
           import nodrix._native_queue
           import nodrix._native_buffer
           import nodrix._native_device
@@ -350,7 +359,9 @@ jobs:
               text=True,
           ).stdout.strip()
           assert version == f"nodrix-native-runner {nodrix.__version__}"
+          assert plyctl.Message is nodrix.Message
           assert "site-packages" in str(runner)
           print(version)
           PY
+          /tmp/nodrix-wheel-test/bin/plyctl --version
           /tmp/nodrix-wheel-test/bin/nodrix --version

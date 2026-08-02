@@ -73,7 +73,7 @@ def list_runs(project: str | Path = ".") -> list[dict[str, Any]]:
 def latest_run_id(project: str | Path = ".") -> str:
     items = list_runs(project)
     if not items:
-        raise LookupError("No Nodrix runs found")
+        raise LookupError("No Plyctl runs found")
 
     active = [
         item

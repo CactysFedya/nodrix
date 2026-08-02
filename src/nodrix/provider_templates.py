@@ -16,7 +16,7 @@ from .provider_verification import verify_candidate
 _EDITOR_SETTINGS = """\
 {
   "yaml.schemas": {
-    ".nodrix-schema.json": [
+    ".plyctl-schema.json": [
       "pipeline.yaml",
       "pipelines/*.yaml"
     ]
@@ -118,7 +118,7 @@ def create_provider_project(
         target.chmod(0o755 if source_mode & stat.S_IXUSR else 0o644)
         created.append(target)
 
-    schema_path = target_root / ".nodrix-schema.json"
+    schema_path = target_root / ".plyctl-schema.json"
     if force or not schema_path.exists():
         write_manifest_schema(schema_path)
     settings_path = target_root / ".vscode" / "settings.json"

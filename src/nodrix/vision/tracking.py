@@ -204,7 +204,7 @@ def greedy_iou_assignment(
         )
     if backend == "native":
         raise RuntimeError(
-            "Native tracking backend is unavailable. Install a Nodrix wheel or editable build "
+            "Native tracking backend is unavailable. Install a Plyctl wheel or editable build "
             "that includes nodrix._native_tracking, or explicitly set backend: python."
         )
     return _python_greedy_iou_assignment(

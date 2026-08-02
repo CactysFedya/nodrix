@@ -7,13 +7,13 @@
       "compat.geometry.odometry.v1"
     ],
     "id": "nodrix.mapping",
-    "name": "Nodrix Mapping Contracts",
+    "name": "Plyctl Mapping Contracts",
     "provider_api": "1",
     "requires_features": [
       "python-node-api.2",
       "domain.spatial.contracts"
     ],
-    "requires_nodrix": ">=2.2.0a3,<3",
+    "requires_nodrix": ">=2.2.0a5,<3",
     "version": "0.1.1"
   },
   "nodes": [],

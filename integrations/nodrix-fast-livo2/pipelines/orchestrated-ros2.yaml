@@ -1,9 +1,9 @@
-apiVersion: nodrix.dev/v2
+apiVersion: plyctl.dev/v2
 kind: Pipeline
 
 metadata:
   name: fast-livo2-ros2-orchestrated
-  description: Generic ROS 2 orchestration without algorithm-specific Nodrix plugins
+  description: Generic ROS 2 orchestration without algorithm-specific Plyctl plugins
 
 runtime:
   engine: unified

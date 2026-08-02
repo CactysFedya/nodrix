@@ -39,7 +39,7 @@ class FrozenMetadata(dict[str, Any]):
 
     @staticmethod
     def _immutable(*_args: Any, **_kwargs: Any) -> None:
-        raise TypeError("Nodrix Message metadata is immutable; use with_updates()")
+        raise TypeError("Plyctl Message metadata is immutable; use with_updates()")
 
     __setitem__ = _immutable
     __delitem__ = _immutable
@@ -53,7 +53,7 @@ class FrozenMetadata(dict[str, Any]):
 
 @dataclass(frozen=True, slots=True)
 class Message:
-    """Typed message passed between Nodrix nodes.
+    """Typed message passed between Plyctl nodes.
 
     ``payload`` is retained by reference.  ``created_ns`` uses the monotonic
     clock and enables end-to-end latency measurement without changing the user

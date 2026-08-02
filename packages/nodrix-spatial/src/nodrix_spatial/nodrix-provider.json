@@ -9,12 +9,12 @@
       "spatial.transform.v1"
     ],
     "id": "nodrix.spatial",
-    "name": "Nodrix Spatial Contracts",
+    "name": "Plyctl Spatial Contracts",
     "provider_api": "1",
     "requires_features": [
       "python-node-api.2"
     ],
-    "requires_nodrix": ">=2.2.0a3,<3",
+    "requires_nodrix": ">=2.2.0a5,<3",
     "version": "0.1.0"
   },
   "nodes": [],

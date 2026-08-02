@@ -108,7 +108,7 @@ def test_vision_template_exports_compressed_preview(tmp_path: Path) -> None:
         assert "vision.jpeg_encoder" in preview
         assert "/camera-app/preview" in manifest
         assert "preview_encoder.frame" in manifest
-        assert "nodrix-viewer /camera-app/preview" in readme
+        assert "plyctl-viewer /camera-app/preview" in readme
         return
 
     assert "blocks/outputs/h264.yaml" in manifest
@@ -118,7 +118,7 @@ def test_vision_template_exports_compressed_preview(tmp_path: Path) -> None:
     assert "media.ffmpeg_encoder" in encoder
     assert "/camera-app/preview/h264" in manifest
     assert "encoder.encoded" in manifest
-    assert "nodrix-viewer nodrix://DEVICE_IP:7420/camera-app/preview/h264 --overlay" in readme
+    assert "plyctl-viewer nodrix://DEVICE_IP:7420/camera-app/preview/h264 --overlay" in readme
 
 
 def test_headless_viewer_reads_local_video(tmp_path: Path) -> None:

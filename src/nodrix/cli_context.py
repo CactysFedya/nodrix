@@ -17,8 +17,8 @@ from .validation import validate_production
 from .provider_cli import provider_app
 
 app = typer.Typer(
-    name="nodrix",
-    help="High-performance runtime for typed local and distributed streaming graphs.",
+    name="plyctl",
+    help="The Pipeline OS for real-time local and distributed systems.",
     no_args_is_help=False,
     invoke_without_command=True,
 )
@@ -30,7 +30,7 @@ media_app = typer.Typer(help="Probe, record, and relay media through FFmpeg.")
 recording_app = typer.Typer(help="Inspect universal .ndrx recordings.")
 data_app = typer.Typer(help="Inspect shared-memory and process data-plane capabilities.")
 device_app = typer.Typer(help="Inspect DLPack, DMA-BUF, V4L2, CUDA and native device-I/O capabilities.")
-package_app = typer.Typer(help="Build and manage local Nodrix packages.")
+package_app = typer.Typer(help="Build and manage local Plyctl packages.")
 plugin_app = typer.Typer(help="Search, verify, install, inspect, and remove offline plugins.")
 runs_app = typer.Typer(help="Inspect reproducible run artifacts.")
 config_app = typer.Typer(help="Inspect resolved profiles and configuration values.")
@@ -84,10 +84,10 @@ def _config_value(data: object, dotted: str) -> object:
 @app.callback()
 def root(
     ctx: typer.Context,
-    version: Annotated[bool, typer.Option("--version", help="Show the Nodrix version", is_eager=True)] = False,
+    version: Annotated[bool, typer.Option("--version", help="Show the Plyctl version", is_eager=True)] = False,
 ) -> None:
     if version:
-        console.print(f"Nodrix {__version__}")
+        console.print(f"Plyctl {__version__}")
         raise typer.Exit()
     if ctx.invoked_subcommand is None:
         console.print(ctx.get_help())
@@ -132,7 +132,7 @@ def doctor_command(
         console.print_json(json.dumps(report))
     else:
         console.print(
-            f"[bold]Nodrix {report['runtime']['nodrix']} doctor[/bold] "
+            f"[bold]Plyctl {report['runtime']['plyctl']} doctor[/bold] "
             f"mode={report['mode']} status={report['status']}"
         )
         core_table = Table("Core check", "Status")

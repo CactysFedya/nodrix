@@ -3,14 +3,14 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nodrix-spatial-ros2"
+name = "plyctl-spatial-ros2"
 version = "0.1.0"
-description = "Typed copy-minimizing bridges between ROS 2 and Nodrix Spatial"
+description = "Typed copy-minimizing bridges between ROS 2 and Plyctl Spatial"
 requires-python = ">=3.11"
 dependencies = [
-  "nodrix>=2.2.0a3,<3",
-  "nodrix-spatial>=0.1,<0.2",
-  "nodrix-ros2>=0.3,<0.5",
+  "plyctl>=2.2.0a5,<3",
+  "plyctl-spatial>=0.1,<0.2",
+  "plyctl-ros2>=0.3,<0.5",
 ]
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -19,6 +19,9 @@ license = {text = "Apache-2.0"}
 test = ["pytest>=8"]
 
 [project.entry-points."nodrix.providers"]
+"nodrix.ros2.spatial" = "nodrix_spatial_ros2.provider:provider"
+
+[project.entry-points."plyctl.providers"]
 "nodrix.ros2.spatial" = "nodrix_spatial_ros2.provider:provider"
 
 [tool.setuptools.packages.find]

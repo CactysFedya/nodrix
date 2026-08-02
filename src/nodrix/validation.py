@@ -6,6 +6,7 @@ from pathlib import Path
 import stat
 from typing import Any
 
+from .branding import MANIFEST_API_V2, is_manifest_v2
 from .manifest import PipelineManifest
 
 
@@ -261,12 +262,12 @@ def validate_production(
                     )
     if manifest.runtime.shutdown.timeout_ms < 100:
         issues.append(ValidationIssue("warning", "W601", "Graceful shutdown timeout is extremely short", "runtime.shutdown"))
-    if production and manifest.api_version != "nodrix.dev/v2":
+    if production and not is_manifest_v2(manifest.api_version):
         issues.append(
             ValidationIssue(
                 "error",
                 "P200",
-                "Production mode requires apiVersion: nodrix.dev/v2",
+                f"Production mode requires apiVersion: {MANIFEST_API_V2}",
                 "apiVersion",
             )
         )

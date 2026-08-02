@@ -1,7 +1,7 @@
-"""Stable Nodrix CLI facade.
+"""Stable Plyctl CLI facade.
 
-Commands are registered by focused modules while ``nodrix.cli:app`` remains
-the unchanged console entry point.
+Commands are registered by focused modules. ``nodrix.cli:app`` remains a
+supported compatibility entry point throughout the 2.x series.
 """
 
 from .cli_context import app

@@ -1,6 +1,6 @@
-"""Explicit import surface for Nodrix Core."""
+"""Explicit import surface for Plyctl Core."""
 
-from nodrix import (
+from plyctl import (
     BufferPool,
     CudaIpcHandle,
     DmaBufHandle,

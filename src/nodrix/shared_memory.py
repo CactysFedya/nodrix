@@ -47,7 +47,7 @@ def _open_shared_memory(
 ) -> SharedMemory:
     """Open shared memory on Python 3.11+.
 
-    The track parameter was added in Python 3.13. Nodrix manages the
+    The track parameter was added in Python 3.13. Plyctl manages the
     lifetime of its shared-memory segments explicitly, so tracking is
     disabled when the interpreter supports that option.
     """
@@ -147,11 +147,11 @@ class SharedBufferPool:
         with self._condition:
             while not self._free and not self._closed:
                 if not block:
-                    raise BufferError("Nodrix shared buffer pool is exhausted")
+                    raise BufferError("Plyctl shared buffer pool is exhausted")
                 self._waits += 1
                 self._condition.wait()
             if self._closed:
-                raise RuntimeError("Nodrix shared buffer pool is closed")
+                raise RuntimeError("Plyctl shared buffer pool is closed")
             index = self._free.popleft()
             self._generation[index] += 1
             self._acquires += 1

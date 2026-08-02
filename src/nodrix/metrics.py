@@ -13,7 +13,7 @@ def _sanitize(name: str) -> str:
 
 
 def prometheus_text(snapshot: dict[str, Any]) -> str:
-    lines = ["# Nodrix runtime metrics"]
+    lines = ["# Plyctl runtime metrics"]
     for name, raw in dict(snapshot.get("nodes", {})).items():
         node = dict(raw)
         label = json.dumps(str(name))

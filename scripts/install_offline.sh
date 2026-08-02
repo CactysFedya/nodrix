@@ -82,6 +82,7 @@ import subprocess
 import tempfile
 
 import nodrix
+import plyctl
 import nodrix._native_buffer
 import nodrix._native_device
 import nodrix._native_plugin
@@ -96,9 +97,11 @@ version = subprocess.run(
     capture_output=True,
     text=True,
 ).stdout.strip()
-if version != f"nodrix-native-runner {nodrix.__version__}":
+if version != f"nodrix-native-runner {plyctl.__version__}":
     raise SystemExit(
         f"Packaged native runner version mismatch: {version}"
     )
-print(f"Nodrix {nodrix.__version__} installed; {version}")
+if plyctl.Message is not nodrix.Message:
+    raise SystemExit("Plyctl and Nodrix compatibility imports disagree")
+print(f"Plyctl {plyctl.__version__} installed; {version}")
 PY

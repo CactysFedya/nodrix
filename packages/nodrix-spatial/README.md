@@ -1,6 +1,6 @@
-# nodrix-spatial
+# plyctl-spatial
 
-Transport-neutral spatial contracts for Nodrix.
+Transport-neutral spatial contracts for Plyctl.
 
 The package owns point clouds, IMU samples, poses, odometry and transforms. It
 contains no ROS 2, mapping, PCL or sensor-driver implementation. Large point

@@ -54,7 +54,7 @@ def compare_reports(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Compare Nodrix benchmark output with a same-host baseline."
+        description="Compare Plyctl benchmark output with a same-host baseline."
     )
     parser.add_argument("baseline", type=Path)
     parser.add_argument("current", type=Path)

@@ -7,6 +7,7 @@ from typing import Any, Iterable
 from pydantic import ValidationError
 import yaml
 
+from .branding import MANIFEST_API_V1, is_manifest_v2
 from .errors import ManifestError
 from .manifest_model import (
     FragmentConfig,
@@ -238,7 +239,7 @@ def _normalize_compact(
     if not name:
         raise ManifestError("Compact manifest requires 'name'")
     canonical: dict[str, Any] = {
-        "apiVersion": raw.get("apiVersion", "nodrix.dev/v1"),
+        "apiVersion": raw.get("apiVersion", MANIFEST_API_V1),
         "kind": raw.get("kind", "Pipeline"),
         "metadata": {"name": name},
         "runtime": deepcopy(raw.get("runtime") or {}),
@@ -254,7 +255,7 @@ def _normalize_compact(
         "security": deepcopy(raw.get("security") or {}),
         "placement": deepcopy(raw.get("placement") or {}),
     }
-    if canonical["apiVersion"] == "nodrix.dev/v2":
+    if is_manifest_v2(str(canonical["apiVersion"])):
         canonical["runtime"].setdefault("engine", "unified")
     description = raw.get("description") or dict(raw.get("metadata") or {}).get("description")
     if description:

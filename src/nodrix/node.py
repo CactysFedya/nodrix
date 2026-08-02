@@ -34,7 +34,7 @@ class NodeContext:
 
         if self._output_allocator is None:
             raise RuntimeError(
-                "This Nodrix execution context has no executor-owned output allocator; "
+                "This Plyctl execution context has no executor-owned output allocator; "
                 "use BufferPool/SharedBufferPool explicitly or configure process isolation"
             )
         return self._output_allocator(int(size), bool(readonly))
@@ -53,7 +53,7 @@ class NodeContext:
 
 
 class Node(ABC):
-    """Base class for Nodrix nodes.
+    """Base class for Plyctl nodes.
 
     ``input_memory`` and ``output_memory`` are optional per-port contracts. A
     missing entry means that the port preserves/accepts any memory domain. The
@@ -77,7 +77,7 @@ class Node(ABC):
         self.context = context
         return None
 
-    # Nodrix 1.x lifecycle. Existing 0.x nodes that only override open/flush/close
+    # Plyctl 1.x lifecycle. Existing 0.x nodes that only override open/flush/close
     # remain source-compatible through these default adapters.
     def configure(self, context: NodeContext) -> Any:
         self._lifecycle.transition(LifecycleState.CONFIGURING)

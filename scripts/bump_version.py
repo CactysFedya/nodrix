@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update the Nodrix release version in authoritative project files."""
+"""Update the Plyctl release version in authoritative project files."""
 
 from __future__ import annotations
 
@@ -30,6 +30,21 @@ def main() -> int:
     replace(ROOT / "pyproject.toml", r'^version = "[^"]+"', f'version = "{version}"')
     replace(ROOT / "src/nodrix/__init__.py", r'^__version__ = "[^"]+"', f'__version__ = "{version}"')
     replace(ROOT / "CITATION.cff", r"^version: [^\n]+", f"version: {version}")
+    replace(
+        ROOT / "packages/nodrix-compat/pyproject.toml",
+        r'^version = "[^"]+"',
+        f'version = "{version}"',
+    )
+    replace(
+        ROOT / "packages/nodrix-compat/pyproject.toml",
+        r'"plyctl==[^"]+"',
+        f'"plyctl=={version}"',
+    )
+    replace(
+        ROOT / "RELEASE_MANIFEST.json",
+        r'"release": "[^"]+"',
+        f'"release": "{version}"',
+    )
     cmake_version = re.match(r"[0-9]+\.[0-9]+\.[0-9]+", version)
     assert cmake_version is not None
     replace(
@@ -45,17 +60,17 @@ def main() -> int:
 
     templates = ROOT / "src/nodrix/project_templates.py"
     text = templates.read_text(encoding="utf-8")
-    text = re.sub(r"nodrix==[0-9A-Za-z.-]+", f"nodrix=={version}", text)
-    text = re.sub(r"nodrix\[viewer\]==[0-9A-Za-z.-]+", f"nodrix[viewer]=={version}", text)
-    text = re.sub(r"nodrix\[media,viewer\]==[0-9A-Za-z.-]+", f"nodrix[media,viewer]=={version}", text)
+    text = re.sub(r"plyctl==[0-9A-Za-z.-]+", f"plyctl=={version}", text)
+    text = re.sub(r"plyctl\[viewer\]==[0-9A-Za-z.-]+", f"plyctl[viewer]=={version}", text)
+    text = re.sub(r"plyctl\[media,viewer\]==[0-9A-Za-z.-]+", f"plyctl[media,viewer]=={version}", text)
     text = re.sub(
-        r"nodrix\[vision,media,viewer\]==[0-9A-Za-z.-]+",
-        f"nodrix[vision,media,viewer]=={version}",
+        r"plyctl\[vision,media,viewer\]==[0-9A-Za-z.-]+",
+        f"plyctl[vision,media,viewer]=={version}",
         text,
     )
     templates.write_text(text, encoding="utf-8")
 
-    print(f"Updated Nodrix version to {version}")
+    print(f"Updated Plyctl version to {version}")
     return 0
 
 

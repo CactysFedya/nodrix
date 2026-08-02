@@ -130,7 +130,7 @@ def _python_source(schema: TypeSchema) -> str:
 from dataclasses import dataclass
 import struct
 
-from nodrix import register_message_type, register_wire_codec
+from plyctl import register_message_type, register_wire_codec
 
 TYPE_NAME = {schema.name!r}
 TYPE_VERSION = {schema.version}

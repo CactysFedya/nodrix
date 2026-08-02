@@ -50,7 +50,7 @@ def _hex(value: str) -> str:
 
 
 class NativeToolchain:
-    """Builds and locates the C++20 data plane shipped with Nodrix."""
+    """Builds and locates the C++20 data plane shipped with Plyctl."""
 
     def __init__(self, project_dir: Path, build_dir: Path | None = None) -> None:
         self.project_dir = project_dir.resolve()
@@ -121,8 +121,8 @@ class NativeToolchain:
         if os.environ.get("NODRIX_ALLOW_RUNTIME_BUILD") == "1":
             return self.build(portable=True, quiet=True)
         raise RuntimeGraphError(
-            "The Nodrix native runner is not installed. Install a compatible "
-            "binary wheel, set NODRIX_NATIVE_RUNNER, run `nodrix native build` "
+            "The Plyctl native runner is not installed. Install a compatible "
+            "binary wheel, set NODRIX_NATIVE_RUNNER, run `plyctl native build` "
             "during deployment, or explicitly allow a developer fallback with "
             "NODRIX_ALLOW_RUNTIME_BUILD=1. Runtime compilation is disabled by "
             "default."
@@ -256,7 +256,7 @@ class NativePipelineRuntime:
 
         if NativeNodeHost is None:
             raise RuntimeGraphError(
-                "The installed Nodrix wheel has no Plugin C ABI host extension"
+                "The installed Plyctl wheel has no Plugin C ABI host extension"
             )
         body = uses.removeprefix("native:")
         library, node_type = body.rsplit("#", 1)

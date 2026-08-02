@@ -1,0 +1,12 @@
+:root {
+  --plyctl-accent: #2d6cdf;
+}
+
+.wy-side-nav-search,
+.wy-nav-top {
+  background: var(--plyctl-accent);
+}
+
+.rst-content code.literal {
+  color: #1f4f9f;
+}

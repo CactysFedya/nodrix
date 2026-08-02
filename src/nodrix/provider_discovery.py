@@ -17,10 +17,11 @@ from . import __version__
 from .errors import ProviderError
 from .provider_api import (
     NodeDescriptor,
-    PROVIDER_ENTRY_POINT_GROUP,
+    PLYCTL_PROVIDER_ENTRY_POINT_GROUP,
     ProbeDescriptor,
     ProviderManifest,
     ProviderMetadata,
+    SUPPORTED_PROVIDER_ENTRY_POINT_GROUPS,
 )
 from .provider_common import (
     _DISCOVERY_CACHE,
@@ -137,6 +138,65 @@ def _distribution_identity(
     return name, version
 
 
+def _provider_document_paths(
+    distribution: importlib.metadata.Distribution,
+    entry_point: Any,
+) -> tuple[Path, Path | None]:
+    """Resolve canonical or legacy metadata, rejecting ambiguous content."""
+
+    canonical = _safe_distribution_file(
+        distribution,
+        "plyctl-provider.json",
+        required=False,
+        entry_point=entry_point,
+    )
+    legacy = _safe_distribution_file(
+        distribution,
+        "nodrix-provider.json",
+        required=False,
+        entry_point=entry_point,
+    )
+    if canonical is None and legacy is None:
+        raise ValueError(
+            "distribution has no plyctl-provider.json or nodrix-provider.json"
+        )
+    if canonical is not None and legacy is not None:
+        canonical_document = _read_json(canonical)
+        legacy_document = _read_json(legacy)
+        if not isinstance(canonical_document, dict) or not isinstance(
+            legacy_document, dict
+        ):
+            raise ValueError("provider manifest must be a JSON object")
+        normalized_canonical = dict(canonical_document)
+        normalized_legacy = dict(legacy_document)
+        for document in (normalized_canonical, normalized_legacy):
+            schema = str(document.get("schema", ""))
+            if schema.startswith("plyctl-provider/"):
+                document["schema"] = schema.replace(
+                    "plyctl-provider/", "nodrix-provider/", 1
+                )
+        if _canonical_document(normalized_canonical) != _canonical_document(
+            normalized_legacy
+        ):
+            raise ValueError(
+                "distribution contains conflicting Plyctl and Nodrix provider metadata"
+            )
+    metadata = canonical or legacy
+    assert metadata is not None
+    signature_name = (
+        "plyctl-provider.sig"
+        if canonical is not None
+        else "nodrix-provider.sig"
+    )
+    signature = _safe_distribution_file(
+        distribution,
+        signature_name,
+        required=False,
+        entry_point=entry_point,
+    )
+    return metadata, signature
+
+
 def _external_candidates(
     paths: Iterable[str | os.PathLike[str]] | None = None,
 ) -> list[ProviderCandidate]:
@@ -145,13 +205,20 @@ def _external_candidates(
         kwargs["path"] = [os.fspath(path) for path in paths]
     result: list[ProviderCandidate] = []
     for distribution in importlib.metadata.distributions(**kwargs):
-        entry_points = [
+        discovered_entry_points = [
             item
             for item in distribution.entry_points
-            if item.group == PROVIDER_ENTRY_POINT_GROUP
+            if item.group in SUPPORTED_PROVIDER_ENTRY_POINT_GROUPS
         ]
-        if not entry_points:
+        if not discovered_entry_points:
             continue
+        unique_entry_points: dict[tuple[str, str], Any] = {}
+        for item in sorted(
+            discovered_entry_points,
+            key=lambda value: value.group != PLYCTL_PROVIDER_ENTRY_POINT_GROUP,
+        ):
+            unique_entry_points.setdefault((item.name, item.value), item)
+        entry_points = list(unique_entry_points.values())
         distribution_name, distribution_version = _distribution_identity(
             distribution
         )
@@ -168,8 +235,8 @@ def _external_candidates(
                         metadata_path=None,
                         signature_path=None,
                         error=(
-                            "a Provider API 1 distribution must declare exactly "
-                            "one nodrix.providers entry point"
+                            "a provider distribution must declare exactly one "
+                            "unique supported provider entry point"
                         ),
                     )
                 )
@@ -178,18 +245,8 @@ def _external_candidates(
         metadata_path: Path | None = None
         signature_path: Path | None = None
         try:
-            metadata_path = _safe_distribution_file(
-                distribution,
-                "nodrix-provider.json",
-                required=True,
-                entry_point=entry_point,
-            )
-            assert metadata_path is not None
-            signature_path = _safe_distribution_file(
-                distribution,
-                "nodrix-provider.sig",
-                required=False,
-                entry_point=entry_point,
+            metadata_path, signature_path = _provider_document_paths(
+                distribution, entry_point
             )
             document = _read_json(metadata_path)
             if not isinstance(document, dict):
@@ -311,7 +368,7 @@ def _legacy_candidates() -> list[ProviderCandidate]:
     manifests = [
         _legacy_manifest(
             "nodrix.core",
-            "Nodrix Core",
+            "Plyctl Core",
             description="Compatibility adapter for Core and base SDK nodes.",
             features=("runtime.core",),
             nodes=(
@@ -368,7 +425,7 @@ def _legacy_candidates() -> list[ProviderCandidate]:
         ),
         _legacy_manifest(
             "nodrix.vision",
-            "Nodrix Vision Legacy Provider",
+            "Plyctl Vision Legacy Provider",
             description="Compatibility adapter for built-in Vision Node IDs.",
             features=("domain.vision",),
             nodes=(
@@ -455,7 +512,7 @@ def _legacy_candidates() -> list[ProviderCandidate]:
         ),
         _legacy_manifest(
             "nodrix.media",
-            "Nodrix Media Legacy Provider",
+            "Plyctl Media Legacy Provider",
             description="Compatibility adapter for built-in FFmpeg Node IDs.",
             features=("domain.media",),
             nodes=(
@@ -494,7 +551,7 @@ def _legacy_candidates() -> list[ProviderCandidate]:
         ),
         _legacy_manifest(
             "nodrix.recording",
-            "Nodrix Recording Legacy Provider",
+            "Plyctl Recording Legacy Provider",
             description="Compatibility adapter for NDRX2 source and writer nodes.",
             features=("domain.recording",),
             nodes=(
@@ -514,7 +571,7 @@ def _legacy_candidates() -> list[ProviderCandidate]:
         ),
         _legacy_manifest(
             "nodrix.ros2",
-            "Nodrix ROS 2 Legacy Provider",
+            "Plyctl ROS 2 Legacy Provider",
             description="Compatibility adapter for generic rclpy source and sink.",
             features=("transport.ros2",),
             nodes=(

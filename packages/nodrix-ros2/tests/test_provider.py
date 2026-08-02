@@ -48,7 +48,7 @@ def test_provider_templates_are_canonical_v2(template: str) -> None:
 
     details = load_manifest_details(pipeline, expand_env=False)
 
-    assert details.manifest.api_version == "nodrix.dev/v2"
+    assert details.manifest.api_version == "plyctl.dev/v2"
     assert details.manifest.applications
     assert all(edge.transport is not None for edge in details.manifest.edges)
     assert details.diagnostics == ()

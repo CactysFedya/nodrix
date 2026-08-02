@@ -39,7 +39,7 @@ class WireProtocolError(RuntimeError):
 
 
 class WirePacket:
-    """Scatter/gather representation of one Nodrix wire message.
+    """Scatter/gather representation of one Plyctl wire message.
 
     Large payloads remain memoryviews over their original buffers. On Unix,
     :func:`send_packet` uses ``sendmsg`` so the Python runtime does not build a
@@ -120,7 +120,7 @@ def _json_bytes(value: Any) -> bytes:
 def _byte_view(value: Any) -> memoryview:
     view = memoryview(value)
     if not view.contiguous:
-        raise ValueError("Nodrix network payloads must be contiguous")
+        raise ValueError("Plyctl network payloads must be contiguous")
     # Python rejects cast() for zero-sized dimensions. Empty detections,
     # tracks and embeddings are valid messages and serialize as empty bytes.
     if view.nbytes == 0:
@@ -314,7 +314,7 @@ def _send_all(sock: socket.socket, view: memoryview) -> None:
     while view:
         sent = sock.send(view)
         if sent <= 0:
-            raise ConnectionError("socket closed while sending Nodrix message")
+            raise ConnectionError("socket closed while sending Plyctl message")
         view = view[sent:]
 
 
@@ -325,7 +325,7 @@ def send_packet(sock: socket.socket, packet: WirePacket) -> int:
         while parts:
             sent = sock.sendmsg(parts)
             if sent <= 0:
-                raise ConnectionError("socket closed while sending Nodrix message")
+                raise ConnectionError("socket closed while sending Plyctl message")
             remaining = sent
             next_parts: list[memoryview] = []
             for index, part in enumerate(parts):
@@ -351,14 +351,14 @@ def _recv_exact(sock: socket.socket, size: int) -> bytearray:
     while offset < size:
         count = sock.recv_into(view[offset:])
         if count <= 0:
-            raise EOFError("socket closed while receiving Nodrix message")
+            raise EOFError("socket closed while receiving Plyctl message")
         offset += count
     return data
 
 
 def _decode_array(payload: memoryview, spec: dict[str, Any], offset: int) -> tuple[Any, int]:
     if np is None:
-        raise RuntimeError("NumPy is required to decode this Nodrix message")
+        raise RuntimeError("NumPy is required to decode this Plyctl message")
     nbytes = int(spec["nbytes"])
     part = payload[offset : offset + nbytes]
     value = np.frombuffer(part, dtype=np.dtype(spec["dtype"])).reshape(tuple(spec["shape"]))
@@ -441,7 +441,7 @@ def _decode_payload(type_name: str, payload: memoryview, metadata: dict[str, Any
         return Embeddings(**values, normalized=bool(codec_meta.get("normalized", False)))
     if codec == "identities":
         return Identities(**values)
-    raise WireProtocolError(f"Unknown Nodrix payload codec: {codec!r}")
+    raise WireProtocolError(f"Unknown Plyctl payload codec: {codec!r}")
 
 
 
@@ -459,20 +459,20 @@ def decode_packet_parts(
     """
     header_view = memoryview(header_bytes)
     if header_view.nbytes != _HEADER.size:
-        raise WireProtocolError(f"Invalid Nodrix header size: {header_view.nbytes}")
+        raise WireProtocolError(f"Invalid Plyctl header size: {header_view.nbytes}")
     (
         magic, version, _flags, _segments, sequence, timestamp_ns, created_ns,
         trace_id, type_len, metadata_len, payload_len,
     ) = _HEADER.unpack(header_view)
     if magic != MAGIC:
-        raise WireProtocolError(f"Invalid Nodrix wire magic: {magic!r}")
+        raise WireProtocolError(f"Invalid Plyctl wire magic: {magic!r}")
     if version != WIRE_VERSION:
-        raise WireProtocolError(f"Unsupported Nodrix wire version: {version}")
+        raise WireProtocolError(f"Unsupported Plyctl wire version: {version}")
     type_view = memoryview(type_bytes)
     metadata_view = memoryview(metadata_bytes)
     payload_view = memoryview(payload)
     if type_view.nbytes != type_len or metadata_view.nbytes != metadata_len or payload_view.nbytes != payload_len:
-        raise WireProtocolError("Nodrix packet part lengths do not match the header")
+        raise WireProtocolError("Plyctl packet part lengths do not match the header")
     type_name = bytes(type_view).decode("utf-8")
     metadata = json.loads(bytes(metadata_view).decode("utf-8"))
     definition = TYPE_REGISTRY.definition(type_name)
@@ -502,14 +502,14 @@ def read_message(stream: Any) -> Message:
     if not header:
         raise EOFError
     if len(header) != _HEADER.size:
-        raise WireProtocolError("Truncated Nodrix wire header")
+        raise WireProtocolError("Truncated Plyctl wire header")
     unpacked = _HEADER.unpack(header)
     type_len, metadata_len, payload_len = unpacked[-3:]
     type_bytes = stream.read(type_len)
     metadata_bytes = stream.read(metadata_len)
     payload = stream.read(payload_len)
     if len(type_bytes) != type_len or len(metadata_bytes) != metadata_len or len(payload) != payload_len:
-        raise WireProtocolError("Truncated Nodrix wire message")
+        raise WireProtocolError("Truncated Plyctl wire message")
     return decode_packet_parts(header, type_bytes, metadata_bytes, payload)
 
 def recv_message(sock: socket.socket, *, max_message_bytes: int = 256 * 1024 * 1024) -> Message:
@@ -528,13 +528,13 @@ def recv_message(sock: socket.socket, *, max_message_bytes: int = 256 * 1024 * 1
         payload_len,
     ) = _HEADER.unpack(header_bytes)
     if magic != MAGIC:
-        raise WireProtocolError(f"Invalid Nodrix wire magic: {magic!r}")
+        raise WireProtocolError(f"Invalid Plyctl wire magic: {magic!r}")
     if version != WIRE_VERSION:
-        raise WireProtocolError(f"Unsupported Nodrix wire version: {version}")
+        raise WireProtocolError(f"Unsupported Plyctl wire version: {version}")
     total_size = int(type_len) + int(metadata_len) + int(payload_len)
     if type_len > 4096 or metadata_len > 16 * 1024 * 1024 or total_size > int(max_message_bytes):
         raise WireProtocolError(
-            f"Nodrix message exceeds configured limits: type={type_len}, metadata={metadata_len}, payload={payload_len}"
+            f"Plyctl message exceeds configured limits: type={type_len}, metadata={metadata_len}, payload={payload_len}"
         )
     type_name = bytes(_recv_exact(sock, type_len)).decode("utf-8")
     metadata = json.loads(bytes(_recv_exact(sock, metadata_len)).decode("utf-8"))

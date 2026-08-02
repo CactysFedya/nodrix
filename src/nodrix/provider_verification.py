@@ -31,7 +31,7 @@ def sign_provider_metadata(
     private_key_path: str | Path,
     output_path: str | Path | None = None,
 ) -> Path:
-    """Create a detached Ed25519 ``nodrix-provider.sig`` document."""
+    """Create a detached Ed25519 provider signature document."""
 
     source = Path(metadata_path).expanduser().resolve()
     document = _read_json(source)
@@ -43,7 +43,7 @@ def sign_provider_metadata(
         from cryptography.hazmat.primitives.asymmetric import ed25519
     except ModuleNotFoundError as exc:
         raise ProviderError(
-            "Provider signing requires `pip install nodrix[security]`"
+            "Provider signing requires `pip install plyctl[security]`"
         ) from exc
     private_key = serialization.load_pem_private_key(
         Path(private_key_path).expanduser().resolve().read_bytes(),
@@ -65,7 +65,11 @@ def sign_provider_metadata(
     target = (
         Path(output_path).expanduser().resolve()
         if output_path is not None
-        else source.with_name("nodrix-provider.sig")
+        else source.with_name(
+            "plyctl-provider.sig"
+            if source.name == "plyctl-provider.json"
+            else "nodrix-provider.sig"
+        )
     )
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
@@ -91,7 +95,7 @@ def _trust_keys(path: Path, *, production: bool) -> dict[str, Any]:
     except ModuleNotFoundError as exc:
         raise ProviderError(
             "Provider signature verification requires "
-            "`pip install nodrix[security]`"
+            "`pip install plyctl[security]`"
         ) from exc
     keys: dict[str, Any] = {}
     for key_path in sorted(path.glob("*.pem")):
@@ -156,12 +160,12 @@ def verify_candidate(
         )
     except (InvalidSpecifier, InvalidVersion) as exc:
         compatible = False
-        errors.append(f"invalid Nodrix compatibility constraint: {exc}")
+        errors.append(f"invalid Plyctl compatibility constraint: {exc}")
     if not compatible and not any(
-        item.startswith("invalid Nodrix compatibility") for item in errors
+        item.startswith("invalid Plyctl compatibility") for item in errors
     ):
         errors.append(
-            f"provider requires Nodrix {metadata.requires_nodrix}, "
+            f"provider requires Plyctl {metadata.requires_nodrix}, "
             f"runtime is {__version__}"
         )
     negotiation = negotiate_features(

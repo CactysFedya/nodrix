@@ -1,4 +1,4 @@
-"""Stable public contracts for Nodrix Provider APIs 1 and 2.
+"""Stable public contracts for Plyctl Provider APIs 1 and 2.
 
 Provider metadata is deliberately made of plain, immutable dataclasses.  A
 provider distribution can therefore describe itself without importing its
@@ -17,11 +17,24 @@ PROVIDER_API_VERSION = "1"
 PROVIDER_SCHEMA = "nodrix-provider/1"
 PROVIDER_API_VERSION_V2 = "2"
 PROVIDER_SCHEMA_V2 = "nodrix-provider/2"
+PLYCTL_PROVIDER_SCHEMA = "plyctl-provider/1"
+PLYCTL_PROVIDER_SCHEMA_V2 = "plyctl-provider/2"
 SUPPORTED_PROVIDER_API_VERSIONS = frozenset(
     {PROVIDER_API_VERSION, PROVIDER_API_VERSION_V2}
 )
-SUPPORTED_PROVIDER_SCHEMAS = frozenset({PROVIDER_SCHEMA, PROVIDER_SCHEMA_V2})
+SUPPORTED_PROVIDER_SCHEMAS = frozenset(
+    {
+        PROVIDER_SCHEMA,
+        PROVIDER_SCHEMA_V2,
+        PLYCTL_PROVIDER_SCHEMA,
+        PLYCTL_PROVIDER_SCHEMA_V2,
+    }
+)
 PROVIDER_ENTRY_POINT_GROUP = "nodrix.providers"
+PLYCTL_PROVIDER_ENTRY_POINT_GROUP = "plyctl.providers"
+SUPPORTED_PROVIDER_ENTRY_POINT_GROUPS = frozenset(
+    {PROVIDER_ENTRY_POINT_GROUP, PLYCTL_PROVIDER_ENTRY_POINT_GROUP}
+)
 
 _IDENTIFIER = re.compile(r"^[a-z0-9](?:[a-z0-9_.-]*[a-z0-9])?$")
 _REFERENCE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*:[A-Za-z_][A-Za-z0-9_.]*$")
@@ -264,7 +277,7 @@ class SessionDescriptor:
 class ResourceDescriptor:
     """One lazily importable pipeline-scoped managed resource.
 
-    ``SessionDescriptor`` remains supported throughout Nodrix 2.x.  New
+    ``SessionDescriptor`` remains supported throughout Plyctl 2.x.  New
     providers should prefer this transport-neutral name when the object is not
     specifically a connection/session.
     """
@@ -425,7 +438,7 @@ class TransportDescriptor(LinkDescriptor):
 class ProbeDescriptor:
     """A bounded provider diagnostic.
 
-    ``safe`` probes may run during ordinary ``nodrix doctor``.  ``deep`` probes
+    ``safe`` probes may run during ordinary ``plyctl doctor``.  ``deep`` probes
     require an explicit ``--deep`` request and declare any expected permission
     or device access in ``permissions``.
     """
@@ -523,7 +536,7 @@ class TemplateDescriptor:
 
 @dataclass(frozen=True, slots=True)
 class ProviderManifest:
-    """Validated content of ``nodrix-provider.json``."""
+    """Validated content of a Plyctl or legacy Nodrix provider document."""
 
     metadata: ProviderMetadata
     nodes: tuple[NodeDescriptor, ...] = ()
@@ -543,7 +556,7 @@ class ProviderManifest:
                 "expected one of "
                 + ", ".join(sorted(SUPPORTED_PROVIDER_SCHEMAS))
             )
-        if self.schema == PROVIDER_SCHEMA and (
+        if self.schema in {PROVIDER_SCHEMA, PLYCTL_PROVIDER_SCHEMA} and (
             self.sessions
             or self.resources
             or self.applications
@@ -552,11 +565,11 @@ class ProviderManifest:
         ):
             raise ValueError(
                 "provider sessions, resources, applications, and external "
-                "links require nodrix-provider/2"
+                "links require a Provider API 2 schema"
             )
         expected_api = (
             PROVIDER_API_VERSION_V2
-            if self.schema == PROVIDER_SCHEMA_V2
+            if self.schema in {PROVIDER_SCHEMA_V2, PLYCTL_PROVIDER_SCHEMA_V2}
             else PROVIDER_API_VERSION
         )
         if self.metadata.provider_api != expected_api:
@@ -697,6 +710,10 @@ __all__ = [
     "PROVIDER_API_VERSION_V2",
     "PROVIDER_SCHEMA_V2",
     "PROVIDER_ENTRY_POINT_GROUP",
+    "PLYCTL_PROVIDER_SCHEMA",
+    "PLYCTL_PROVIDER_SCHEMA_V2",
+    "PLYCTL_PROVIDER_ENTRY_POINT_GROUP",
+    "SUPPORTED_PROVIDER_ENTRY_POINT_GROUPS",
     "ProviderMetadata",
     "NodeDescriptor",
     "ProbeDescriptor",

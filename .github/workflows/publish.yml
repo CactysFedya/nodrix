@@ -47,7 +47,7 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install toolchain and Nodrix
+      - name: Install toolchain and Plyctl
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends cmake ffmpeg g++
@@ -99,12 +99,14 @@ jobs:
         run: |
           python -m pip install --upgrade build twine
           python -m build --sdist
+          python -m build --sdist --wheel \
+            --outdir dist packages/nodrix-compat
           python -m twine check dist/*
 
       - uses: actions/upload-artifact@v6
         with:
           name: sdist
-          path: dist/*.tar.gz
+          path: dist/*
           if-no-files-found: error
 
   build-wheels:
@@ -139,7 +141,7 @@ jobs:
         shell: bash
         run: |
           python -m cibuildwheel \
-            --output-dir wheelhouse dist/nodrix-*.tar.gz
+            --output-dir wheelhouse dist/plyctl-*.tar.gz
 
       - uses: actions/upload-artifact@v6
         with:
@@ -153,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/nodrix/
+      url: https://pypi.org/project/plyctl/
     permissions:
       id-token: write
 
@@ -190,5 +192,5 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" dist/* \
             --repo "${GITHUB_REPOSITORY}" \
-            --title "Nodrix ${GITHUB_REF_NAME#v}" \
+            --title "Plyctl ${GITHUB_REF_NAME#v}" \
             --generate-notes

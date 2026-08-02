@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.2.0a5 — Plyctl compatibility rebrand
+
+- Renamed the public product, distribution, CLI, Python SDK, manifest API,
+  provider entry point, and documentation to Plyctl.
+- Preserved the `nodrix` import and CLI, `nodrix.dev/v1`/`v2` manifests,
+  Provider API entry points, native ABI, recordings, stream URIs, provider
+  ids, environment variables, and run-artifact paths for the 2.x line.
+- Added canonical `plyctl-spatial`, `plyctl-mapping`, `plyctl-ros2`, and
+  `plyctl-spatial-ros2` distributions with legacy Python import shims.
+- Added a metadata-only `nodrix` compatibility distribution that installs the
+  matching Plyctl version.
+- Added a Sphinx/MyST documentation site and GitHub Pages build/deployment
+  workflow.
+- Kept the generic ROS 2 YAML model and FAST-LIVO2 orchestration independent
+  of algorithm-specific plugins.
+
 ## 2.2.0-alpha.4 — Core Boundaries
 
 - Split manifest, provider, CLI, and unified-runtime implementation into

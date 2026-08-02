@@ -2,10 +2,10 @@
   "schema": "nodrix-provider/1",
   "metadata": {
     "id": "nodrix.ros2.spatial",
-    "name": "Nodrix ROS 2 Spatial Bridges",
+    "name": "Plyctl ROS 2 Spatial Bridges",
     "version": "0.1.0",
     "provider_api": "1",
-    "requires_nodrix": ">=2.2.0a3,<3",
+    "requires_nodrix": ">=2.2.0a5,<3",
     "description": "Typed ROS 2 PointCloud, IMU, and Odometry bridges",
     "features": [
       "bridge.ros2.spatial",
