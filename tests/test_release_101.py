@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_patch_release_metadata() -> None:
     with (ROOT / "pyproject.toml").open("rb") as handle:
         config = tomllib.load(handle)
-    assert config["project"]["version"] == "2.2.0a3"
+    assert config["project"]["version"] == "2.2.0a4"
     assert "setuptools>=68" in config["build-system"]["requires"]
     assert "license" not in config["project"]
     assert (

@@ -30,10 +30,17 @@ def main() -> int:
     replace(ROOT / "pyproject.toml", r'^version = "[^"]+"', f'version = "{version}"')
     replace(ROOT / "src/nodrix/__init__.py", r'^__version__ = "[^"]+"', f'__version__ = "{version}"')
     replace(ROOT / "CITATION.cff", r"^version: [^\n]+", f"version: {version}")
+    cmake_version = re.match(r"[0-9]+\.[0-9]+\.[0-9]+", version)
+    assert cmake_version is not None
     replace(
         ROOT / "src/nodrix/native/CMakeLists.txt",
         r"project\(nodrix_native VERSION [^ ]+",
-        f"project(nodrix_native VERSION {version}",
+        f"project(nodrix_native VERSION {cmake_version.group(0)}",
+    )
+    replace(
+        ROOT / "src/nodrix/native/CMakeLists.txt",
+        r'^set\(NODRIX_RELEASE_VERSION "[^"]+"',
+        f'set(NODRIX_RELEASE_VERSION "{version}"',
     )
 
     templates = ROOT / "src/nodrix/project_templates.py"

@@ -65,7 +65,7 @@ def _write_manifest(path: Path, document: dict) -> Path:
 
 
 def test_v200_version_and_stable_public_api() -> None:
-    assert nodrix.__version__ == "2.2.0a3"
+    assert nodrix.__version__ == "2.2.0a4"
     assert nodrix.PipelineManifest is PipelineManifest
     assert nodrix.load_manifest is load_manifest
     assert issubclass(nodrix.ManifestError, nodrix.NodrixError)

@@ -23,6 +23,8 @@ class ValidationIssue:
 def _find_cycles(manifest: PipelineManifest) -> list[list[str]]:
     graph: dict[str, list[str]] = {name: [] for name in manifest.nodes}
     for edge in manifest.edges:
+        if edge.transport is not None:
+            continue
         source = edge.source.split(".", 1)[0]
         target = edge.target.split(".", 1)[0]
         graph.setdefault(source, []).append(target)

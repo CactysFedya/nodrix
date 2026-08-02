@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodrix"
-version = "2.2.0a3"
+version = "2.2.0a4"
 description = "High-performance typed runtime for local and distributed streaming graphs"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -103,6 +103,7 @@ nodrix = [
   "native/examples/*.cpp",
   "native/tests/*.cpp",
   "native/tests/fake_ncnn/*.h",
+  "schemas/*.json",
 ]
 
 [tool.pytest.ini_options]

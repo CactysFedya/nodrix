@@ -128,6 +128,13 @@ nodrix init my-project --template provider-template-id
 Template discovery and copying are metadata-first. Sources must remain inside
 the installed provider package and symbolic links are rejected.
 
+Development and hermetic test environments can restrict metadata discovery to
+an explicit set of distribution directories with the platform-separated
+`NODRIX_PROVIDER_PATH` environment variable. Imports still follow normal
+Python rules; the override changes only which installed provider metadata is
+considered and prevents unrelated global editable installs from leaking into a
+test run.
+
 ## Signatures and trust
 
 `nodrix-provider.sig` is a detached Ed25519 signature over canonical JSON

@@ -16,7 +16,11 @@ EXECUTION_PLAN_SCHEMA = "nodrix.execution-plan/v1"
 def _topological_order(manifest: PipelineManifest) -> tuple[list[str], bool]:
     indegree = {name: 0 for name in manifest.nodes}
     outgoing: dict[str, list[str]] = defaultdict(list)
-    for edge in (*manifest.edges, *manifest.links):
+    # External links describe an integration topology, not local scheduling
+    # dependencies.  They may also terminate at managed applications.
+    for edge in manifest.edges:
+        if edge.transport is not None:
+            continue
         source = edge.source.split(".", 1)[0]
         target = edge.target.split(".", 1)[0]
         if source == target:
@@ -124,6 +128,24 @@ def compile_execution_plan(
     edges: list[dict[str, Any]] = []
     total_planned_copies = 0
     for ordinal, edge in enumerate(manifest.edges):
+        if edge.transport is not None:
+            edges.append(
+                {
+                    "ordinal": ordinal,
+                    "from": edge.source,
+                    "to": edge.target,
+                    "transport": _redact(
+                        edge.transport.model_dump(
+                            by_alias=True,
+                            exclude_none=True,
+                            mode="json",
+                        )
+                    ),
+                    "data_plane": "external",
+                    "planned_copies": 0,
+                }
+            )
+            continue
         described = described_edges.get((edge.source, edge.target), {})
         memory = dict(described.get("memory") or {})
         planned_copies = int(memory.get("planned_copies", 0))
@@ -155,6 +177,26 @@ def compile_execution_plan(
                 "parameters": _redact(dict(config.parameters)),
             }
             for name, config in manifest.sessions.items()
+        ],
+        "resources": [
+            {
+                "name": name,
+                "uses": config.uses,
+                "parameters": _redact(dict(config.parameters)),
+            }
+            for name, config in manifest.resources.items()
+        ],
+        "applications": [
+            {
+                "ordinal": ordinal,
+                "name": name,
+                "uses": config.uses,
+                "bindings": dict(config.bindings),
+                "parameters": _redact(dict(config.parameters)),
+            }
+            for ordinal, (name, config) in enumerate(
+                manifest.applications.items()
+            )
         ],
         "reproducible": reproducible,
         "topological_order": order,
@@ -194,6 +236,8 @@ def compile_execution_plan(
             "edges": len(edges),
             "links": len(manifest.links),
             "sessions": len(manifest.sessions),
+            "resources": len(manifest.resources),
+            "applications": len(manifest.applications),
             "streams": len(manifest.streams.exports),
             "planned_copies": total_planned_copies,
         },
@@ -212,14 +256,36 @@ def validate_execution_plan(plan: dict[str, Any]) -> None:
         raise ValueError("Execution plan has an invalid manifest_sha256")
     nodes = list(plan.get("nodes") or [])
     names = [str(node.get("name", "")) for node in nodes]
-    if not names or any(not name for name in names) or len(names) != len(set(names)):
+    if any(not name for name in names) or len(names) != len(set(names)):
         raise ValueError("Execution plan node names must be non-empty and unique")
-    known = set(names)
-    for edge in [*(plan.get("edges") or []), *(plan.get("links") or [])]:
+    applications = list(plan.get("applications") or [])
+    application_names = [str(item.get("name", "")) for item in applications]
+    if any(not name for name in application_names) or len(application_names) != len(
+        set(application_names)
+    ):
+        raise ValueError(
+            "Execution plan application names must be non-empty and unique"
+        )
+    if set(names) & set(application_names):
+        raise ValueError("Execution plan node/application names must be unique")
+    if not names and not application_names:
+        raise ValueError("Execution plan requires a node or application")
+    known_nodes = set(names)
+    known_endpoints = known_nodes | set(application_names)
+    for edge in plan.get("edges") or []:
         source = str(edge.get("from", "")).split(".", 1)[0]
         target = str(edge.get("to", "")).split(".", 1)[0]
+        known = known_endpoints if edge.get("transport") else known_nodes
         if source not in known or target not in known:
             raise ValueError(f"Execution plan edge references an unknown node: {edge!r}")
+    for link in plan.get("links") or []:
+        source = str(link.get("from", "")).split(".", 1)[0]
+        target = str(link.get("to", "")).split(".", 1)[0]
+        if source not in known_endpoints or target not in known_endpoints:
+            raise ValueError(
+                "Execution plan link references an unknown endpoint: "
+                f"{link!r}"
+            )
 
 
 def write_execution_plan(plan: dict[str, Any], path: str | Path) -> Path:
