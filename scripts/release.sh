@@ -18,6 +18,6 @@ git add pyproject.toml CITATION.cff RELEASE_MANIFEST.json \
   src/nodrix/project_templates.py CHANGELOG.md
 git commit -m "Release Plyctl $VERSION"
 git tag -s "$TAG" -m "Plyctl $VERSION" || git tag -a "$TAG" -m "Plyctl $VERSION"
-git push origin main "$TAG"
+git push origin HEAD "$TAG"
 
 echo "The Publish workflow will build wheels and upload Plyctl $VERSION to PyPI."

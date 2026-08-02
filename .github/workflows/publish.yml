@@ -101,6 +101,14 @@ jobs:
           python -m build --sdist
           python -m build --sdist --wheel \
             --outdir dist packages/nodrix-compat
+          python -m build --sdist --wheel \
+            --outdir dist packages/nodrix-spatial
+          python -m build --sdist --wheel \
+            --outdir dist packages/nodrix-mapping
+          python -m build --sdist --wheel \
+            --outdir dist packages/nodrix-ros2
+          python -m build --sdist --wheel \
+            --outdir dist packages/nodrix-spatial-ros2
           python -m twine check dist/*
 
       - uses: actions/upload-artifact@v6
@@ -171,6 +179,8 @@ jobs:
 
       - name: Publish distributions
         uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
 
   github-release:
     name: Create GitHub release

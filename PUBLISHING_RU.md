@@ -62,9 +62,14 @@ Workflow:          publish.yml
 Environment:       pypi
 ```
 
-Тот же publisher нужно разрешить и для проекта `nodrix`: workflow публикует
-маленький compatibility-пакет, который зависит от точно такой же версии
-`plyctl`. Он нужен, чтобы старый `pip install nodrix` не перестал работать.
+Тот же publisher для `publish.yml` нужно разрешить для `nodrix` и четырёх
+модульных проектов: `plyctl-spatial`, `plyctl-mapping`, `plyctl-ros2` и
+`plyctl-spatial-ros2`. Пакет `nodrix` — маленький compatibility installer,
+который зависит от точно такой же версии `plyctl`.
+
+Для четырёх модульных проектов дополнительно разреши тот же repository и
+environment, но workflow укажи `publish-modular-package.yml`. Это позволяет
+выпускать отдельный пакет независимо от ядра.
 
 На GitHub создай environment `pypi`:
 
@@ -134,6 +139,19 @@ scripts/release.sh X.Y.Z
 версии, создаст commit/tag и отправит их в GitHub.
 
 PyPI запрещает перезаписывать уже опубликованную версию. Любое исправление требует новой версии.
+
+Отдельный модуль публикуется собственным тегом после изменения его версии в
+`pyproject.toml` и успешного modular CI:
+
+```bash
+git tag -a plyctl-ros2-v0.4.1 -m "plyctl-ros2 0.4.1"
+git push origin plyctl-ros2-v0.4.1
+```
+
+Допустимые префиксы: `plyctl-spatial-v`, `plyctl-mapping-v`,
+`plyctl-ros2-v` и `plyctl-spatial-ros2-v`. Workflow сверяет имя и версию тега
+с метаданными выбранного пакета, тестирует весь модульный набор и публикует
+только выбранный wheel/sdist.
 
 ## Ручная загрузка как аварийный вариант
 
