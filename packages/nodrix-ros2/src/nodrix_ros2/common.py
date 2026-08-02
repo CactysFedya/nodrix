@@ -44,23 +44,63 @@ def message_frame_id(message: Any) -> str:
     return str(getattr(header, "frame_id", "") or "")
 
 
-def ros_to_python(value: Any) -> Any:
+def ros_to_python(
+    value: Any,
+    *,
+    maximum_binary_bytes: int = 1_048_576,
+    maximum_sequence_items: int = 65_536,
+) -> Any:
     if isinstance(value, (str, int, float, bool, bytes, bytearray)) or value is None:
+        if isinstance(value, (bytes, bytearray)) and len(value) > maximum_binary_bytes:
+            raise ValueError(
+                "Generic ROS conversion refused a large binary payload; "
+                "use a typed/native adapter or raise maximum_binary_bytes explicitly"
+            )
         return value
     if isinstance(value, Mapping):
-        return {str(key): ros_to_python(item) for key, item in value.items()}
+        return {
+            str(key): ros_to_python(
+                item,
+                maximum_binary_bytes=maximum_binary_bytes,
+                maximum_sequence_items=maximum_sequence_items,
+            )
+            for key, item in value.items()
+        }
     if isinstance(value, Sequence):
-        return [ros_to_python(item) for item in value]
+        if len(value) > maximum_sequence_items:
+            raise ValueError(
+                "Generic ROS conversion refused a large sequence; use a "
+                "typed/native adapter or raise maximum_sequence_items explicitly"
+            )
+        return [
+            ros_to_python(
+                item,
+                maximum_binary_bytes=maximum_binary_bytes,
+                maximum_sequence_items=maximum_sequence_items,
+            )
+            for item in value
+        ]
     fields = getattr(value, "get_fields_and_field_types", None)
     if callable(fields):
         return {
-            name: ros_to_python(getattr(value, name))
+            name: ros_to_python(
+                getattr(value, name),
+                maximum_binary_bytes=maximum_binary_bytes,
+                maximum_sequence_items=maximum_sequence_items,
+            )
             for name in fields()
         }
     return value
 
 
 def assign_ros(target: Any, values: Mapping[str, Any]) -> Any:
+    try:
+        set_message = importlib.import_module("rosidl_runtime_py.set_message")
+    except ModuleNotFoundError:
+        set_message = None
+    if set_message is not None:
+        set_message.set_message_fields(target, dict(values))
+        return target
     for name, value in values.items():
         if not hasattr(target, name):
             raise ValueError(f"ROS message has no field {name!r}")

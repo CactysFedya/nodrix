@@ -17,11 +17,20 @@ def ros_value(value: Any) -> str:
     return json.dumps(value, separators=(",", ":"), ensure_ascii=False)
 
 
+def ros_parameter_value(value: Any) -> str:
+    """Serialize a CLI parameter without retyping string-looking values."""
+
+    if isinstance(value, str):
+        return json.dumps(value, ensure_ascii=False)
+    return ros_value(value)
+
+
 def ros_arguments(
     *,
     node_name: str | None = None,
     namespace: str | None = None,
     parameters: Mapping[str, Any] | None = None,
+    parameter_files: tuple[str, ...] = (),
     remappings: Mapping[str, str] | None = None,
 ) -> list[str]:
     result: list[str] = []
@@ -31,8 +40,10 @@ def ros_arguments(
         result.extend(["-r", f"__ns:={namespace}"])
     for source, target in dict(remappings or {}).items():
         result.extend(["-r", f"{source}:={target}"])
+    for path in parameter_files:
+        result.extend(["--params-file", str(path)])
     for name, value in dict(parameters or {}).items():
-        result.extend(["-p", f"{name}:={ros_value(value)}"])
+        result.extend(["-p", f"{name}:={ros_parameter_value(value)}"])
     return result
 
 
@@ -47,6 +58,7 @@ def build_ros2_run_command(parameters: Mapping[str, Any]) -> tuple[str, ...]:
         node_name=(str(parameters["name"]) if parameters.get("name") else None),
         namespace=(str(parameters["namespace"]) if parameters.get("namespace") else None),
         parameters=parameters.get("ros_parameters"),
+        parameter_files=tuple(str(item) for item in parameters.get("params_files", ())),
         remappings=parameters.get("remappings"),
     )
     if ros_args:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodrix-ros2"
-version = "0.3.0"
+version = "0.3.1"
 description = "Universal ROS 2 orchestration and transport provider for Nodrix"
 requires-python = ">=3.11"
 dependencies = ["nodrix>=2.2.0a3,<3"]
@@ -27,4 +27,5 @@ nodrix_ros2 = [
   "py.typed",
   "templates/ros2-fast-livo2/*",
   "templates/ros2-fast-livo2/.env.example",
+  "templates/ros2-fast-livo2/rviz/*.rviz",
 ]

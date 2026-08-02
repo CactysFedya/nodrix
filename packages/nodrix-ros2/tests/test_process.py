@@ -44,3 +44,19 @@ def test_managed_process_rotates_logs_and_reports_command_identity(
     assert snapshot.command_sha256 == hashlib.sha256(
         "\0".join(command).encode("utf-8")
     ).hexdigest()
+
+
+def test_managed_process_can_restart_after_clean_exit(tmp_path: Path) -> None:
+    process = ManagedProcess(
+        [sys.executable, "-c", "print('ready')"],
+        cwd=tmp_path,
+        environment={"PATH": str(Path(sys.executable).parent)},
+        stdout_path=tmp_path / "restart.stdout.log",
+        stderr_path=tmp_path / "restart.stderr.log",
+    )
+    process.start()
+    assert process.wait(5) == 0
+    process.restart()
+    assert process.wait(5) == 0
+    process.stop()
+    assert (tmp_path / "restart.stdout.log").read_text().count("ready") == 2

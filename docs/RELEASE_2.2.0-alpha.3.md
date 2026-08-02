@@ -20,7 +20,7 @@ ROS 2 orchestrator while keeping existing Nodrix YAML valid.
 nodrix
 ├── nodrix-spatial          transport-neutral spatial contracts
 ├── nodrix-mapping          mapping contracts and alpha aliases
-├── nodrix-ros2 0.3.0       ROS platform/session/orchestration
+├── nodrix-ros2 0.3.1       ROS platform/session/orchestration
 └── nodrix-spatial-ros2     optional typed ROS ↔ Spatial bridges
 ```
 
@@ -60,7 +60,9 @@ The Livox → FAST-LIVO2 → RViz integration was migrated to this shape.
 ## Validation scope
 
 Offline unit tests cover Provider APIs 1/2, old and new manifest shapes,
-parameter schemas, session cleanup, graph-only monitoring, log rotation,
-workspace trust policy, spatial adapters, and provider metadata. Real ROS 2,
-QoS, Livox Mid-360S, FAST-LIVO2, and RViz validation remains required on the
-target Ubuntu 24.04 / ROS 2 Jazzy system.
+parameter schemas, teardown races, strict QoS, graph/sample monitoring,
+logical-link compilation, restart/log supervision, workspace trust and
+environment policy, spatial adapters, and provider metadata. CI also contains
+a real ROS 2 Jazzy publisher/subscriber smoke job. Livox Mid-360S, FAST-LIVO2,
+RViz rendering, and RMW performance validation remain required on the target
+Ubuntu 24.04 robot system.

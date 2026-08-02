@@ -27,8 +27,41 @@ _LOCKS: dict[str, threading.RLock] = {}
 _LOCKS_GUARD = threading.Lock()
 
 
-def _expand_path(value: str | os.PathLike[str]) -> Path:
-    return Path(os.path.expandvars(os.path.expanduser(str(value)))).resolve()
+def _expand_path(
+    value: str | os.PathLike[str],
+    *,
+    base_dir: Path | None = None,
+) -> Path:
+    path = Path(os.path.expandvars(os.path.expanduser(str(value))))
+    if not path.is_absolute() and base_dir is not None:
+        path = base_dir / path
+    return path.resolve()
+
+
+_SAFE_ENVIRONMENT_NAMES = {
+    "HOME", "USER", "LOGNAME", "PATH", "SHELL", "LANG", "LANGUAGE",
+    "TMPDIR", "TEMP", "TMP", "TERM", "DISPLAY", "XAUTHORITY",
+    "WAYLAND_DISPLAY", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH",
+    "PYTHONPATH", "CC", "CXX", "CMAKE_TOOLCHAIN_FILE",
+    "CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES",
+    "CYCLONEDDS_URI", "FASTRTPS_DEFAULT_PROFILES_FILE",
+}
+_SAFE_ENVIRONMENT_PREFIXES = ("LC_", "ROS_", "RMW_", "AMENT_", "COLCON_")
+
+
+def base_ros_environment(
+    *,
+    inherit_all: bool = False,
+    pass_names: Sequence[str] = (),
+) -> dict[str, str]:
+    if inherit_all:
+        return dict(os.environ)
+    allowed = _SAFE_ENVIRONMENT_NAMES | {str(item) for item in pass_names}
+    return {
+        name: value
+        for name, value in os.environ.items()
+        if name in allowed or name.startswith(_SAFE_ENVIRONMENT_PREFIXES)
+    }
 
 
 def _path_lock(path: Path) -> threading.RLock:
@@ -104,7 +137,7 @@ def capture_sourced_environment(
     commands.extend(f"source {shlex.quote(str(path))}" for path in setup_files)
     commands.append("env -0")
     completed = subprocess.run(
-        ["bash", "-lc", "; ".join(commands)],
+        ["bash", "--noprofile", "--norc", "-c", "; ".join(commands)],
         check=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -162,10 +195,17 @@ class RosWorkspaceSpec:
     path: Path | None = None
     build: RosBuildSpec = field(default_factory=RosBuildSpec)
     environment: Mapping[str, str] = field(default_factory=dict)
+    inherit_environment: bool = False
+    pass_environment: tuple[str, ...] = ()
     trust: str = "explicit"
 
     @classmethod
-    def from_mapping(cls, value: Mapping[str, Any] | None) -> "RosWorkspaceSpec":
+    def from_mapping(
+        cls,
+        value: Mapping[str, Any] | None,
+        *,
+        base_dir: Path | None = None,
+    ) -> "RosWorkspaceSpec":
         data = dict(value or {})
         distro = str(data.get("distro") or os.environ.get("ROS_DISTRO") or "jazzy")
         raw_underlays = list(data.get("underlays", ()))
@@ -177,10 +217,20 @@ class RosWorkspaceSpec:
             raise ValueError("ROS workspace trust must be project, explicit, or readonly")
         return cls(
             distro=distro,
-            underlays=tuple(_expand_path(item) for item in raw_underlays),
-            path=None if not path_value else _expand_path(path_value),
+            underlays=tuple(
+                _expand_path(item, base_dir=base_dir) for item in raw_underlays
+            ),
+            path=(
+                None
+                if not path_value
+                else _expand_path(path_value, base_dir=base_dir)
+            ),
             build=RosBuildSpec.from_mapping(data.get("build")),
             environment={str(k): str(v) for k, v in dict(data.get("environment") or {}).items()},
+            inherit_environment=bool(data.get("inherit_environment", False)),
+            pass_environment=tuple(
+                str(item) for item in data.get("pass_environment", ())
+            ),
             trust=trust,
         )
 
@@ -301,6 +351,7 @@ class RosWorkspaceManager:
         self,
         underlay_setups: Sequence[Path],
         command: Sequence[str],
+        environment: Mapping[str, str],
     ) -> dict[str, Any]:
         return {
             "schema": "nodrix.ros2-build-identity/v1",
@@ -317,9 +368,9 @@ class RosWorkspaceManager:
             "colcon": shutil.which("colcon"),
             "python": sys.version.split()[0],
             "platform": platform.platform(),
-            "cc": os.environ.get("CC"),
-            "cxx": os.environ.get("CXX"),
-            "cmake_toolchain_file": os.environ.get("CMAKE_TOOLCHAIN_FILE"),
+            "cc": environment.get("CC"),
+            "cxx": environment.get("CXX"),
+            "cmake_toolchain_file": environment.get("CMAKE_TOOLCHAIN_FILE"),
             "environment": dict(sorted(self.spec.environment.items())),
         }
 
@@ -334,7 +385,14 @@ class RosWorkspaceManager:
 
     def _prepare_locked(self) -> WorkspacePreparation:
         underlay_setups = tuple(resolve_setup_file(path) for path in self.spec.underlays)
-        build_environment = capture_sourced_environment(underlay_setups)
+        base_environment = base_ros_environment(
+            inherit_all=self.spec.inherit_environment,
+            pass_names=self.spec.pass_environment,
+        )
+        build_environment = capture_sourced_environment(
+            underlay_setups,
+            base_environment=base_environment,
+        )
         build_environment.update(self.spec.environment)
         built = False
         command: tuple[str, ...] = ()
@@ -346,7 +404,11 @@ class RosWorkspaceManager:
             if not workspace.is_dir():
                 raise FileNotFoundError(f"ROS workspace does not exist: {workspace}")
             planned_command = build_command(self.spec.build)
-            identity = self._identity(underlay_setups, planned_command)
+            identity = self._identity(
+                underlay_setups,
+                planned_command,
+                build_environment,
+            )
             fingerprint = workspace_fingerprint(
                 workspace,
                 strict=self.spec.build.strict_fingerprint,
@@ -427,9 +489,13 @@ class RosWorkspaceManager:
         else:
             setup_files = underlay_setups
 
-        runtime_environment = capture_sourced_environment(
-            setup_files,
-            base_environment=build_environment,
+        runtime_environment = (
+            capture_sourced_environment(
+                (install_setup,),
+                base_environment=build_environment,
+            )
+            if self.spec.path is not None
+            else dict(build_environment)
         )
         runtime_environment.update(self.spec.environment)
         return WorkspacePreparation(

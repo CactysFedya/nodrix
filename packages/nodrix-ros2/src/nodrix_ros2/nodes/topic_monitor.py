@@ -49,7 +49,12 @@ class Ros2TopicMonitor(SourceNode):
         self._lease: RosNodeLease = shared_ros_runtime().acquire_node(
             name=str(self.parameters.get("node_name", f"nodrix_monitor_{context.name}")),
             namespace=str(self.parameters.get("namespace", "")),
-            executor_threads=int(self.parameters.get("executor_threads", 2)),
+            executor_threads=int(
+                self.parameters.get(
+                    "executor_threads",
+                    getattr(self._session, "executor_threads", 2),
+                )
+            ),
         )
 
         def callback(_: Any) -> None:
@@ -84,8 +89,8 @@ class Ros2TopicMonitor(SourceNode):
         minimum = max(float(self.parameters.get("minimum_rate_hz", 0.0)), 0.0)
         stale_timeout = max(float(self.parameters.get("stale_timeout_s", 2.0)), 0.05)
         ready = received > 0 and age is not None and age <= stale_timeout
-        if minimum > 0 and len(arrivals) >= 2:
-            ready = ready and rate >= minimum
+        if minimum > 0:
+            ready = ready and len(arrivals) >= 2 and rate >= minimum
         return {
             "mode": "sample",
             "topic": self._topic,
@@ -108,7 +113,16 @@ class Ros2TopicMonitor(SourceNode):
             if updated_ns <= 0
             else max((time.time_ns() - updated_ns) / 1_000_000_000, 0.0)
         )
-        ready = publishers > 0 and self._message_type_name in types
+        graph_stale_timeout = max(
+            float(self.parameters.get("graph_stale_timeout_s", 2.0)),
+            0.05,
+        )
+        ready = (
+            publishers > 0
+            and self._message_type_name in types
+            and age_s is not None
+            and age_s <= graph_stale_timeout
+        )
         return {
             "mode": self._mode,
             "topic": self._topic,
@@ -134,6 +148,11 @@ class Ros2TopicMonitor(SourceNode):
         stale_timeout = max(float(self.parameters.get("stale_timeout_s", 2.0)), 0.05)
         deadline = time.monotonic() + startup_timeout
         was_ready = False
+        unhealthy_since: float | None = None
+        rate_grace = max(
+            float(self.parameters.get("rate_failure_grace_s", 2.0)),
+            0.0,
+        )
         while not self._closed:
             snapshot = self._snapshot()
             if not snapshot["ready"] and time.monotonic() >= deadline:
@@ -141,10 +160,21 @@ class Ros2TopicMonitor(SourceNode):
             if (
                 self._mode == "sample"
                 and was_ready
-                and snapshot["age_s"] is not None
-                and snapshot["age_s"] > stale_timeout
+                and not snapshot["ready"]
             ):
-                raise RuntimeError(f"ROS 2 topic became stale: {self._topic}")
+                unhealthy_since = unhealthy_since or time.monotonic()
+                if time.monotonic() - unhealthy_since >= rate_grace:
+                    reason = (
+                        "stale"
+                        if snapshot["age_s"] is not None
+                        and snapshot["age_s"] > stale_timeout
+                        else "below the required rate"
+                    )
+                    raise RuntimeError(
+                        f"ROS 2 topic became {reason}: {self._topic}"
+                    )
+            else:
+                unhealthy_since = None
             was_ready = was_ready or bool(snapshot["ready"])
             yield {
                 "status": Message(
@@ -177,3 +207,4 @@ class Ros2TopicMonitor(SourceNode):
         if lease is not None:
             lease.close()
         self._lease = None
+        super().close()

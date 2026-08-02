@@ -8,6 +8,7 @@ from nodrix_ros2.workspace import (
     resolve_setup_file,
     workspace_fingerprint,
     RosWorkspaceManager,
+    base_ros_environment,
 )
 import pytest
 
@@ -55,6 +56,48 @@ def test_build_command_is_deterministic() -> None:
 def test_default_workspace_uses_ros_distro_underlay() -> None:
     spec = RosWorkspaceSpec.from_mapping({"distro": "jazzy"})
     assert str(spec.underlays[0]) == "/opt/ros/jazzy"
+
+
+def test_relative_workspace_and_underlay_resolve_from_project(tmp_path: Path) -> None:
+    spec = RosWorkspaceSpec.from_mapping(
+        {"path": "robot_ws", "underlays": ["ros_underlay"]},
+        base_dir=tmp_path,
+    )
+    assert spec.path == (tmp_path / "robot_ws").resolve()
+    assert spec.underlays == ((tmp_path / "ros_underlay").resolve(),)
+
+
+def test_runtime_does_not_source_underlay_twice(tmp_path: Path) -> None:
+    underlay = tmp_path / "underlay"
+    workspace = tmp_path / "workspace"
+    (workspace / "install").mkdir(parents=True)
+    underlay.mkdir()
+    (underlay / "setup.bash").write_text(
+        "export NODRIX_SOURCE_COUNT=$(( ${NODRIX_SOURCE_COUNT:-0} + 1 ))\n",
+        encoding="utf-8",
+    )
+    (workspace / "install" / "setup.bash").write_text(
+        "export NODRIX_INSTALL_SEES_COUNT=${NODRIX_SOURCE_COUNT}\n",
+        encoding="utf-8",
+    )
+    spec = RosWorkspaceSpec.from_mapping(
+        {
+            "underlays": [str(underlay)],
+            "path": str(workspace),
+            "build": {"mode": "never"},
+        }
+    )
+    prepared = RosWorkspaceManager(spec).prepare()
+    assert prepared.environment["NODRIX_SOURCE_COUNT"] == "1"
+    assert prepared.environment["NODRIX_INSTALL_SEES_COUNT"] == "1"
+
+
+def test_base_environment_requires_explicit_secret_pass(monkeypatch) -> None:
+    monkeypatch.setenv("NODRIX_PRIVATE_TOKEN", "secret")
+    assert "NODRIX_PRIVATE_TOKEN" not in base_ros_environment()
+    assert base_ros_environment(pass_names=("NODRIX_PRIVATE_TOKEN",))[
+        "NODRIX_PRIVATE_TOKEN"
+    ] == "secret"
 
 
 def test_project_trust_rejects_workspace_outside_project(

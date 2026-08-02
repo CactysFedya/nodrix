@@ -26,7 +26,7 @@
       "external-links.1"
     ],
     "requires_nodrix": ">=2.2.0a3,<3",
-    "version": "0.3.0"
+    "version": "0.3.1"
   },
   "nodes": [
     {
@@ -49,7 +49,17 @@
           "executable": {"type": "string", "minLength": 1},
           "workspace": {"type": "object"},
           "remappings": {"type": "object"},
-          "requires_topics": {"type": "array"}
+          "ros_parameters": {"type": "object"},
+          "params_files": {"type": "array", "items": {"type": "string"}},
+          "requires_topics": {"type": "array"},
+          "startup_grace_s": {"type": "number", "minimum": 0},
+          "heartbeat_interval_s": {"type": "number", "exclusiveMinimum": 0},
+          "allow_clean_exit": {"type": "boolean"},
+          "restart_policy": {"enum": ["none", "on-failure", "always"]},
+          "max_restarts": {"type": "integer", "minimum": 0},
+          "restart_backoff_s": {"type": "number", "minimum": 0},
+          "restart_max_backoff_s": {"type": "number", "minimum": 0},
+          "expose_command": {"type": "boolean"}
         }
       }
     },
@@ -73,7 +83,16 @@
           "launch_file": {"type": "string", "minLength": 1},
           "workspace": {"type": "object"},
           "arguments": {"type": "object"},
-          "requires_topics": {"type": "array"}
+          "ros_port_arguments": {"type": "object"},
+          "requires_topics": {"type": "array"},
+          "startup_grace_s": {"type": "number", "minimum": 0},
+          "heartbeat_interval_s": {"type": "number", "exclusiveMinimum": 0},
+          "allow_clean_exit": {"type": "boolean"},
+          "restart_policy": {"enum": ["none", "on-failure", "always"]},
+          "max_restarts": {"type": "integer", "minimum": 0},
+          "restart_backoff_s": {"type": "number", "minimum": 0},
+          "restart_max_backoff_s": {"type": "number", "minimum": 0},
+          "expose_command": {"type": "boolean"}
         }
       }
     },
@@ -94,7 +113,15 @@
         "properties": {
           "config": {"type": "string"},
           "workspace": {"type": "object"},
-          "requires_topics": {"type": "array"}
+          "remappings": {"type": "object"},
+          "requires_topics": {"type": "array"},
+          "startup_grace_s": {"type": "number", "minimum": 0},
+          "allow_clean_exit": {"type": "boolean"},
+          "restart_policy": {"enum": ["none", "on-failure", "always"]},
+          "max_restarts": {"type": "integer", "minimum": 0},
+          "restart_backoff_s": {"type": "number", "minimum": 0},
+          "restart_max_backoff_s": {"type": "number", "minimum": 0},
+          "expose_command": {"type": "boolean"}
         }
       }
     },
@@ -118,7 +145,17 @@
           "topic": {"type": "string", "minLength": 1},
           "message_type": {"type": "string", "minLength": 1},
           "startup_timeout_s": {"type": "number", "exclusiveMinimum": 0},
-          "sample_interval_s": {"type": "number", "exclusiveMinimum": 0}
+          "sample_interval_s": {"type": "number", "exclusiveMinimum": 0},
+          "stale_timeout_s": {"type": "number", "exclusiveMinimum": 0},
+          "graph_stale_timeout_s": {"type": "number", "exclusiveMinimum": 0},
+          "minimum_rate_hz": {"type": "number", "minimum": 0},
+          "rate_failure_grace_s": {"type": "number", "minimum": 0},
+          "executor_threads": {"type": "integer", "minimum": 1},
+          "preset": {"enum": ["sensor_data"]},
+          "reliability": {"enum": ["reliable", "best_effort"]},
+          "durability": {"enum": ["volatile", "transient_local"]},
+          "history": {"enum": ["keep_last", "keep_all"]},
+          "depth": {"type": "integer", "minimum": 1}
         }
       }
     },
@@ -139,7 +176,16 @@
         "properties": {
           "topic": {"type": "string", "minLength": 1},
           "message_type": {"type": "string", "minLength": 1},
-          "capacity": {"type": "integer", "minimum": 1}
+          "capacity": {"type": "integer", "minimum": 1},
+          "raw_message": {"type": "boolean"},
+          "maximum_binary_bytes": {"type": "integer", "minimum": 0},
+          "maximum_sequence_items": {"type": "integer", "minimum": 0},
+          "executor_threads": {"type": "integer", "minimum": 1},
+          "preset": {"enum": ["sensor_data"]},
+          "reliability": {"enum": ["reliable", "best_effort"]},
+          "durability": {"enum": ["volatile", "transient_local"]},
+          "history": {"enum": ["keep_last", "keep_all"]},
+          "depth": {"type": "integer", "minimum": 1}
         }
       }
     },
@@ -159,7 +205,14 @@
         "required": ["topic", "message_type"],
         "properties": {
           "topic": {"type": "string", "minLength": 1},
-          "message_type": {"type": "string", "minLength": 1}
+          "message_type": {"type": "string", "minLength": 1},
+          "executor_threads": {"type": "integer", "minimum": 1},
+          "map_timestamp": {"type": "boolean"},
+          "preset": {"enum": ["sensor_data"]},
+          "reliability": {"enum": ["reliable", "best_effort"]},
+          "durability": {"enum": ["volatile", "transient_local"]},
+          "history": {"enum": ["keep_last", "keep_all"]},
+          "depth": {"type": "integer", "minimum": 1}
         }
       }
     },
@@ -240,8 +293,16 @@
         "properties": {
           "distro": {"type": "string", "default": "jazzy"},
           "path": {"type": "string"},
+          "underlays": {"type": "array", "items": {"type": "string"}},
           "trust": {"enum": ["project", "explicit", "readonly"]},
-          "build": {"type": "object"}
+          "build": {"type": "object"},
+          "environment": {"type": "object"},
+          "inherit_environment": {"type": "boolean"},
+          "pass_environment": {"type": "array", "items": {"type": "string"}},
+          "executor_threads": {"type": "integer", "minimum": 1},
+          "graph_interval_s": {"type": "number", "exclusiveMinimum": 0},
+          "graph_worker_command": {"type": "array", "items": {"type": "string"}},
+          "worker_python": {"type": "string"}
         }
       }
     }
@@ -254,8 +315,8 @@
         "type": "object",
         "required": ["topic", "message_type"],
         "properties": {
-          "topic": {"type": "string"},
-          "message_type": {"type": "string"},
+          "topic": {"type": "string", "minLength": 1},
+          "message_type": {"type": "string", "minLength": 1},
           "qos": {"type": "object"}
         }
       }

@@ -16,7 +16,7 @@
   "packages": {
     "nodrix-spatial": "0.1.0",
     "nodrix-mapping": "0.1.1",
-    "nodrix-ros2": "0.3.0",
+    "nodrix-ros2": "0.3.1",
     "nodrix-spatial-ros2": "0.1.0"
   },
   "compatibility": {
@@ -26,13 +26,14 @@
     "ros2_spatial_adapter_import_shims": true
   },
   "validation": {
-    "offline_contract_tests": "56 passed",
+    "offline_contract_tests": "52 passed, 3 skipped in clean modular environment",
     "python_compile": "passed",
     "provider_discovery": "passed in isolated metadata path",
     "provider_template_generation": "passed",
     "compact_template_validation": "passed",
     "canonical_integration_validation": "passed",
     "independent_wheels": "passed",
+    "ros2_jazzy_smoke": "configured in modular CI",
     "ros2_hardware_validation": "pending on Ubuntu 24.04 / ROS 2 Jazzy"
   }
 }

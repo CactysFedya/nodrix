@@ -76,27 +76,6 @@ nodes:
     config: ${RVIZ_CONFIG:-rviz/fast_livo2.rviz}
     requirements_timeout_s: 45
 
-  livox_status:
-    use: core.counter_sink
-  fast_livo2_status:
-    use: core.counter_sink
-  lidar_status:
-    use: core.counter_sink
-  imu_status:
-    use: core.counter_sink
-  cloud_status:
-    use: core.counter_sink
-  rviz_status:
-    use: core.counter_sink
-
-flow:
-  - livox.status -> livox_status.input
-  - fast_livo2.status -> fast_livo2_status.input
-  - lidar_ready.status -> lidar_status.input
-  - imu_ready.status -> imu_status.input
-  - cloud_ready.status -> cloud_status.input
-  - rviz.status -> rviz_status.input
-
 links:
   - from: livox.lidar
     to: fast_livo2.lidar

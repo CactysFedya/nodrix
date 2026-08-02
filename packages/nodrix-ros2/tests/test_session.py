@@ -1,6 +1,9 @@
 import os
+from collections import deque
 from pathlib import Path
 import sys
+import threading
+import time
 
 from nodrix import NodeContext, SessionContext
 from nodrix_ros2.nodes.topic_monitor import Ros2TopicMonitor
@@ -87,3 +90,27 @@ def test_python_environment_activation_is_reversible(
     session.close()
     assert os.environ["NODRIX_ROS_TEST"] == "before"
     assert str(python_path) not in sys.path
+
+
+def test_sample_monitor_needs_enough_arrivals_for_minimum_rate() -> None:
+    monitor = Ros2TopicMonitor(
+        {
+            "topic": "/imu",
+            "message_type": "sensor_msgs/msg/Imu",
+            "minimum_rate_hz": 5.0,
+            "stale_timeout_s": 1.0,
+        }
+    )
+    now = time.monotonic()
+    monitor._topic = "/imu"
+    monitor._message_type_name = "sensor_msgs/msg/Imu"
+    monitor._lock = threading.Lock()
+    monitor._received = 1
+    monitor._last_arrival = now
+    monitor._arrivals = deque([now])
+    assert monitor._sample_snapshot()["ready"] is False
+
+    monitor._received = 2
+    monitor._arrivals.append(now + 0.1)
+    monitor._last_arrival = now + 0.1
+    assert monitor._sample_snapshot()["ready"] is True

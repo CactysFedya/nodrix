@@ -80,6 +80,16 @@ class ManagedProcess:
             raise
         self._started_ns = time.time_ns()
 
+    def restart(self) -> None:
+        """Restart a process that has already exited, preserving supervision."""
+
+        if self._process is not None and self._process.poll() is None:
+            raise RuntimeError("cannot restart a running process")
+        self._close_logs()
+        self._process = None
+        self._started_ns = None
+        self.start()
+
     def _rotate_log(self, path: Path) -> None:
         if (
             self.max_log_bytes <= 0
@@ -155,21 +165,43 @@ class ManagedProcess:
         if process.poll() is None:
             try:
                 self._send_group_signal(signal.SIGINT)
+            except OSError:
+                pass
+            try:
                 process.wait(timeout=max(interrupt_timeout_s, 0.0))
             except subprocess.TimeoutExpired:
-                try:
-                    self._send_group_signal(signal.SIGTERM)
-                    process.wait(timeout=max(terminate_timeout_s, 0.0))
-                except subprocess.TimeoutExpired:
-                    if os.name == "posix":
-                        self._send_group_signal(signal.SIGKILL)
-                    else:
-                        process.kill()
-                    process.wait()
-            except ProcessLookupError:
                 pass
+        if process.poll() is None:
+            try:
+                self._send_group_signal(signal.SIGTERM)
+            except OSError:
+                pass
+            try:
+                process.wait(timeout=max(terminate_timeout_s, 0.0))
+            except subprocess.TimeoutExpired:
+                pass
+        if process.poll() is None:
+            try:
+                if os.name == "posix":
+                    self._send_group_signal(signal.SIGKILL)
+                else:
+                    process.kill()
+            except OSError:
+                pass
+            shutdown_error: BaseException | None = None
+            try:
+                process.wait(timeout=max(terminate_timeout_s, 1.0))
+            except subprocess.TimeoutExpired as exc:
+                shutdown_error = RuntimeError(
+                    f"process group {process.pid} did not stop after SIGKILL"
+                )
+                shutdown_error.__cause__ = exc
+        else:
+            shutdown_error = None
         returncode = process.poll()
         self._close_logs()
+        if shutdown_error is not None:
+            raise shutdown_error
         return returncode
 
     def _close_logs(self) -> None:

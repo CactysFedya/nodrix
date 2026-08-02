@@ -18,6 +18,7 @@ class Ros2TopicSink(SinkNode):
     def open(self, context: Any) -> None:
         super().open(context)
         session = context.binding("session", required=False)
+        self._session = session
         activate = getattr(session, "activate_python_environment", None)
         if callable(activate):
             activate()
@@ -39,12 +40,21 @@ class Ros2TopicSink(SinkNode):
                 )
             ),
             namespace=str(self.parameters.get("namespace", "")),
-            executor_threads=int(self.parameters.get("executor_threads", 2)),
+            executor_threads=int(
+                self.parameters.get(
+                    "executor_threads",
+                    getattr(session, "executor_threads", 2),
+                )
+            ),
         )
         self._publisher = self._lease.node.create_publisher(
             self._message_class,
             topic,
-            build_qos_profile(self.parameters),
+            build_qos_profile(
+                self.parameters,
+                default_reliability="reliable",
+                default_depth=10,
+            ),
         )
 
     def process(self, inputs: dict[str, Message]) -> None:
@@ -63,7 +73,7 @@ class Ros2TopicSink(SinkNode):
                 )
             ros_message = candidate
 
-        if bool(self.parameters.get("map_timestamp", True)):
+        if bool(self.parameters.get("map_timestamp", False)):
             header = getattr(ros_message, "header", None)
             stamp = getattr(header, "stamp", None)
             if stamp is not None:
@@ -83,3 +93,4 @@ class Ros2TopicSink(SinkNode):
         if lease is not None:
             lease.close()
         self._lease = None
+        super().close()

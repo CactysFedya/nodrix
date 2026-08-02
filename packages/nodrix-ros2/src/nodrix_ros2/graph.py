@@ -44,6 +44,17 @@ class RosGraphWatcher:
         with self._lock:
             if self._process is not None and self._process.snapshot().running:
                 return
+            if self._process is not None:
+                self._process.stop(
+                    interrupt_timeout_s=0.0,
+                    terminate_timeout_s=0.0,
+                )
+            try:
+                self.snapshot_path.unlink(missing_ok=True)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Cannot reset ROS graph snapshot: {self.snapshot_path}"
+                ) from exc
             process = ManagedProcess(
                 self.command,
                 cwd=self.run_dir,

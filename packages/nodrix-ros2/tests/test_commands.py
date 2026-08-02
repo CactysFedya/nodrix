@@ -22,6 +22,19 @@ def test_ros2_run_command_maps_parameters_without_shell() -> None:
     assert "enabled:=true" in command
 
 
+def test_ros_parameter_strings_keep_their_type() -> None:
+    command = build_ros2_run_command(
+        {
+            "package": "demo_nodes_cpp",
+            "executable": "talker",
+            "ros_parameters": {"label": "true"},
+            "params_files": ["robot.yaml"],
+        }
+    )
+    assert 'label:="true"' in command
+    assert command[command.index("--params-file") + 1] == "robot.yaml"
+
+
 def test_launch_and_rviz_commands_are_explicit_argv() -> None:
     launch = build_ros2_launch_command(
         {

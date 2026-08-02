@@ -87,34 +87,9 @@ nodes:
       config: rviz/fast_livo2.rviz
       requirements_timeout_s: 45
 
-  livox_status:
-    uses: core.counter_sink
-  fast_livo2_status:
-    uses: core.counter_sink
-  lidar_health_status:
-    uses: core.counter_sink
-  imu_health_status:
-    uses: core.counter_sink
-  cloud_health_status:
-    uses: core.counter_sink
-  rviz_status:
-    uses: core.counter_sink
-
 fragments: {}
 
-edges:
-  - from: livox.status
-    to: livox_status.input
-  - from: fast_livo2.status
-    to: fast_livo2_status.input
-  - from: lidar_health.status
-    to: lidar_health_status.input
-  - from: imu_health.status
-    to: imu_health_status.input
-  - from: registered_cloud_health.status
-    to: cloud_health_status.input
-  - from: rviz.status
-    to: rviz_status.input
+edges: []
 
 links:
   - from: livox.lidar

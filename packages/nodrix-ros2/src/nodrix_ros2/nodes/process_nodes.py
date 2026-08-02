@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import subprocess
 import time
@@ -8,6 +9,7 @@ from typing import Any, Callable, Mapping
 from nodrix import Message, SourceNode
 
 from ..commands import build_ros2_launch_command, build_ros2_run_command, build_rviz_command
+from ..links import apply_topic_contracts, topic_contracts
 from ..process import ManagedProcess
 from ..workspace import RosWorkspaceManager, RosWorkspaceSpec
 
@@ -20,29 +22,46 @@ def _context_log_directory(context: Any) -> Path:
     return Path.cwd() / ".nodrix" / "logs"
 
 
-def _topic_types(environment: Mapping[str, str]) -> dict[str, str]:
-    completed = subprocess.run(
-        ["ros2", "topic", "list", "-t"],
-        env=dict(environment),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        check=False,
-        timeout=5.0,
-    )
+def _project_path(context: Any, value: Any) -> Path:
+    path = Path(os.path.expandvars(os.path.expanduser(str(value))))
+    if not path.is_absolute():
+        path = Path(context.project_dir) / path
+    return path.resolve()
+
+
+def _topic_types(
+    environment: Mapping[str, str],
+    *,
+    timeout_s: float,
+) -> tuple[dict[str, set[str]], str | None]:
+    try:
+        completed = subprocess.run(
+            ["ros2", "topic", "list", "-t"],
+            env=dict(environment),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=False,
+            timeout=max(timeout_s, 0.05),
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {}, f"{type(exc).__name__}: {exc}"
     if completed.returncode != 0:
-        return {}
-    result: dict[str, str] = {}
+        detail = completed.stderr.strip() or f"exit code {completed.returncode}"
+        return {}, detail
+    result: dict[str, set[str]] = {}
     for line in completed.stdout.splitlines():
         text = line.strip()
         if not text:
             continue
         if " [" in text and text.endswith("]"):
             topic, types = text.split(" [", 1)
-            result[topic.strip()] = types[:-1].split(",", 1)[0].strip()
+            result[topic.strip()] = {
+                item.strip() for item in types[:-1].split(",") if item.strip()
+            }
         else:
-            result[text] = ""
-    return result
+            result[text] = set()
+    return result, None
 
 
 class _Ros2ProcessSource(SourceNode):
@@ -67,33 +86,43 @@ class _Ros2ProcessSource(SourceNode):
             self._workspace = preparation
         else:
             self._workspace = RosWorkspaceManager(
-                RosWorkspaceSpec.from_mapping(workspace_value),
+                RosWorkspaceSpec.from_mapping(
+                    workspace_value,
+                    base_dir=Path(context.project_dir),
+                ),
                 project_dir=Path(context.project_dir),
                 log_directory=log_directory,
             ).prepare()
-        effective_parameters = dict(self.parameters)
+        self._contracts = topic_contracts(
+            context.external_links,
+            node_name=str(context.name),
+        )
+        effective_parameters = apply_topic_contracts(
+            self.parameters,
+            process_kind=self.process_kind,
+            contracts=self._contracts,
+        )
+        if self.process_kind == "ros2.rviz" and effective_parameters.get("config"):
+            config = _project_path(context, effective_parameters["config"])
+            if not config.is_file():
+                raise FileNotFoundError(f"RViz config does not exist: {config}")
+            effective_parameters["config"] = str(config)
         if self.process_kind == "ros2.node":
-            remappings = dict(effective_parameters.get("remappings") or {})
-            for link in context.external_links:
-                if str(link.get("uses")) != "ros2.topic":
-                    continue
-                parameters = dict(link.get("parameters") or {})
-                topic = str(parameters.get("topic", "")).strip()
-                if not topic:
-                    continue
-                source_node, source_port = str(link.get("from", "")).split(".", 1)
-                target_node, target_port = str(link.get("to", "")).split(".", 1)
-                if source_node == context.name:
-                    remappings.setdefault(source_port, topic)
-                if target_node == context.name:
-                    remappings.setdefault(target_port, topic)
-            if remappings:
-                effective_parameters["remappings"] = remappings
+            parameter_files: list[str] = []
+            for item in effective_parameters.get("params_files", ()):
+                path = _project_path(context, item)
+                if not path.is_file():
+                    raise FileNotFoundError(
+                        f"ROS parameter file does not exist: {path}"
+                    )
+                parameter_files.append(str(path))
+            if parameter_files:
+                effective_parameters["params_files"] = parameter_files
         self._command = self.command_builder(effective_parameters)
         name = str(getattr(context, "name", self.process_kind)).replace("/", "_")
         cwd_value = self.parameters.get("cwd")
         if cwd_value:
-            cwd = Path(str(cwd_value)).expanduser().resolve()
+            cwd = _project_path(context, cwd_value)
         else:
             cwd = None
             for attribute in ("project_dir", "base_dir", "work_dir"):
@@ -114,9 +143,14 @@ class _Ros2ProcessSource(SourceNode):
         if callable(register):
             register(self._process)
         self._started = False
+        self._restart_count = 0
 
     def _requirements(self) -> tuple[dict[str, Any], ...]:
         raw = self.parameters.get("requires_topics", ())
+        if isinstance(raw, str):
+            raw = (raw,)
+        elif not isinstance(raw, (list, tuple)):
+            raise TypeError("requires_topics must be an array")
         result: list[dict[str, Any]] = []
         for item in raw:
             if isinstance(item, str):
@@ -125,22 +159,21 @@ class _Ros2ProcessSource(SourceNode):
                 result.append(dict(item))
             else:
                 raise TypeError("requires_topics entries must be strings or mappings")
-        for link in self._context.external_links:
-            if str(link.get("uses")) != "ros2.topic":
-                continue
-            target_node = str(link.get("to", "")).split(".", 1)[0]
-            if target_node != self._context.name:
-                continue
-            parameters = dict(link.get("parameters") or {})
-            topic = str(parameters.get("topic", "")).strip()
-            if topic:
-                result.append(
-                    {
-                        "name": topic,
-                        "message_type": str(parameters.get("message_type", "")),
-                    }
-                )
-        return tuple(result)
+        result.extend(
+            {"name": item.topic, "message_type": item.message_type}
+            for item in self._contracts
+            if item.direction == "input"
+        )
+        deduplicated: dict[tuple[str, str], dict[str, Any]] = {}
+        for requirement in result:
+            key = (
+                str(requirement.get("name", "")).strip(),
+                str(requirement.get("message_type", "")).strip(),
+            )
+            if not key[0]:
+                raise ValueError("ROS topic requirement name cannot be empty")
+            deduplicated.setdefault(key, requirement)
+        return tuple(deduplicated.values())
 
     def _wait_requirements(self) -> None:
         requirements = self._requirements()
@@ -157,20 +190,34 @@ class _Ros2ProcessSource(SourceNode):
             return
         interval = max(float(self.parameters.get("requirements_poll_s", 0.25)), 0.05)
         deadline = time.monotonic() + timeout
+        last_graph_error: str | None = None
         while not self._closed:
-            observed = _topic_types(self._workspace.environment)
+            remaining = max(deadline - time.monotonic(), 0.05)
+            observed, graph_error = _topic_types(
+                self._workspace.environment,
+                timeout_s=min(5.0, remaining),
+            )
+            if graph_error:
+                last_graph_error = graph_error
             missing: list[str] = []
             for requirement in requirements:
                 name = str(requirement.get("name", "")).strip()
                 expected = str(requirement.get("message_type", "")).strip()
                 actual = observed.get(name)
-                if actual is None or (expected and actual != expected):
+                if actual is None or (expected and expected not in actual):
                     missing.append(name)
             if not missing:
                 return
             if time.monotonic() >= deadline:
+                detail = (
+                    f"; ROS graph query failed: {last_graph_error}"
+                    if last_graph_error
+                    else ""
+                )
                 raise RuntimeError(
-                    "ROS 2 topic requirements were not satisfied: " + ", ".join(missing)
+                    "ROS 2 topic requirements were not satisfied: "
+                    + ", ".join(missing)
+                    + detail
                 )
             time.sleep(interval)
 
@@ -182,16 +229,64 @@ class _Ros2ProcessSource(SourceNode):
             return
         self._process.start()
         self._started = True
+        failure = self._startup_failure()
+        if failure is not None:
+            returncode, detail = failure
+            suffix = f": {detail}" if detail else ""
+            raise RuntimeError(
+                f"{self.process_kind} failed during startup with code "
+                f"{returncode}{suffix}"
+            )
+
+    def _startup_failure(self) -> tuple[int, str] | None:
+        grace = max(float(self.parameters.get("startup_grace_s", 0.25)), 0.0)
+        deadline = time.monotonic() + grace
+        while not self._closed and time.monotonic() < deadline:
+            returncode = self._process.poll()
+            if returncode is not None:
+                return returncode, self._process.stderr_tail().strip()
+            time.sleep(min(0.02, max(deadline - time.monotonic(), 0.0)))
+        return None
+
+    def _restart_if_allowed(self, returncode: int | None) -> bool:
+        policy = str(self.parameters.get("restart_policy", "none")).strip().lower()
+        if policy not in {"none", "on-failure", "always"}:
+            raise ValueError("restart_policy must be none, on-failure, or always")
+        requested = policy == "always" or (
+            policy == "on-failure" and returncode not in (None, 0)
+        )
+        maximum = max(int(self.parameters.get("max_restarts", 3)), 0)
+        if not requested or self._restart_count >= maximum or self._closed:
+            return False
+        initial = max(float(self.parameters.get("restart_backoff_s", 0.5)), 0.0)
+        maximum_backoff = max(
+            float(self.parameters.get("restart_max_backoff_s", 30.0)),
+            initial,
+        )
+        delay = min(initial * (2 ** self._restart_count), maximum_backoff)
+        deadline = time.monotonic() + delay
+        while not self._closed and time.monotonic() < deadline:
+            time.sleep(min(0.05, max(deadline - time.monotonic(), 0.0)))
+        if self._closed:
+            return False
+        self._restart_count += 1
+        self._process.restart()
+        self._startup_failure()
+        return True
 
     def produce(self):
         self._start()
         heartbeat = max(float(self.parameters.get("heartbeat_interval_s", 1.0)), 0.05)
-        allow_clean_exit = bool(self.parameters.get("allow_clean_exit", False))
+        allow_clean_exit = bool(
+            self.parameters.get(
+                "allow_clean_exit",
+                self.process_kind == "ros2.rviz",
+            )
+        )
         while not self._closed:
             snapshot = self._process.snapshot()
             payload = {
                 "kind": self.process_kind,
-                "command": list(self._command),
                 "pid": snapshot.pid,
                 "running": snapshot.running,
                 "returncode": snapshot.returncode,
@@ -204,7 +299,11 @@ class _Ros2ProcessSource(SourceNode):
                     if self._session is None
                     else str(getattr(getattr(self._session, "context", None), "name", "ros"))
                 ),
+                "topic_contracts": [item.as_dict() for item in self._contracts],
+                "restart_count": self._restart_count,
             }
+            if bool(self.parameters.get("expose_command", False)):
+                payload["command"] = list(self._command)
             yield {
                 "status": Message(
                     type="core.object",
@@ -217,6 +316,8 @@ class _Ros2ProcessSource(SourceNode):
             }
             self._sequence += 1
             if not snapshot.running:
+                if self._restart_if_allowed(snapshot.returncode):
+                    continue
                 if snapshot.returncode == 0 and allow_clean_exit:
                     return
                 raise RuntimeError(
@@ -230,7 +331,9 @@ class _Ros2ProcessSource(SourceNode):
         value.update(
             {
                 "kind": self.process_kind,
-                "command": list(getattr(self, "_command", ())),
+                "command_sha256": (
+                    None if snapshot is None else snapshot.command_sha256
+                ),
                 "started": bool(getattr(self, "_started", False)),
                 "pid": None if snapshot is None else snapshot.pid,
                 "running": False if snapshot is None else snapshot.running,
@@ -238,21 +341,39 @@ class _Ros2ProcessSource(SourceNode):
                 "workspace_built": bool(
                     getattr(getattr(self, "_workspace", None), "built", False)
                 ),
+                "topic_contracts": [
+                    item.as_dict() for item in getattr(self, "_contracts", ())
+                ],
+                "restart_count": int(getattr(self, "_restart_count", 0)),
             }
         )
+        if bool(self.parameters.get("expose_command", False)):
+            value["command"] = list(getattr(self, "_command", ()))
         return value
 
     def close(self) -> None:
         self._closed = True
         process = getattr(self, "_process", None)
-        if process is not None:
-            process.stop(
-                interrupt_timeout_s=float(self.parameters.get("interrupt_timeout_s", 8.0)),
-                terminate_timeout_s=float(self.parameters.get("terminate_timeout_s", 3.0)),
-            )
+        error: BaseException | None = None
+        try:
+            if process is not None:
+                process.stop(
+                    interrupt_timeout_s=float(
+                        self.parameters.get("interrupt_timeout_s", 8.0)
+                    ),
+                    terminate_timeout_s=float(
+                        self.parameters.get("terminate_timeout_s", 3.0)
+                    ),
+                )
+        except BaseException as exc:
+            error = exc
+        finally:
             unregister = getattr(self._session, "unregister_process", None)
-            if callable(unregister):
+            if process is not None and callable(unregister):
                 unregister(process)
+            super().close()
+        if error is not None:
+            raise error
 
 
 class Ros2NodeProcess(_Ros2ProcessSource):
