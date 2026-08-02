@@ -349,7 +349,7 @@ jobs:
               capture_output=True,
               text=True,
           ).stdout.strip()
-          assert version == "nodrix-native-runner 2.1.0"
+          assert version == f"nodrix-native-runner {nodrix.__version__}"
           assert "site-packages" in str(runner)
           print(version)
           PY
