@@ -11,6 +11,11 @@ from .nodes import (
 )
 from .probes import deep_probe, safe_probe
 from .session import Ros2Session
+from .applications import (
+    Ros2LaunchApplication,
+    Ros2NodeApplication,
+    Ros2RvizApplication,
+)
 
 
 def provider() -> ProviderRuntime:
@@ -31,4 +36,9 @@ def provider() -> ProviderRuntime:
             "nodrix.ros2.deep": deep_probe,
         },
         sessions={"ros2.session": Ros2Session},
+        applications={
+            "ros2.node": Ros2NodeApplication,
+            "ros2.launch": Ros2LaunchApplication,
+            "ros2.rviz": Ros2RvizApplication,
+        },
     )

@@ -1,15 +1,16 @@
-# Known limitations of nodrix-ros2 0.3.1
+# Known limitations of nodrix-ros2 0.4.0
 
 This alpha is suitable for repeatable orchestration and integration testing,
 but it is not yet a complete high-performance ROS transport implementation.
 
-- `ros2.node`, `ros2.launch`, and `ros2.rviz` are supervised external
-  processes. Lifecycle-node transitions and composable-component containers
-  are not implemented yet.
+- `ros2.node`, `ros2.launch`, and `ros2.rviz` are managed external
+  Applications. ROS lifecycle-node transitions and composable-component
+  containers are not implemented yet.
 - The graph watcher is isolated in a ROS-system-Python worker. Generic topic
   source/sink bridges still use `rclpy` in the Nodrix process and therefore
   require a Python ABI compatible with the installed ROS distribution.
-- ROS-to-ROS data described by `ros2.topic` remains in DDS. The Python bridges
+- ROS-to-ROS data described by an Edge with `ros2.topic` Transport remains in
+  DDS. The Python bridges
   are bounded compatibility paths, not DDS loaned-message zero-copy. Large
   payloads should use `nodrix-spatial-ros2` or a future native bridge.
 - Generic ROS services, actions, parameters, TF2, rosbag, lifecycle nodes, and

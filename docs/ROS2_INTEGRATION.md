@@ -24,12 +24,13 @@ sessions:
         symlink_install: true
         timeout_s: 1800
 
-nodes:
+applications:
   driver:
-    use: ros2.launch
+    uses: ros2.launch
     bindings: {session: ros}
-    package: example_driver
-    launch_file: driver.launch.py
+    parameters:
+      package: example_driver
+      launch_file: driver.launch.py
 ```
 
 `if-needed` fingerprints source metadata and content policy together with the
@@ -39,25 +40,32 @@ from building the same workspace at once. Every process has separate bounded,
 rotated stdout and stderr logs and shuts down with
 `SIGINT → SIGTERM → SIGKILL` fallback.
 
-## External topic links
+## External topic transports
 
-`ros2.topic` links express ROS dependencies without creating a Nodrix data
-queue:
+`ros2.topic` is attached to a logical Edge. It expresses a ROS dependency
+without creating a Nodrix data queue:
 
 ```yaml
-links:
+edges:
   - from: driver.lidar
     to: slam.lidar
-    uses: ros2.topic
-    parameters:
-      topic: /lidar/points
-      message_type: sensor_msgs/msg/PointCloud2
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /lidar/points
+        message_type: sensor_msgs/msg/PointCloud2
 ```
 
-An incoming link delays the dependent supervised process until a publisher of
-the declared type appears. For `ros2.node`, logical ports can also become ROS
-remappings. The execution plan marks these links as external with zero planned
-Nodrix copies.
+An incoming transported Edge delays the dependent application until a
+publisher of the declared type appears. For `ros2.node`, logical ports can
+also become ROS remappings. The execution plan marks the Edge as external with
+zero planned Nodrix copies.
+
+`ros2.node`, `ros2.launch`, and `ros2.rviz` are managed Applications in new
+manifests. They are control-plane processes and no longer emit artificial
+heartbeat messages into the data graph. The old Node declarations and
+top-level `links` remain readable throughout Nodrix 2.x; `nodrix migrate`
+rewrites `links` to `edges[].transport`.
 
 ## Monitoring modes
 

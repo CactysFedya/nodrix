@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodrix-ros2"
-version = "0.3.1"
+version = "0.4.0"
 description = "Universal ROS 2 orchestration and transport provider for Nodrix"
 requires-python = ">=3.11"
-dependencies = ["nodrix>=2.2.0a3,<3"]
+dependencies = ["nodrix>=2.2.0a4,<3"]
 readme = "README.md"
 license = {text = "Apache-2.0"}
 
@@ -25,6 +25,8 @@ where = ["src"]
 nodrix_ros2 = [
   "nodrix-provider.json",
   "py.typed",
+  "templates/ros2/*",
+  "templates/ros2/.env.example",
   "templates/ros2-fast-livo2/*",
   "templates/ros2-fast-livo2/.env.example",
   "templates/ros2-fast-livo2/rviz/*.rviz",
