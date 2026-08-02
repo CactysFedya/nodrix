@@ -2,7 +2,7 @@
 
 Discovery, verification, loading, compatibility, and diagnostics are split
 into focused modules. Existing ``nodrix.providers`` imports remain stable
-throughout Nodrix 2.x.
+throughout Plyctl 2.x.
 """
 
 from __future__ import annotations

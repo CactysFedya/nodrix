@@ -3,7 +3,7 @@
 The classes in this module deliberately know nothing about ROS, DDS, brokers,
 containers, or a particular process supervisor.  Providers use resources for
 pipeline-scoped dependencies and applications for externally managed work
-that has a lifecycle but does not move messages through a Nodrix queue.
+that has a lifecycle but does not move messages through a Plyctl queue.
 """
 
 from __future__ import annotations

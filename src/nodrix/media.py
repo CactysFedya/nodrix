@@ -269,7 +269,7 @@ class FFmpegFrameReader:
 
     def open(self) -> None:
         if np is None:
-            raise MediaError('NumPy is required. Install with: pip install "nodrix[media]"')
+            raise MediaError('NumPy is required. Install with: pip install "plyctl[media]"')
         source = self.uri
         if source.startswith("lavfi:"):
             self.input_format = "lavfi"
@@ -827,10 +827,10 @@ class FFmpegWriter(SinkNode):
 
 @register_builtin("media.ffmpeg_encoder")
 class FFmpegEncoder(Node):
-    """Persistent FFmpeg H.264/H.265 encoder producing Nodrix byte chunks.
+    """Persistent FFmpeg H.264/H.265 encoder producing Plyctl byte chunks.
 
     Output messages are Annex-B chunks. They are deliberately not required to
-    match one frame or one NAL unit; the stateful Nodrix Viewer decoder accepts
+    match one frame or one NAL unit; the stateful Plyctl Viewer decoder accepts
     arbitrary ordered chunks and therefore avoids an extra parser/copy in the
     encoder node.
     """

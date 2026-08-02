@@ -71,7 +71,7 @@ class PublisherMetrics:
         self.bitrate_mbps = 0.0
 
     def start(self) -> None:
-        self._thread = threading.Thread(target=self._run, name="nodrix-viewer-metrics", daemon=True)
+        self._thread = threading.Thread(target=self._run, name="plyctl-viewer-metrics", daemon=True)
         self._thread.start()
 
     def _run(self) -> None:
@@ -193,14 +193,14 @@ class _Reader(Protocol):
 
 
 class FFmpegAccessUnitDecoder:
-    """Persistent low-latency decoder for H.264/H.265 Nodrix access units."""
+    """Persistent low-latency decoder for H.264/H.265 Plyctl access units."""
 
     def __init__(self, slot: LatestSlot, encoded: EncodedFrame) -> None:
         if np is None:
-            raise ViewerError("NumPy is required for H.264/H.265 Nodrix stream decoding")
+            raise ViewerError("NumPy is required for H.264/H.265 Plyctl stream decoding")
         ffmpeg = shutil.which("ffmpeg")
         if ffmpeg is None:
-            raise ViewerError("FFmpeg is required for H.264/H.265 Nodrix stream decoding")
+            raise ViewerError("FFmpeg is required for H.264/H.265 Plyctl stream decoding")
         if encoded.width <= 0 or encoded.height <= 0:
             raise ViewerError("Encoded H.264/H.265 frames must declare width and height")
         self.slot = slot
@@ -225,7 +225,7 @@ class FFmpegAccessUnitDecoder:
             bufsize=0,
         )
         self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._read_loop, name="nodrix-viewer-au-decoder", daemon=True)
+        self._thread = threading.Thread(target=self._read_loop, name="plyctl-viewer-au-decoder", daemon=True)
         self._thread.start()
 
     @staticmethod
@@ -337,7 +337,7 @@ class NodrixStreamReader:
     def start(self) -> None:
         self.client.connect()
         self.source_label = self.client.uri
-        self._thread = threading.Thread(target=self._loop, name="nodrix-viewer-stream", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name="plyctl-viewer-stream", daemon=True)
         self._thread.start()
 
     def _loop(self) -> None:
@@ -398,7 +398,7 @@ class FFmpegReader:
 
     def start(self) -> None:
         self.reader.open()
-        self._thread = threading.Thread(target=self._loop, name="nodrix-viewer-ffmpeg", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name="plyctl-viewer-ffmpeg", daemon=True)
         self._thread.start()
 
     def _loop(self) -> None:
@@ -440,7 +440,7 @@ class FFmpegReader:
 class OpenCVReader:
     def __init__(self, source: str, *, realtime: bool = True, backend: int = 0) -> None:
         if cv2 is None:
-            raise ViewerError('OpenCV is required. Install with: pip install "nodrix[viewer]"')
+            raise ViewerError('OpenCV is required. Install with: pip install "plyctl[viewer]"')
         self.original_source = source
         self.source = _normalize_opencv_source(source)
         self.source_label = str(source)
@@ -458,7 +458,7 @@ class OpenCVReader:
             raise ViewerError(f"Cannot open video source: {self.original_source}")
         self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self.source_fps = float(self.capture.get(cv2.CAP_PROP_FPS) or 0.0)
-        self._thread = threading.Thread(target=self._loop, name="nodrix-viewer-capture", daemon=True)
+        self._thread = threading.Thread(target=self._loop, name="plyctl-viewer-capture", daemon=True)
         self._thread.start()
 
     def _loop(self) -> None:
@@ -529,7 +529,7 @@ def _decode_still_image(encoded: EncodedFrame) -> Any:
     if encoded.codec not in {MediaCodec.JPEG, MediaCodec.MJPEG, MediaCodec.PNG}:
         raise ViewerError(
             f"Still-image decoder cannot decode {encoded.codec.value}; "
-            "H.264/H.265 Nodrix streams are handled by the persistent FFmpeg reader"
+            "H.264/H.265 Plyctl streams are handled by the persistent FFmpeg reader"
         )
     data = np.frombuffer(encoded.memoryview(), dtype=np.uint8)
     frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
@@ -540,13 +540,13 @@ def _decode_still_image(encoded: EncodedFrame) -> Any:
 
 def message_to_bgr(message: Message) -> Any:
     if cv2 is None:
-        raise ViewerError('OpenCV is required. Install with: pip install "nodrix[viewer]"')
+        raise ViewerError('OpenCV is required. Install with: pip install "plyctl[viewer]"')
     payload = message.payload
     if isinstance(payload, EncodedFrame):
         return _decode_still_image(payload)
     if not isinstance(payload, Frame):
         raise ViewerError(
-            f"nodrix-viewer expects vision.frame or vision.encoded_frame, got {message.type} / {type(payload).__name__}"
+            f"plyctl-viewer expects vision.frame or vision.encoded_frame, got {message.type} / {type(payload).__name__}"
         )
     frame = payload.numpy()
     pixel_format = payload.pixel_format
@@ -678,7 +678,7 @@ def _make_reader(
 def run_viewer(
     source: str,
     *,
-    title: str = "Nodrix Viewer",
+    title: str = "Plyctl Viewer",
     max_fps: float = 0.0,
     overlay: bool = True,
     fullscreen: bool = False,
@@ -697,7 +697,7 @@ def run_viewer(
     metrics_url: str | None = None,
 ) -> dict[str, Any]:
     if cv2 is None or np is None:
-        raise ViewerError('Install viewer dependencies with: pip install "nodrix[viewer]"')
+        raise ViewerError('Install viewer dependencies with: pip install "plyctl[viewer]"')
     if max_fps < 0:
         raise ViewerError("--fps cannot be negative")
     if scale <= 0:
@@ -810,7 +810,7 @@ def run_viewer(
 def view_command(
     source: str = typer.Argument(..., help="Stream name, nodrix:// URI, RTSP/HTTP URL, device, camera index, or video path"),
     fps: float = typer.Option(0.0, "--fps", min=0.0, help="Maximum display FPS; 0 keeps source rate"),
-    title: str = typer.Option("Nodrix Viewer", "--title"),
+    title: str = typer.Option("Plyctl Viewer", "--title"),
     overlay: bool = typer.Option(True, "--overlay/--no-overlay", help="Show FPS, latency, sequence and dropped frames"),
     fullscreen: bool = typer.Option(False, "--fullscreen"),
     scale: float = typer.Option(1.0, "--scale", min=0.05, max=8.0),
@@ -824,8 +824,8 @@ def view_command(
     max_frames: int = typer.Option(0, "--max-frames", min=0),
     screenshot_dir: Path = typer.Option(Path("screenshots"), "--screenshot-dir"),
     json_stats: bool = typer.Option(False, "--json-stats"),
-    publisher_stats: bool = typer.Option(True, "--publisher-stats/--no-publisher-stats", help="Read Nodrix publisher metrics from port 9464"),
-    metrics_url: str | None = typer.Option(None, "--metrics-url", help="Explicit Nodrix /metrics.json endpoint"),
+    publisher_stats: bool = typer.Option(True, "--publisher-stats/--no-publisher-stats", help="Read Plyctl publisher metrics from port 9464"),
+    metrics_url: str | None = typer.Option(None, "--metrics-url", help="Explicit Plyctl /metrics.json endpoint"),
 ) -> None:
     """View a frame stream with a latest-frame low-latency policy."""
     try:

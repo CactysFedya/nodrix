@@ -49,7 +49,7 @@ def _compatibility_diagnostics(raw: Mapping[str, Any]) -> tuple[ManifestDiagnost
                         code="W214",
                         message=(
                             "Deprecated field 'use'; use 'uses' instead. "
-                            "The alias will be removed in Nodrix 3.0."
+                            "The alias will be removed in Plyctl 3.0."
                         ),
                         location=f"{section}.{name}.use",
                     )
@@ -65,7 +65,7 @@ def _compatibility_diagnostics(raw: Mapping[str, Any]) -> tuple[ManifestDiagnost
                         code="W214",
                         message=(
                             "Deprecated field 'use'; use 'uses' instead. "
-                            "The alias will be removed in Nodrix 3.0."
+                            "The alias will be removed in Plyctl 3.0."
                         ),
                         location=f"edges[{index}].transport.use",
                     )
@@ -80,7 +80,7 @@ def _compatibility_diagnostics(raw: Mapping[str, Any]) -> tuple[ManifestDiagnost
                         code="W214",
                         message=(
                             "Deprecated field 'use'; use 'uses' instead. "
-                            "The alias will be removed in Nodrix 3.0."
+                            "The alias will be removed in Plyctl 3.0."
                         ),
                         location=f"links[{index}].use",
                     )
@@ -93,7 +93,7 @@ def _compatibility_diagnostics(raw: Mapping[str, Any]) -> tuple[ManifestDiagnost
                     message=(
                         "Deprecated top-level 'links'; attach the external "
                         "provider as edges[].transport instead. The alias "
-                        "will be removed in Nodrix 3.0."
+                        "will be removed in Plyctl 3.0."
                     ),
                     location="links",
                 )
@@ -161,7 +161,7 @@ def load_manifest_details(
                     code="W214",
                     message=(
                         "Deprecated field 'use'; use 'uses' instead. The "
-                        "alias will be removed in Nodrix 3.0."
+                        "alias will be removed in Plyctl 3.0."
                     ),
                     location=f"blocks.{block_name}.use",
                 )

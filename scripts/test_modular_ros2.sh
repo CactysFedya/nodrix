@@ -48,14 +48,14 @@ NODRIX_PROVIDER_PATH="$(
   "${TEST_PYTHON}" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])'
 )"
 
-"${TEST_PYTHON}" -m nodrix.cli validate \
+"${TEST_PYTHON}" -m plyctl.cli validate \
   "${ROOT}/integrations/nodrix-fast-livo2/pipelines/input.yaml"
 
-"${TEST_PYTHON}" -m nodrix.cli validate \
+"${TEST_PYTHON}" -m plyctl.cli validate \
   "${ROOT}/integrations/nodrix-fast-livo2/pipelines/generic-topic-smoke.yaml"
 
-"${TEST_PYTHON}" -m nodrix.cli validate \
+"${TEST_PYTHON}" -m plyctl.cli validate \
   "${ROOT}/integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml"
 
-"${TEST_PYTHON}" -m nodrix.cli init "${TEST_ROOT}/ros2-project" --template ros2
-"${TEST_PYTHON}" -m nodrix.cli validate "${TEST_ROOT}/ros2-project/pipeline.yaml"
+"${TEST_PYTHON}" -m plyctl.cli init "${TEST_ROOT}/ros2-project" --template ros2
+"${TEST_PYTHON}" -m plyctl.cli validate "${TEST_ROOT}/ros2-project/pipeline.yaml"

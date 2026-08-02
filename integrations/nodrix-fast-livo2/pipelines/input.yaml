@@ -1,4 +1,4 @@
-apiVersion: nodrix.dev/v2
+apiVersion: plyctl.dev/v2
 kind: Pipeline
 
 metadata:

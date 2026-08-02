@@ -20,7 +20,7 @@
       "ros2.edge_transports"
     ],
     "id": "nodrix.ros2",
-    "name": "Nodrix ROS 2 Provider",
+    "name": "Plyctl ROS 2 Provider",
     "provider_api": "2",
     "requires_features": [
       "python-node-api.2",
@@ -29,7 +29,7 @@
       "managed-applications.1",
       "edge-transports.1"
     ],
-    "requires_nodrix": ">=2.2.0a4,<3",
+    "requires_nodrix": ">=2.2.0a5,<3",
     "version": "0.4.0"
   },
   "nodes": [

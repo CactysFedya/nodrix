@@ -183,7 +183,7 @@ class StreamServer:
             raise ValueError(f"Stream name must start with '/': {name!r}")
         with self._lock:
             if name in self._streams:
-                raise ValueError(f"Duplicate Nodrix stream: {name}")
+                raise ValueError(f"Duplicate Plyctl stream: {name}")
             self._streams[name] = StreamDefinition(
                 name, type_name, capacity, policy, access_mode, token, tuple(allow_ips),
                 incoming=_PacketQueue(capacity, policy),
@@ -280,7 +280,7 @@ class StreamServer:
         while offset < size:
             count = sock.recv_into(view[offset:])
             if count <= 0:
-                raise EOFError("incomplete Nodrix handshake")
+                raise EOFError("incomplete Plyctl handshake")
             offset += count
         return bytes(data)
 
@@ -289,18 +289,18 @@ class StreamServer:
         raw_length = cls._receive_exact(sock, _HANDSHAKE_LENGTH.size)
         length = _HANDSHAKE_LENGTH.unpack(raw_length)[0]
         if length <= 0 or length > int(max_handshake_bytes):
-            raise ValueError(f"invalid Nodrix handshake length: {length}")
+            raise ValueError(f"invalid Plyctl handshake length: {length}")
         data = bytearray(length)
         view = memoryview(data)
         offset = 0
         while offset < length:
             count = sock.recv_into(view[offset:])
             if count <= 0:
-                raise EOFError("incomplete Nodrix handshake")
+                raise EOFError("incomplete Plyctl handshake")
             offset += count
         value = json.loads(bytes(data).decode("utf-8"))
         if not isinstance(value, dict):
-            raise ValueError("Nodrix handshake must be a JSON object")
+            raise ValueError("Plyctl handshake must be a JSON object")
         return value
 
     @staticmethod
@@ -564,7 +564,7 @@ class StreamClient:
             uri = resolve_stream(uri_or_name, timeout=discovery_timeout).endpoint
         parsed = urlparse(uri)
         if parsed.scheme not in {"nodrix", "nodrix+tls"} or not parsed.hostname or not parsed.port or not parsed.path:
-            raise ValueError(f"Invalid Nodrix stream URI: {uri!r}")
+            raise ValueError(f"Invalid Plyctl stream URI: {uri!r}")
         self.uri = uri
         self.host = parsed.hostname
         self.port = parsed.port
@@ -669,7 +669,7 @@ class StreamClient:
             ):
                 self._state = "budget_exhausted"
                 raise ConnectionError(
-                    "Nodrix stream reconnect budget exhausted"
+                    "Plyctl stream reconnect budget exhausted"
                 )
             self._reconnect_attempt_times.append(now)
             self.reconnect_attempts_total += 1
@@ -699,12 +699,12 @@ class StreamClient:
         )
         if attempt_limit <= 0:
             raise ConnectionError(
-                "Nodrix stream reconnect is disabled"
+                "Plyctl stream reconnect is disabled"
             )
         for attempt in range(attempt_limit):
             if self._shutdown.is_set():
                 raise ConnectionAbortedError(
-                    "Nodrix stream client is shutting down"
+                    "Plyctl stream client is shutting down"
                 )
             if _reconnect:
                 self._reserve_reconnect_attempt()
@@ -729,7 +729,7 @@ class StreamClient:
                 StreamServer._send_json(sock, request)
                 response = StreamServer._receive_json(sock)
                 if not response.get("ok"):
-                    raise LookupError(response.get("error", "Nodrix stream subscription failed"))
+                    raise LookupError(response.get("error", "Plyctl stream subscription failed"))
                 sock.settimeout(None)
                 self.socket = sock
                 self.type = str(response.get("type", "core.any"))
@@ -761,7 +761,7 @@ class StreamClient:
                 if delay:
                     if self._shutdown.wait(delay):
                         raise ConnectionAbortedError(
-                            "Nodrix stream shutdown interrupted reconnect backoff"
+                            "Plyctl stream shutdown interrupted reconnect backoff"
                         )
         assert last_error is not None
         raise last_error

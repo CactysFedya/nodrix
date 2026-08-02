@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nodrix"
+version = "2.2.0a5"
+description = "Compatibility installer for the renamed Plyctl runtime"
+requires-python = ">=3.11"
+dependencies = ["plyctl==2.2.0a5"]
+readme = "README.md"
+license = {text = "Apache-2.0"}
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+]
+
+[project.urls]
+Homepage = "https://github.com/CactysFedya/plyctl"
+Documentation = "https://cactysfedya.github.io/plyctl/"
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,11 +1,11 @@
-# Публикация Nodrix на GitHub и PyPI
+# Публикация Plyctl на GitHub и PyPI
 
 ## Что уже настроено
 
-- пакет PyPI называется `nodrix`;
-- установка: `pip install nodrix`;
-- CLI: `nodrix` и `nodrix-viewer`;
-- репозиторий: `CactysFedya/nodrix`;
+- пакет PyPI называется `plyctl`;
+- установка: `pip install plyctl`;
+- CLI: `plyctl` и `plyctl-viewer`;
+- репозиторий: `CactysFedya/plyctl`;
 - CI проверяет Python 3.11–3.14 и C++ runtime;
 - workflow `publish.yml` собирает Linux x86-64, Linux ARM64, macOS Apple
   Silicon и Windows x86-64 wheels;
@@ -39,14 +39,14 @@ gh auth login
 Из корня проекта:
 
 ```bash
-scripts/create_github_repo.sh CactysFedya nodrix public
+scripts/create_github_repo.sh CactysFedya plyctl public
 ```
 
 Ручной эквивалент:
 
 ```bash
 git branch -M main
-git remote add origin git@github.com:CactysFedya/nodrix.git
+git remote add origin git@github.com:CactysFedya/plyctl.git
 git push -u origin main
 ```
 
@@ -55,12 +55,21 @@ git push -u origin main
 На PyPI открой настройки публикации и создай pending Trusted Publisher:
 
 ```text
-PyPI project name: nodrix
+PyPI project name: plyctl
 Owner:             CactysFedya
-Repository:        nodrix
+Repository:        plyctl
 Workflow:          publish.yml
 Environment:       pypi
 ```
+
+Тот же publisher для `publish.yml` нужно разрешить для `nodrix` и четырёх
+модульных проектов: `plyctl-spatial`, `plyctl-mapping`, `plyctl-ros2` и
+`plyctl-spatial-ros2`. Пакет `nodrix` — маленький compatibility installer,
+который зависит от точно такой же версии `plyctl`.
+
+Для четырёх модульных проектов дополнительно разреши тот же repository и
+environment, но workflow укажи `publish-modular-package.yml`. Это позволяет
+выпускать отдельный пакет независимо от ядра.
 
 На GitHub создай environment `pypi`:
 
@@ -70,28 +79,27 @@ Repository → Settings → Environments → New environment → pypi
 
 Рекомендуется включить Required reviewers. Секрет `PYPI_TOKEN` добавлять не нужно.
 
-## 4. Релиз 2.1.0
+## 4. Релиз 2.2.0a5
 
-Версию 2.0.0 повторно публиковать нельзя. После merge ветки 2.1.0 в `main`
-и успешного CI:
+После merge alpha.5 в основную ветку и успешного CI:
 
 ```bash
 git switch main
 git pull --ff-only
 python3 scripts/check_release.py
-git tag -s v2.1.0 -m "Nodrix 2.1.0"
+git tag -s v2.2.0a5 -m "Plyctl 2.2.0a5"
 ```
 
 Если GPG-подпись не настроена:
 
 ```bash
-git tag -a v2.1.0 -m "Nodrix 2.1.0"
+git tag -a v2.2.0a5 -m "Plyctl 2.2.0a5"
 ```
 
 Затем:
 
 ```bash
-git push origin v2.1.0
+git push origin v2.2.0a5
 ```
 
 GitHub Actions автоматически:
@@ -108,17 +116,17 @@ GitHub Actions автоматически:
 Проверка после публикации:
 
 ```bash
-python3 -m venv /tmp/nodrix-pypi
-source /tmp/nodrix-pypi/bin/activate
-pip install nodrix
-nodrix --version
+python3 -m venv /tmp/plyctl-pypi
+source /tmp/plyctl-pypi/bin/activate
+pip install plyctl
+plyctl --version
 ```
 
 Viewer и Media Pack:
 
 ```bash
-pip install "nodrix[viewer]"
-pip install "nodrix[media]"
+pip install "plyctl[viewer]"
+pip install "plyctl[media]"
 ```
 
 ## 5. Следующие релизы
@@ -131,6 +139,19 @@ scripts/release.sh X.Y.Z
 версии, создаст commit/tag и отправит их в GitHub.
 
 PyPI запрещает перезаписывать уже опубликованную версию. Любое исправление требует новой версии.
+
+Отдельный модуль публикуется собственным тегом после изменения его версии в
+`pyproject.toml` и успешного modular CI:
+
+```bash
+git tag -a plyctl-ros2-v0.4.1 -m "plyctl-ros2 0.4.1"
+git push origin plyctl-ros2-v0.4.1
+```
+
+Допустимые префиксы: `plyctl-spatial-v`, `plyctl-mapping-v`,
+`plyctl-ros2-v` и `plyctl-spatial-ros2-v`. Workflow сверяет имя и версию тега
+с метаданными выбранного пакета, тестирует весь модульный набор и публикует
+только выбранный wheel/sdist.
 
 ## Ручная загрузка как аварийный вариант
 

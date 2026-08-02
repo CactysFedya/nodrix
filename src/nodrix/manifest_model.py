@@ -7,6 +7,7 @@ from typing import Any, Literal, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .branding import MANIFEST_API_V1, is_manifest_v2
 from .errors import ManifestError
 
 
@@ -81,7 +82,7 @@ class TracingConfig(StrictModel):
     enabled: bool = False
     exporter: Literal["none", "console", "otlp"] = "none"
     endpoint: str | None = None
-    service_name: str = "nodrix"
+    service_name: str = "plyctl"
 
     @model_validator(mode="after")
     def validate_exporter(self) -> "TracingConfig":
@@ -308,8 +309,8 @@ class EdgeConfig(StrictModel):
 class ExternalLinkConfig(UsesConfig):
     """A control-plane link compiled by an optional integration provider.
 
-    Unlike ``edges``, external links do not create a Nodrix queue or move a
-    payload through the Nodrix runtime.  A provider can use them to describe
+    Unlike ``edges``, external links do not create a Plyctl queue or move a
+    payload through the Plyctl runtime.  A provider can use them to describe
     DDS topics, broker routes, service bindings, or equivalent external data
     paths while keeping the ordinary node.port notation.
     """
@@ -366,8 +367,13 @@ class PlacementConfig(StrictModel):
 
 
 class PipelineManifest(StrictModel):
-    api_version: Literal["nodrix.dev/v1", "nodrix.dev/v2"] = Field(
-        default="nodrix.dev/v1",
+    api_version: Literal[
+        "plyctl.dev/v1",
+        "plyctl.dev/v2",
+        "nodrix.dev/v1",
+        "nodrix.dev/v2",
+    ] = Field(
+        default=MANIFEST_API_V1,
         alias="apiVersion",
     )
     kind: Literal["Pipeline"] = "Pipeline"
@@ -390,7 +396,7 @@ class PipelineManifest(StrictModel):
 
     @model_validator(mode="after")
     def validate_node_names(self) -> "PipelineManifest":
-        if self.api_version == "nodrix.dev/v2":
+        if is_manifest_v2(self.api_version):
             required = {
                 "metadata",
                 "runtime",

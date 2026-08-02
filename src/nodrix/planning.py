@@ -202,7 +202,7 @@ def build_static_plan(
             {
                 "code": "P101",
                 "target": "pipeline.throughput",
-                "message": "Run `nodrix benchmark` before assigning an output FPS target.",
+                "message": "Run `plyctl benchmark` before assigning an output FPS target.",
                 "evidence": "At least one source or processing rate is unknown.",
             }
         )

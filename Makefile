@@ -21,5 +21,6 @@ check:
 
 clean:
 	rm -rf build dist wheelhouse .pytest_cache .ruff_cache *.egg-info src/*.egg-info
-	find src tests -type d -name __pycache__ -prune -exec rm -rf {} +
-	find src -type f \( -name '*.so' -o -name '*.pyd' -o -name '*.dylib' \) -delete
+	rm -rf packages/*/build packages/*/dist packages/*/src/*.egg-info
+	find src tests packages examples scripts -type d -name __pycache__ -prune -exec rm -rf {} +
+	find src packages -type f \( -name '*.so' -o -name '*.pyd' -o -name '*.dylib' \) -delete

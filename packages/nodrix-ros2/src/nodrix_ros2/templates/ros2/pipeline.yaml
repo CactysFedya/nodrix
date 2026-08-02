@@ -1,9 +1,9 @@
-apiVersion: nodrix.dev/v2
+apiVersion: plyctl.dev/v2
 kind: Pipeline
 
 metadata:
   name: ros2-demo
-  description: Generic ROS 2 applications supervised by Nodrix
+  description: Generic ROS 2 applications supervised by Plyctl
 
 runtime:
   engine: unified

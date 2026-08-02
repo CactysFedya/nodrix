@@ -124,8 +124,8 @@ def render_pipeline_graph(manifest: Any, *, details: bool = False) -> Group:
         style="cyan",
     )
     footer.append("   Discovery: ", style="dim")
-    footer.append("nodrix stream list", style="cyan")
-    return Group(Panel(header, title="Nodrix graph"), graph, footer)
+    footer.append("plyctl stream list", style="cyan")
+    return Group(Panel(header, title="Plyctl graph"), graph, footer)
 
 
 def render_node_details(manifest: Any, node_name: str) -> Group:
@@ -176,7 +176,7 @@ def render_node_details(manifest: Any, node_name: str) -> Group:
 
 def render_startup_summary(manifest: Any, version: str) -> Group:
     text = Text()
-    text.append(f"Nodrix {version}", style="bold cyan")
+    text.append(f"Plyctl {version}", style="bold cyan")
     text.append(f" · {manifest.metadata.name}", style="bold")
     text.append(
         f"\n{manifest.runtime.mode} · {manifest.runtime.engine} · "
@@ -226,7 +226,7 @@ def render_runtime_event(event: dict[str, Any], indexes: dict[str, int], total: 
         text.append("Streams READY", style="bold green")
         text.append(f" · port {event.get('port')}")
         for name in event.get("streams") or []:
-            text.append(f"\n  nodrix-viewer {name}", style="cyan")
+            text.append(f"\n  plyctl-viewer {name}", style="cyan")
         return text
     if kind == "pipeline_running":
         text.append("RUNNING", style="bold green")
@@ -298,7 +298,7 @@ def render_top(data: dict[str, object]) -> Group:
     duration = float(data.get("duration_seconds", 0.0) or 0.0)
 
     header = Text()
-    header.append("Nodrix top", style="bold cyan")
+    header.append("Plyctl top", style="bold cyan")
     header.append(f" · {data.get('pipeline', '-')}", style="bold")
     header.append(f" · {str(data.get('status', 'running')).upper()}", style="green")
     header.append(f" · {duration:,.1f}s")

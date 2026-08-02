@@ -18,7 +18,10 @@ on:
       - "src/nodrix/process_host.py"
       - "src/nodrix/provider*.py"
       - "src/nodrix/session.py"
+      - "src/plyctl/**"
+      - "tests/test_plyctl_compat.py"
       - "scripts/*modular_ros2*"
+      - "scripts/*plyctl_ros2*"
       - ".github/workflows/modular-packages.yml"
   pull_request:
     paths:
@@ -34,7 +37,10 @@ on:
       - "src/nodrix/process_host.py"
       - "src/nodrix/provider*.py"
       - "src/nodrix/session.py"
+      - "src/plyctl/**"
+      - "tests/test_plyctl_compat.py"
       - "scripts/*modular_ros2*"
+      - "scripts/*plyctl_ros2*"
       - ".github/workflows/modular-packages.yml"
   workflow_dispatch:
 
@@ -65,7 +71,7 @@ jobs:
           python -m pip install -e packages/nodrix-mapping --no-deps
           python -m pip install -e packages/nodrix-ros2 --no-deps
           python -m pip install -e packages/nodrix-spatial-ros2 --no-deps
-          python -m pip install build twine
+          python -m pip install build "twine>=6.1,<7"
 
       - name: Test Provider API and package contracts
         run: |
@@ -83,32 +89,32 @@ jobs:
           LIVOX_WS: /opt/ros/jazzy
           ROBOT_WS: ${{ github.workspace }}
         run: |
-          nodrix provider list
-          nodrix provider info nodrix.spatial
-          nodrix provider info nodrix.mapping
-          nodrix provider info nodrix.ros2
-          nodrix provider info nodrix.ros2.spatial
-          nodrix validate integrations/nodrix-fast-livo2/pipelines/input.yaml
-          nodrix validate integrations/nodrix-fast-livo2/pipelines/generic-topic-smoke.yaml
-          nodrix validate integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml
+          plyctl provider list
+          plyctl provider info nodrix.spatial
+          plyctl provider info nodrix.mapping
+          plyctl provider info nodrix.ros2
+          plyctl provider info nodrix.ros2.spatial
+          plyctl validate integrations/nodrix-fast-livo2/pipelines/input.yaml
+          plyctl validate integrations/nodrix-fast-livo2/pipelines/generic-topic-smoke.yaml
+          plyctl validate integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml
           template_root="$(mktemp -d)"
-          nodrix init "${template_root}/ros2-project" --template ros2
-          nodrix validate "${template_root}/ros2-project/pipeline.yaml"
+          plyctl init "${template_root}/ros2-project" --template ros2
+          plyctl validate "${template_root}/ros2-project/pipeline.yaml"
 
       - name: Build independent distributions
         if: matrix.python-version == '3.12'
         run: |
-          python -m build . --outdir dist/nodrix-core
-          python -m build packages/nodrix-spatial --outdir dist/nodrix-spatial
-          python -m build packages/nodrix-mapping --outdir dist/nodrix-mapping
-          python -m build packages/nodrix-ros2 --outdir dist/nodrix-ros2
-          python -m build packages/nodrix-spatial-ros2 --outdir dist/nodrix-spatial-ros2
+          python -m build . --outdir dist/plyctl-core
+          python -m build packages/nodrix-spatial --outdir dist/plyctl-spatial
+          python -m build packages/nodrix-mapping --outdir dist/plyctl-mapping
+          python -m build packages/nodrix-ros2 --outdir dist/plyctl-ros2
+          python -m build packages/nodrix-spatial-ros2 --outdir dist/plyctl-spatial-ros2
           python -m twine check \
-            dist/nodrix-core/* \
-            dist/nodrix-spatial/* \
-            dist/nodrix-mapping/* \
-            dist/nodrix-ros2/* \
-            dist/nodrix-spatial-ros2/*
+            dist/plyctl-core/* \
+            dist/plyctl-spatial/* \
+            dist/plyctl-mapping/* \
+            dist/plyctl-ros2/* \
+            dist/plyctl-spatial-ros2/*
 
       - name: Upload distributions
         if: matrix.python-version == '3.12'
@@ -123,15 +129,15 @@ jobs:
         run: |
           python -m venv wheel-smoke
           wheel-smoke/bin/python -m pip install \
-            dist/nodrix-core/*.whl \
-            dist/nodrix-spatial/*.whl \
-            dist/nodrix-mapping/*.whl \
-            dist/nodrix-ros2/*.whl \
-            dist/nodrix-spatial-ros2/*.whl
+            dist/plyctl-core/*.whl \
+            dist/plyctl-spatial/*.whl \
+            dist/plyctl-mapping/*.whl \
+            dist/plyctl-ros2/*.whl \
+            dist/plyctl-spatial-ros2/*.whl
           wheel-smoke/bin/python -c \
-            "import nodrix_ros2; assert nodrix_ros2.__version__ == '0.4.0'"
-          wheel-smoke/bin/nodrix provider info nodrix.ros2
-          wheel-smoke/bin/nodrix provider info nodrix.ros2.spatial
+            "import nodrix_ros2, plyctl_ros2; assert plyctl_ros2.Ros2Session is nodrix_ros2.Ros2Session"
+          wheel-smoke/bin/plyctl provider info nodrix.ros2
+          wheel-smoke/bin/plyctl provider info nodrix.ros2.spatial
 
   ros-jazzy-smoke:
     runs-on: ubuntu-latest

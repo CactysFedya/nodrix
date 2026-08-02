@@ -1,7 +1,8 @@
 include README.md LICENSE NOTICE CHANGELOG.md VERIFICATION.md
 include pyproject.toml setup.py setup.cfg
 include CONTRIBUTING.md SECURITY.md SUPPORT.md CODE_OF_CONDUCT.md CITATION.cff
-recursive-include docs *.md
+include RELEASE_MANIFEST.json
+recursive-include docs *.md *.py *.css
 recursive-include examples *.py *.cpp *.yaml *.yml *.toml *.json *.md
 recursive-include benchmarks *.yaml *.yml *.md
 recursive-include tests *.py *.json

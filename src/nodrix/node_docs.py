@@ -88,7 +88,7 @@ def validate_parameters(reference: str, parameters: dict[str, Any]) -> None:
 
     Node-specific ``open`` methods remain authoritative for hardware and file
     checks. This validator catches missing required values, enum typos and
-    numeric range errors during ``nodrix validate``.
+    numeric range errors during ``plyctl validate``.
     """
     from .provider_validation import validate_provider_parameters
     from .providers import provider_for_node

@@ -35,7 +35,7 @@ class NativePluginNode(Node):
         defer_host: bool = False,
     ) -> None:
         if NativeNodeHost is None:
-            raise RuntimeError("Nodrix native plugin extension is not built")
+            raise RuntimeError("Plyctl native plugin extension is not built")
         super().__init__(parameters)
         self.library = library
         self.node_type = node_type

@@ -16,7 +16,7 @@ except Exception:  # pragma: no cover - built during installation
 
 def probe_v4l2(device: str = "/dev/video0") -> dict[str, Any]:
     if _native_v4l2_probe is None:
-        raise RuntimeError("Nodrix native device extension is not built")
+        raise RuntimeError("Plyctl native device extension is not built")
     return dict(_native_v4l2_probe(device=device))
 
 

@@ -3,13 +3,13 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nodrix"
-version = "2.2.0a4"
-description = "High-performance typed runtime for local and distributed streaming graphs"
+name = "plyctl"
+version = "2.2.0a5"
+description = "The Pipeline OS for real-time local and distributed systems"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{name = "CactysFedya"}]
-maintainers = [{name = "Nodrix contributors"}]
+maintainers = [{name = "Plyctl contributors"}]
 keywords = [
   "streaming",
   "dataflow",
@@ -19,9 +19,12 @@ keywords = [
   "shared-memory",
   "cpp",
   "edge-computing",
+  "pipeline-os",
+  "realtime",
+  "ros2",
 ]
 classifiers = [
-  "Development Status :: 5 - Production/Stable",
+  "Development Status :: 3 - Alpha",
   "License :: OSI Approved :: Apache Software License",
   "Environment :: Console",
   "Intended Audience :: Developers",
@@ -69,17 +72,26 @@ dev = [
   "pytest>=8.0",
   "pytest-timeout>=2.4",
   "ruff>=0.12",
-  "twine>=6.1",
+  "twine>=6.1,<7",
+]
+docs = [
+  "myst-parser>=4,<5",
+  "sphinx>=8,<9",
+  "sphinx-copybutton>=0.5,<1",
+  "sphinx-rtd-theme>=3,<4",
+  "sphinxcontrib-mermaid>=1,<2",
 ]
 
 [project.urls]
-Homepage = "https://github.com/CactysFedya/nodrix"
-Documentation = "https://github.com/CactysFedya/nodrix/tree/main/docs"
-Repository = "https://github.com/CactysFedya/nodrix.git"
-Issues = "https://github.com/CactysFedya/nodrix/issues"
-Changelog = "https://github.com/CactysFedya/nodrix/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/CactysFedya/plyctl"
+Documentation = "https://cactysfedya.github.io/plyctl/"
+Repository = "https://github.com/CactysFedya/plyctl.git"
+Issues = "https://github.com/CactysFedya/plyctl/issues"
+Changelog = "https://github.com/CactysFedya/plyctl/blob/main/CHANGELOG.md"
 
 [project.scripts]
+plyctl = "plyctl.cli:app"
+plyctl-viewer = "nodrix.viewer:main"
 nodrix = "nodrix.cli:app"
 nodrix-viewer = "nodrix.viewer:main"
 
@@ -125,7 +137,7 @@ build = "cp311-* cp312-* cp313-* cp314-*"
 skip = "*-musllinux*"
 build-verbosity = 1
 environment = { NODRIX_BUILD_NCNN_PLUGIN = "1", NODRIX_FETCH_NCNN = "1" }
-test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix; from nodrix.native_runtime import NativeToolchain; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == f'nodrix-native-runner {nodrix.__version__}'; root=Path(nodrix.__file__).resolve().parent/'bin'; assert any(root.glob('*ncnn_detector*')), root\" && nodrix --version"
+test-command = "python -c \"from pathlib import Path; import subprocess,tempfile,nodrix,plyctl; from nodrix.native_runtime import NativeToolchain; assert plyctl.Message is nodrix.Message; runner=NativeToolchain(Path(tempfile.gettempdir())).ensure_runner(); assert subprocess.run([str(runner),'--version'],check=True,capture_output=True,text=True).stdout.strip() == f'nodrix-native-runner {plyctl.__version__}'; root=Path(nodrix.__file__).resolve().parent/'bin'; assert any(root.glob('*ncnn_detector*')), root\" && plyctl --version && nodrix --version"
 
 [tool.cibuildwheel.linux]
 manylinux-x86_64-image = "manylinux_2_28"

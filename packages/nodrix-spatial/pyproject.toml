@@ -3,11 +3,11 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nodrix-spatial"
+name = "plyctl-spatial"
 version = "0.1.0"
-description = "Spatial data contracts and typed zero-copy payloads for Nodrix"
+description = "Spatial data contracts and typed zero-copy payloads for Plyctl"
 requires-python = ">=3.11"
-dependencies = ["nodrix>=2.2.0a3,<3"]
+dependencies = ["plyctl>=2.2.0a5,<3"]
 readme = "README.md"
 license = {text = "Apache-2.0"}
 
@@ -15,6 +15,9 @@ license = {text = "Apache-2.0"}
 test = ["pytest>=8"]
 
 [project.entry-points."nodrix.providers"]
+"nodrix.spatial" = "nodrix_spatial.provider:provider"
+
+[project.entry-points."plyctl.providers"]
 "nodrix.spatial" = "nodrix_spatial.provider:provider"
 
 [tool.setuptools.packages.find]

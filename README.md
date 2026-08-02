@@ -1,19 +1,24 @@
-# Nodrix 2.2.0 alpha.4
+# Plyctl 2.2.0 alpha.5
 
-[![PyPI](https://img.shields.io/pypi/v/nodrix.svg)](https://pypi.org/project/nodrix/)
-[![Python](https://img.shields.io/pypi/pyversions/nodrix.svg)](https://pypi.org/project/nodrix/)
-[![CI](https://github.com/CactysFedya/nodrix/actions/workflows/ci.yml/badge.svg)](https://github.com/CactysFedya/nodrix/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/plyctl.svg)](https://pypi.org/project/plyctl/)
+[![Python](https://img.shields.io/pypi/pyversions/plyctl.svg)](https://pypi.org/project/plyctl/)
+[![CI](https://github.com/CactysFedya/plyctl/actions/workflows/ci.yml/badge.svg)](https://github.com/CactysFedya/plyctl/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-Nodrix is a high-performance typed runtime for local and distributed streaming graphs. It runs Python and C++ nodes in one graph, preserves zero-copy paths where the memory domain permits, and makes every copy, drop, restart, queue, and network export observable.
+Plyctl is the Pipeline OS for real-time systems. It composes Python, C++, ROS 2,
+processes, devices, and transports in one typed YAML graph, preserves zero-copy
+paths where the memory domain permits, and makes every copy, drop, restart,
+queue, and network export observable.
 
 
-## Nodrix 2.2 alpha.4 highlights
+## Plyctl 2.2 alpha.5 highlights
 
-Core Boundaries separates manifest parsing, provider discovery/loading, CLI
-commands, and runtime lifecycle into focused modules without changing the 2.x
-facades. Integrations now use transport-neutral Resources and managed
-Applications, while physical/external Transports attach to logical Edges.
+This release introduces the `plyctl` product, Python package, CLI, manifest API,
+and independently installable integration packages. The previous `nodrix`
+Python import, CLI, provider entry point, and `nodrix.dev/v1`/`v2` YAML values
+remain supported throughout 2.x. Native ABI symbols, `.ndrx` recordings,
+`nodrix://` stream URIs, and on-disk compatibility names are intentionally
+unchanged.
 
 ```yaml
 applications:
@@ -33,20 +38,34 @@ edges:
 
 Compact provider parameters stay available as shown above. Canonical resolved
 YAML nests them under `parameters`. Old `use` and top-level `links` remain
-readable in 2.x and can be rewritten with `nodrix migrate`.
+readable in 2.x and can be rewritten with `plyctl migrate`.
+
+## ROS 2 as packages, not a fork
+
+```bash
+pip install plyctl plyctl-spatial plyctl-ros2 plyctl-spatial-ros2
+plyctl init my-robot --template ros2
+plyctl validate my-robot/pipeline.yaml
+plyctl run my-robot/pipeline.yaml
+```
+
+The YAML structure is the same as for every other Plyctl pipeline. ROS 2 adds
+provider-owned sessions, applications, nodes, and transports; it does not
+replace the core manifest or require a separate runtime. Existing ROS 2 YAML
+with `apiVersion: nodrix.dev/v2` continues to load unchanged.
 
 ## Provider security
 
-Nodrix 2.1 adds Provider API 1: independently installed providers are
+Plyctl 2.1 adds Provider API 1: independently installed providers are
 discovered from signed metadata, checked for API/version/features and trust,
 then imported lazily only when selected. Existing Core, Media, Vision,
 Recording and ROS 2 Node ids continue through a compatibility adapter.
 
 ```bash
-nodrix provider list
-nodrix provider verify example.echo
-nodrix doctor --provider ros2
-nodrix doctor --deep --json
+plyctl provider list
+plyctl provider verify example.echo
+plyctl doctor --provider ros2
+plyctl doctor --deep --json
 ```
 
 Production pipelines verify provider signatures and explicit allowlist
@@ -65,7 +84,7 @@ Preprocessing, NCNN inference, YOLO decoding, filtering, and NMS execute in
 C++ through Plugin C ABI 2. The previous `vision.ncnn_detector` remains the
 Python reference backend.
 
-Nodrix 2.0 establishes stable Manifest v2, Python SDK and Plugin C ABI 2
+Plyctl 2.0 establishes stable Manifest v2, Python SDK and Plugin C ABI 2
 contracts while keeping existing Manifest v1 pipelines readable. It adds
 reusable Fragments, signed offline plugins, production validation, automatic
 recording, OpenTelemetry lifecycle traces, optional ROS 2 adapters, a packaged
@@ -73,9 +92,9 @@ standalone C++ runner, and direct external C ABI plugin execution in
 `engine: native`.
 
 ```bash
-nodrix migrate pipeline.yaml --to v2
-nodrix validate pipeline.v2.yaml --production
-nodrix run pipeline.v2.yaml --production
+plyctl migrate pipeline.yaml --to v2
+plyctl validate pipeline.v2.yaml --production
+plyctl run pipeline.v2.yaml --production
 ```
 
 Multi-rate detection and tracking remain available without duplicating stale
@@ -88,11 +107,11 @@ source 30 FPS ─┬─ latest frame → detector ~10 FPS ─┐
 ```
 
 ```bash
-nodrix init camera_app --template vision
+plyctl init camera_app --template vision
 cd camera_app
-nodrix inspect
-nodrix run
-nodrix top
+plyctl inspect
+plyctl run
+plyctl top
 ```
 
 `vision.realtime_bytetrack` predicts on every source frame, applies each
@@ -124,24 +143,24 @@ Install the core runtime and CLI from PyPI:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install nodrix
-nodrix --version
+pip install plyctl
+plyctl --version
 ```
 
 Optional media and viewer dependencies:
 
 ```bash
-pip install "nodrix[viewer]"
-pip install "nodrix[media]"
-pip install "nodrix[vision,media,viewer]"
+pip install "plyctl[viewer]"
+pip install "plyctl[media]"
+pip install "plyctl[vision,media,viewer]"
 ```
 
-Use `nodrix[vision-ncnn]` only when the Python NCNN reference backend is also
+Use `plyctl[vision-ncnn]` only when the Python NCNN reference backend is also
 required. Official wheels already contain the native NCNN provider.
 
 ### Raspberry Pi and offline source installation
 
-Nodrix 2.1.0 can be built without PyPI build isolation when the runtime dependencies are already present:
+Plyctl 2.1.0 can be built without PyPI build isolation when the runtime dependencies are already present:
 
 ```bash
 python3 -m pip install . --no-build-isolation --no-deps
@@ -152,7 +171,7 @@ Use `scripts/install_offline.sh` for a dependency preflight. See [docs/OFFLINE_I
 For an isolated CLI installation:
 
 ```bash
-pipx install nodrix
+pipx install plyctl
 ```
 
 Release wheels cover Linux x86-64, Linux ARM64, macOS Apple Silicon, and
@@ -166,25 +185,25 @@ documented in [the 2.1 release notes](docs/RELEASE_2.1.0.md).
 ## Empty project and templates
 
 ```bash
-nodrix init my_project
+plyctl init my_project
 ```
 
 This creates an intentionally empty project skeleton. Runnable examples are explicit:
 
 ```bash
-nodrix init camera_app --template vision
-nodrix init media_app --template media
-nodrix init device_app --template device
-nodrix init package_app --template package
+plyctl init camera_app --template vision
+plyctl init media_app --template media
+plyctl init device_app --template device
+plyctl init package_app --template package
 ```
 
 ## Run and reproduce
 
 ```bash
 cd my_project
-nodrix validate --strict
-nodrix lock
-nodrix run --locked
+plyctl validate --strict
+plyctl lock
+plyctl run --locked
 ```
 
 Every run receives its own artifact directory:
@@ -207,7 +226,7 @@ Every run receives its own artifact directory:
 ## Stable Python API
 
 ```python
-from nodrix import Message, Node
+from plyctl import Message, Node
 
 class Multiply(Node):
     input_types = {"input": "core.object"}
@@ -222,7 +241,7 @@ class Multiply(Node):
         }
 ```
 
-Nodrix 2.x preserves the public `Node`, `SourceNode`, `SinkNode`, `Message`,
+Plyctl 2.x preserves the public `Node`, `SourceNode`, `SinkNode`, `Message`,
 `NodeContext`, manifest models, buffer, memory, error, and lifecycle contracts.
 Existing nodes that override `open`, `flush`, and `close` continue to work
 through lifecycle adapters.
@@ -238,9 +257,9 @@ created → configuring → ready → starting → running → stopping → stop
 ```
 
 ```bash
-nodrix status
-nodrix health
-nodrix health --watch
+plyctl status
+plyctl health
+plyctl health --watch
 ```
 
 Process-isolated nodes can use watchdog recovery:
@@ -262,10 +281,10 @@ nodes:
 ## Local packages
 
 ```bash
-nodrix init my_nodes --template package
+plyctl init my_nodes --template package
 cd my_nodes
-nodrix package build .
-nodrix package install dist/my-nodes-1.0.0.ndpkg
+plyctl package build .
+plyctl package install dist/my-nodes-1.0.0.ndpkg
 ```
 
 Use an installed node by stable package reference:
@@ -280,7 +299,7 @@ nodes:
 before extraction, rejects traversal/symlinks/platform filename collisions and
 decompression bombs, and atomically installs immutable versions. Packages may
 be signed and verified with an Ed25519 key. The local registry is offline by
-design; Nodrix does not silently download or execute marketplace code.
+design; Plyctl does not silently download or execute marketplace code.
 
 ## Secure named streams
 
@@ -308,8 +327,8 @@ streams:
 
 ```bash
 export NODRIX_STREAM_TOKEN=...
-nodrix stream echo /camera/front/h264 --ca secrets/ca.crt
-nodrix-viewer /camera/front/h264
+plyctl stream echo /camera/front/h264 --ca secrets/ca.crt
+plyctl-viewer /camera/front/h264
 ```
 
 TLS endpoints are advertised as `nodrix+tls://`. Certificate verification is
@@ -319,12 +338,12 @@ mandatory; mutual TLS is available with `client_ca` and
 ## Production validation
 
 ```bash
-nodrix validate --strict
-nodrix run --production
-nodrix inspect --memory
-nodrix plan pipeline.yaml
-nodrix diagnose runs/RUN-ID
-nodrix explain edge source.output:sink.input --pipeline pipeline.yaml
+plyctl validate --strict
+plyctl run --production
+plyctl inspect --memory
+plyctl plan pipeline.yaml
+plyctl diagnose runs/RUN-ID
+plyctl explain edge source.output:sink.input --pipeline pipeline.yaml
 ```
 
 The validator checks graph cycles, port/type compatibility, memory transfers, unsupported copies, open LAN streams, stream backpressure, watchdog/isolation conflicts, resource configuration, and native plugin loading.
@@ -335,25 +354,25 @@ unverified required plugins, unencrypted/open LAN exports, and planned payload
 copies. Direct native libraries additionally require an absolute path inside
 `security.native_plugin_allowlist` and cannot be world-writable.
 
-`nodrix optimize` writes separate benchmark variants and a decision report. It
+`plyctl optimize` writes separate benchmark variants and a decision report. It
 never edits or applies the production pipeline.
 
 ## Metrics, resources and runs
 
 ```bash
 # runtime.metrics.listen can be stored in pipeline.yaml
-nodrix run
-nodrix top
-nodrix metrics --format prometheus
-nodrix runs list
-nodrix runs show <run-id>
-nodrix runs compare <run-a> <run-b>
+plyctl run
+plyctl top
+plyctl metrics --format prometheus
+plyctl runs list
+plyctl runs show <run-id>
+plyctl runs compare <run-a> <run-b>
 ```
 
 ## Plugin C ABI 2.0
 
 ```bash
-nodrix native inspect ./libdetector.so
+plyctl native inspect ./libdetector.so
 ```
 
 Plugin C ABI 2.0 uses numeric ABI `131072`, opaque handles and function
@@ -381,7 +400,7 @@ nodes:
 - DLPack interoperability;
 - `.ndrx` universal record/play;
 - FFmpeg Media Pack and H.264/H.265 named streams;
-- low-latency `nodrix-viewer`;
+- low-latency `plyctl-viewer`;
 - typed custom-message generation for Python and C++;
 - local/LAN stream discovery without a mandatory agent.
 

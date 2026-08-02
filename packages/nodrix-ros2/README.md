@@ -1,6 +1,6 @@
-# nodrix-ros2
+# plyctl-ros2
 
-Universal ROS 2 platform provider and orchestrator for Nodrix. ROS 2 and
+Universal ROS 2 platform provider and orchestrator for Plyctl. ROS 2 and
 `rclpy` remain system dependencies and are intentionally not installed from
 PyPI.
 
@@ -21,12 +21,12 @@ The base package contains only reusable ROS platform services:
   remapping.
 
 PointCloud, IMU, and Odometry contracts live in the optional
-`nodrix-spatial-ros2` package. This keeps a non-spatial ROS deployment small
+`plyctl-spatial-ros2` package. This keeps a non-spatial ROS deployment small
 and lets both packages evolve independently.
 
 ## Same YAML model
 
-Ordinary Nodrix YAML remains valid. A ROS project only adds a session and binds
+Ordinary Plyctl YAML remains valid. A ROS project only adds a session and binds
 the managed Applications that share it:
 
 ```yaml
@@ -73,7 +73,7 @@ edges:
 Generate a complete editable project with:
 
 ```bash
-nodrix init my-robot --template ros2
+plyctl init my-robot --template ros2
 ```
 
 The workspace is prepared once, source changes are fingerprinted together with
@@ -82,7 +82,7 @@ ROS-to-ROS payloads remain in DDS/RMW: a `ros2.topic` transport is a typed topol
 readiness, and remapping contract, not a Python payload copy. For `ros2.node`
 and RViz the port is compiled to a ROS remap. A launch process can expose the
 same behavior with `ros_port_arguments`. Use a typed source/sink bridge only
-when an algorithm inside Nodrix actually needs the data; that compatibility
+when an algorithm inside Plyctl actually needs the data; that compatibility
 path is bounded but is not DDS loaned-message zero-copy.
 
 By default the session passes a ROS-focused allowlist of environment variables

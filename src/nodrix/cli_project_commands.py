@@ -35,7 +35,7 @@ from .lockfile import verify_lock
 
 @app.command()
 def init(
-    directory: Annotated[Path, typer.Argument(help="Directory for a new Nodrix project")] = Path("nodrix-project"),
+    directory: Annotated[Path, typer.Argument(help="Directory for a new Plyctl project")] = Path("plyctl-project"),
     template: Annotated[str | None, typer.Option("--template", "-t", help="Built-in or installed provider template id")] = None,
     force: Annotated[bool, typer.Option("--force", help="Overwrite generated files")] = False,
 ) -> None:
@@ -67,12 +67,12 @@ def init(
     label = f"{selected} template" if selected else "empty skeleton"
     console.print(f"[green]Created[/green] {directory.resolve()} ({label}, {len(created)} files)")
     if selected == "package":
-        console.print("Build: [bold]cd %s && nodrix package build .[/bold]" % directory)
+        console.print("Build: [bold]cd %s && plyctl package build .[/bold]" % directory)
     elif selected:
-        console.print("Run: [bold]cd %s && nodrix validate && nodrix run[/bold]" % directory)
+        console.print("Run: [bold]cd %s && plyctl validate && plyctl run[/bold]" % directory)
     else:
         console.print("Add nodes to pipeline.yaml, or create a runnable example with: "
-                      f"[bold]nodrix init {directory} --template vision --force[/bold]")
+                      f"[bold]plyctl init {directory} --template vision --force[/bold]")
 
 
 @app.command()
@@ -158,9 +158,9 @@ def schema_command(
             "-o",
             help="Destination for the canonical pipeline JSON Schema",
         ),
-    ] = Path(".nodrix-schema.json"),
+    ] = Path(".plyctl-schema.json"),
 ) -> None:
-    """Write the canonical Nodrix pipeline JSON Schema for editor tooling."""
+    """Write the canonical Plyctl pipeline JSON Schema for editor tooling."""
 
     try:
         destination = write_manifest_schema(output)
@@ -453,7 +453,7 @@ def record(
     duration: Annotated[float, typer.Option("--duration", min=0.0, help="Stop after N seconds; 0 disables")] = 0.0,
     count: Annotated[int, typer.Option("--count", min=0, help="Stop after N total messages; 0 disables")] = 0,
 ) -> None:
-    """Record any typed Nodrix streams into one indexed .ndrx file."""
+    """Record any typed Plyctl streams into one indexed .ndrx file."""
     from .recording import record_streams
 
     if duration <= 0 and count <= 0:
@@ -478,7 +478,7 @@ def play(
     count: Annotated[int, typer.Option("--count", min=0, help="Play at most N messages; 0 means all")] = 0,
     fixed_fps: Annotated[float, typer.Option("--fixed-fps", min=0.0, help="Use a fixed replay rate; 0 preserves timing")] = 0.0,
 ) -> None:
-    """Replay an .ndrx recording as discoverable Nodrix streams."""
+    """Replay an .ndrx recording as discoverable Plyctl streams."""
     from .recording import RecordingError, play_recording
 
     try:

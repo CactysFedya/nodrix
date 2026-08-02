@@ -192,7 +192,7 @@ def test_provider_template_copy_is_metadata_first_and_rejects_escape(
     )
     created = create_provider_project(tmp_path / "project", "demo")
     assert [path.name for path in created] == ["pipeline.yaml"]
-    assert (tmp_path / "project" / ".nodrix-schema.json").is_file()
+    assert (tmp_path / "project" / ".plyctl-schema.json").is_file()
     assert (tmp_path / "project" / ".vscode" / "settings.json").is_file()
 
     unsafe = TemplateDescriptor("demo", "../escape")

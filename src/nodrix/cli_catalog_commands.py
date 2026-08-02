@@ -99,7 +99,7 @@ def node_create(
         if path.exists() and not force:
             raise typer.BadParameter(f"File exists: {path}; use --force")
         template_lines = [
-            "from nodrix import Message, Node",
+            "from plyctl import Message, Node",
             "",
             "",
             f"class {class_name}(Node):",
@@ -378,7 +378,7 @@ def stream_list(
         table.add_row(item.name, item.type, item.host, item.pipeline, item.endpoint)
     console.print(table)
     if not streams:
-        console.print("[yellow]No Nodrix streams discovered during the selected window.[/yellow]")
+        console.print("[yellow]No Plyctl streams discovered during the selected window.[/yellow]")
 
 
 @fragment_app.command("validate")
@@ -442,13 +442,13 @@ def fragment_init_command(
         encoding="utf-8",
     )
     (target / "README.md").write_text(
-        f"# {name}\n\nValidate with `nodrix fragment validate fragment.yaml`.\n",
+        f"# {name}\n\nValidate with `plyctl fragment validate fragment.yaml`.\n",
         encoding="utf-8",
     )
     tests_dir = target / "tests"
     tests_dir.mkdir(exist_ok=True)
     (tests_dir / "test_contract.py").write_text(
-        "from nodrix import load_fragment\n\n"
+        "from plyctl import load_fragment\n\n"
         "def test_contract():\n"
         "    fragment = load_fragment('fragment.yaml')\n"
         "    assert fragment.inputs and fragment.outputs\n",
@@ -534,7 +534,7 @@ def stream_view(
     fullscreen: Annotated[bool, typer.Option("--fullscreen")] = False,
     scale: Annotated[float, typer.Option("--scale", min=0.05, max=8.0)] = 1.0,
 ) -> None:
-    """Open a named frame stream in Nodrix Viewer."""
+    """Open a named frame stream in Plyctl Viewer."""
     from .viewer import ViewerError, run_viewer
 
     try:

@@ -1,4 +1,4 @@
-"""JSON Schema generation for canonical Nodrix pipeline manifests."""
+"""JSON Schema generation for canonical Plyctl pipeline manifests."""
 
 from __future__ import annotations
 
@@ -11,18 +11,19 @@ from typing import Any
 from .manifest import PipelineManifest
 
 
-MANIFEST_SCHEMA_ID = "https://nodrix.dev/schemas/pipeline-2.2.json"
+MANIFEST_SCHEMA_ID = "https://plyctl.dev/schemas/pipeline-2.2.json"
 
 
 def manifest_json_schema() -> dict[str, Any]:
     schema = PipelineManifest.model_json_schema(by_alias=True)
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
     schema["$id"] = MANIFEST_SCHEMA_ID
-    schema["title"] = "Nodrix Pipeline Manifest"
+    schema["title"] = "Plyctl Pipeline Manifest"
     schema["description"] = (
-        "Canonical Nodrix 2.x pipeline manifest. The deprecated 'use' alias "
+        "Canonical Plyctl 2.x pipeline manifest. The deprecated 'use' alias "
         "is accepted by the compatibility parser but intentionally omitted "
-        "from this schema."
+        "from this schema. Legacy nodrix.dev API versions remain accepted "
+        "throughout the 2.x series."
     )
     return schema
 

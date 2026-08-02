@@ -92,7 +92,7 @@ def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
             except ModuleNotFoundError as exc:
                 extra = prefix.removesuffix(".")
                 raise PluginError(
-                    f"Node pack {extra!r} is unavailable; install Nodrix with the appropriate extra"
+                    f"Node pack {extra!r} is unavailable; install Plyctl with the appropriate extra"
                 ) from exc
             break
 
@@ -111,7 +111,7 @@ def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
         if provider_class is not None:
             if not issubclass(provider_class, Node):
                 raise PluginError(
-                    f"Provider Node {reference!r} is not a Nodrix Node class"
+                    f"Provider Node {reference!r} is not a Plyctl Node class"
                 )
             return provider_class
 
@@ -139,5 +139,5 @@ def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
         raise PluginError(f"Cannot load node {reference!r}: {exc}") from exc
 
     if not isinstance(cls, type) or not issubclass(cls, Node):
-        raise PluginError(f"{reference!r} is not a Nodrix Node class")
+        raise PluginError(f"{reference!r} is not a Plyctl Node class")
     return cls

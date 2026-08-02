@@ -19,8 +19,8 @@ fi
 "${PYTHON_BIN}" -m pip install -e "${ROOT}/packages/nodrix-ros2" --no-deps
 "${PYTHON_BIN}" -m pip install -e "${ROOT}/packages/nodrix-spatial-ros2" --no-deps
 
-"${PYTHON_BIN}" -m nodrix.cli provider list
-"${PYTHON_BIN}" -m nodrix.cli provider info nodrix.spatial
-"${PYTHON_BIN}" -m nodrix.cli provider info nodrix.mapping
-"${PYTHON_BIN}" -m nodrix.cli provider info nodrix.ros2
-"${PYTHON_BIN}" -m nodrix.cli provider info nodrix.ros2.spatial
+"${PYTHON_BIN}" -m plyctl.cli provider list
+"${PYTHON_BIN}" -m plyctl.cli provider info nodrix.spatial
+"${PYTHON_BIN}" -m plyctl.cli provider info nodrix.mapping
+"${PYTHON_BIN}" -m plyctl.cli provider info nodrix.ros2
+"${PYTHON_BIN}" -m plyctl.cli provider info nodrix.ros2.spatial

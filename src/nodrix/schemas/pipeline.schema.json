@@ -125,7 +125,7 @@
     },
     "ExternalLinkConfig": {
       "additionalProperties": false,
-      "description": "A control-plane link compiled by an optional integration provider.\n\nUnlike ``edges``, external links do not create a Nodrix queue or move a\npayload through the Nodrix runtime.  A provider can use them to describe\nDDS topics, broker routes, service bindings, or equivalent external data\npaths while keeping the ordinary node.port notation.",
+      "description": "A control-plane link compiled by an optional integration provider.\n\nUnlike ``edges``, external links do not create a Plyctl queue or move a\npayload through the Plyctl runtime.  A provider can use them to describe\nDDS topics, broker routes, service bindings, or equivalent external data\npaths while keeping the ordinary node.port notation.",
       "properties": {
         "from": {
           "title": "From",
@@ -1132,7 +1132,7 @@
           "type": "string"
         },
         "service_name": {
-          "default": "nodrix",
+          "default": "plyctl",
           "title": "Service Name",
           "type": "string"
         }
@@ -1162,14 +1162,16 @@
       "type": "object"
     }
   },
-  "$id": "https://nodrix.dev/schemas/pipeline-2.2.json",
+  "$id": "https://plyctl.dev/schemas/pipeline-2.2.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
-  "description": "Canonical Nodrix 2.x pipeline manifest. The deprecated 'use' alias is accepted by the compatibility parser but intentionally omitted from this schema.",
+  "description": "Canonical Plyctl 2.x pipeline manifest. The deprecated 'use' alias is accepted by the compatibility parser but intentionally omitted from this schema. Legacy nodrix.dev API versions remain accepted throughout the 2.x series.",
   "properties": {
     "apiVersion": {
-      "default": "nodrix.dev/v1",
+      "default": "plyctl.dev/v1",
       "enum": [
+        "plyctl.dev/v1",
+        "plyctl.dev/v2",
         "nodrix.dev/v1",
         "nodrix.dev/v2"
       ],
@@ -1256,6 +1258,6 @@
     "nodes",
     "edges"
   ],
-  "title": "Nodrix Pipeline Manifest",
+  "title": "Plyctl Pipeline Manifest",
   "type": "object"
 }

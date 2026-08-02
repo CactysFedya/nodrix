@@ -56,7 +56,7 @@ def _minimal_manifest() -> dict[str, object]:
 
 
 def test_v151_version() -> None:
-    assert nodrix.__version__ == "2.2.0a4"
+    assert nodrix.__version__ == "2.2.0a5"
 
 
 def test_manifest_rejects_unknown_fields_and_api_versions() -> None:

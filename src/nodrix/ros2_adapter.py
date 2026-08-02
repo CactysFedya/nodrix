@@ -68,7 +68,7 @@ class _Ros2Base:
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "ROS 2 adapters require a ROS 2 installation with rclpy; "
-                "rclpy is intentionally not a Nodrix dependency"
+                "rclpy is intentionally not a Plyctl dependency"
             ) from exc
         self._owns_context = not self.rclpy.ok()
         if self._owns_context:

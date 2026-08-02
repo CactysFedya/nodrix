@@ -65,7 +65,7 @@ def _write_manifest(path: Path, document: dict) -> Path:
 
 
 def test_v200_version_and_stable_public_api() -> None:
-    assert nodrix.__version__ == "2.2.0a4"
+    assert nodrix.__version__ == "2.2.0a5"
     assert nodrix.PipelineManifest is PipelineManifest
     assert nodrix.load_manifest is load_manifest
     assert issubclass(nodrix.ManifestError, nodrix.NodrixError)
@@ -100,7 +100,7 @@ def test_manifest_v1_remains_loadable() -> None:
             "edges": [],
         }
     )
-    assert manifest.api_version == "nodrix.dev/v1"
+    assert manifest.api_version == "plyctl.dev/v1"
     assert manifest.runtime.engine == "auto"
 
 
@@ -126,12 +126,12 @@ def test_migration_preserves_source_and_in_place_creates_backup(
     destination = Path(result["destination"])
     assert source.read_bytes() == original
     assert destination.name == "pipeline.v2.yaml"
-    assert load_manifest(destination).api_version == "nodrix.dev/v2"
+    assert load_manifest(destination).api_version == "plyctl.dev/v2"
     assert load_manifest(destination).nodes["source"].failure.policy == "restart_node"
 
     in_place = migrate_manifest(source, in_place=True)
     assert Path(in_place["backup"]).read_bytes() == original
-    assert load_manifest(source).api_version == "nodrix.dev/v2"
+    assert load_manifest(source).api_version == "plyctl.dev/v2"
 
 
 def test_fragment_expansion_rewrites_public_ports(tmp_path: Path) -> None:
@@ -549,7 +549,7 @@ def test_cli_surface_ci_matrix_and_generated_v2_template(
     project = tmp_path / "generated"
     create_project(project, "core")
     generated = load_manifest(project / "pipeline.yaml")
-    assert generated.api_version == "nodrix.dev/v2"
+    assert generated.api_version == "plyctl.dev/v2"
 
     root = Path(__file__).resolve().parents[1]
     ci_path = root / ".github/workflows/ci.yml"

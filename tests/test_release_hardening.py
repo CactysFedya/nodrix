@@ -217,7 +217,7 @@ def test_package_install_is_atomic_immutable_and_rolls_back(
         incompatible,
         tmp_path / "incompatible.ndpkg",
     )
-    with pytest.raises(ValueError, match="requires Nodrix"):
+    with pytest.raises(ValueError, match="requires Plyctl"):
         install_package(bad_archive)
     assert not (
         tmp_path / "home/packages/incompatible/1.0.0"

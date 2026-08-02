@@ -47,7 +47,7 @@ class HybridPipelineRuntime(
     IntegrationRuntimeMixin,
     RuntimeWorkerMixin,
 ):
-    """Nodrix 2.x unified executor.
+    """Plyctl 2.x unified executor.
 
     Python nodes and C++ processor/sink plugins share the same native bounded
     queues, typed messages, lifecycle, synchronization, telemetry, and zero-copy

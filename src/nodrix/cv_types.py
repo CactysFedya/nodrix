@@ -85,7 +85,7 @@ class _SharedBufferResource:
     def retain(self) -> None:
         with self._lock:
             if self._references <= 0:
-                raise RuntimeError("Cannot retain a released Nodrix buffer")
+                raise RuntimeError("Cannot retain a released Plyctl buffer")
             self._references += 1
 
     @property
@@ -163,12 +163,12 @@ class ManagedBuffer:
     def memoryview(self) -> memoryview:
         if not self.host_accessible:
             raise TypeError(
-                f"Nodrix {self.memory_type.value} buffer on {self.device!r} is device-only; "
+                f"Plyctl {self.memory_type.value} buffer on {self.device!r} is device-only; "
                 "use DLPack or the matching device backend instead of forcing a CPU copy"
             )
         view = memoryview(self.owner)
         if not view.contiguous:
-            raise ValueError("Nodrix buffers must be contiguous")
+            raise ValueError("Plyctl buffers must be contiguous")
         byte_view = view.cast("B") if view.format != "B" else view
         end = None if self.length is None else self.offset + self.length
         sliced = byte_view[self.offset:end]
@@ -183,7 +183,7 @@ class ManagedBuffer:
         handle_size = getattr(self.handle, "nbytes", None)
         if handle_size is not None:
             return int(handle_size)
-        raise ValueError("Device-only Nodrix buffer has no nbytes_hint")
+        raise ValueError("Device-only Plyctl buffer has no nbytes_hint")
 
     def __dlpack_device__(self) -> tuple[int, int]:
         provider = self.owner if self.owner is not None else self.handle
@@ -269,7 +269,7 @@ class ManagedBuffer:
 
         with self._state_lock:
             if self._released:
-                raise RuntimeError("Cannot share a released Nodrix buffer")
+                raise RuntimeError("Cannot share a released Plyctl buffer")
             resource = self._shared_resource
             if resource is None:
                 managed_handle = (
@@ -450,11 +450,11 @@ class Frame:
 
 @dataclass(slots=True)
 class EncodedFrame:
-    """Compressed image/video access unit carried by Nodrix.
+    """Compressed image/video access unit carried by Plyctl.
 
     JPEG/PNG payloads contain one complete image. H.264/H.265 payloads may
     contain an access unit or an ordered Annex-B byte chunk and require a stateful decoder. The buffer remains
-    immutable and can be sent through the Nodrix wire protocol without an
+    immutable and can be sent through the Plyctl wire protocol without an
     additional Python-side payload copy.
     """
 

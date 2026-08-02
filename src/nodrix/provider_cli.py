@@ -125,7 +125,7 @@ def provider_info_command(
         f"Distribution: {record['distribution']} ({record['source']})"
     )
     console.print(f"Provider API: {record['provider_api']}")
-    console.print(f"Requires Nodrix: {record['requires_nodrix']}")
+    console.print(f"Requires Plyctl: {record['requires_nodrix']}")
     console.print(f"Trust status: {record['verification']['status']}")
     if record["verification"]["errors"]:
         for error in record["verification"]["errors"]:
