@@ -71,7 +71,7 @@ jobs:
           python -m pip install -e packages/nodrix-mapping --no-deps
           python -m pip install -e packages/nodrix-ros2 --no-deps
           python -m pip install -e packages/nodrix-spatial-ros2 --no-deps
-          python -m pip install build twine
+          python -m pip install build "twine>=6.1,<7"
 
       - name: Test Provider API and package contracts
         run: |

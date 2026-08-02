@@ -97,7 +97,7 @@ jobs:
 
       - name: Build and validate sdist
         run: |
-          python -m pip install --upgrade build twine
+          python -m pip install --upgrade build "twine>=6.1,<7"
           python -m build --sdist
           python -m build --sdist --wheel \
             --outdir dist packages/nodrix-compat
