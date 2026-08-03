@@ -50,3 +50,24 @@ This mode adds Python deserialization overhead.
 Diagnostic monitors do not gate application startup. A slow Python diagnostic
 subscriber may observe fewer messages than native ROS 2 consumers, so its
 reported rate must not be used to block FAST-LIO2 or RViz.
+
+## Recommended manifests
+
+- `pipelines/fastlio2.yaml` is the default headless pipeline. It runs the
+  Livox driver and FAST-LIO2 without requiring a graphical desktop.
+- `pipelines/fastlio2-rviz.yaml` adds RViz and must be launched only from a
+  terminal with a working `DISPLAY` or `WAYLAND_DISPLAY`.
+- RViz is optional and must never be part of the SLAM availability contract.
+- Topic monitor node frequency is diagnostic loop frequency, not the native
+  ROS 2 topic publication frequency.
+
+Run artifacts are stored under the project that invoked `plyctl run`:
+
+```bash
+cd /path/to/nodrix
+plyctl run integrations/nodrix-fast-lio2/pipelines/fastlio2.yaml
+plyctl top
+```
+
+Relative paths inside the manifest continue to resolve from the manifest
+directory.

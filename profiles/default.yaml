@@ -1,0 +1,3 @@
+schema: nodrix.profile/v1
+name: default
+variables: {}

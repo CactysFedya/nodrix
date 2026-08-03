@@ -1,0 +1,5 @@
+schema: nodrix.profile/v1
+name: mid360s
+runtime_profile: realtime-low-latency
+variables:
+  FASTLIO_CONFIG_FILE: mid360s_handheld.yaml

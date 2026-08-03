@@ -256,7 +256,8 @@ def _node_line(name: str, raw: dict[str, Any], bottleneck_p95: float) -> Text:
     p95 = float(raw.get("p95_ms", raw.get("processing", {}).get("p95_ms", 0.0)))
     text = Text()
     text.append(f"{name:<14}", style="bold")
-    text.append(f" {rate:6.1f} Hz")
+    rate_label = "monitor Hz" if name.endswith("_health") else "node Hz"
+    text.append(f" {rate:6.1f} {rate_label}")
     text.append(f" {p95:8.2f} ms")
     text.append(f"  {_bar(busy, 100.0, 16)} ")
     text.append(f"{busy:5.1f}%")

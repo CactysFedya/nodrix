@@ -1,0 +1,10 @@
+schema: nodrix.view/v1
+name: compact
+style:
+  borders: none
+  spacing: compact
+sections:
+  - runtime
+  - applications
+  - monitors
+  - edges

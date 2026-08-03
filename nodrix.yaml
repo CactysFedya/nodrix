@@ -1,0 +1,29 @@
+schema: nodrix.project/v1
+name: nodrix-development
+
+defaults:
+  pipeline: fastlio2
+  context: robot
+  view: compact
+
+pipelines:
+  fastlio2: integrations/nodrix-fast-lio2/pipelines/fastlio2.yaml
+  fastlio2-rviz: integrations/nodrix-fast-lio2/pipelines/fastlio2-rviz.yaml
+
+contexts:
+  robot:
+    environment: ros2
+    profile: mid360s
+    view: operations
+  local:
+    environment: local
+    profile: default
+    view: compact
+
+environments:
+  ros2: environments/ros2.yaml
+  local: environments/local.yaml
+
+profiles:
+  mid360s: profiles/mid360s.yaml
+  default: profiles/default.yaml
