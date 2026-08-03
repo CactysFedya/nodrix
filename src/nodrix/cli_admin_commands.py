@@ -162,9 +162,9 @@ def _run_unavailable(
     project: Path,
     error: BaseException,
 ) -> None:
-    console.print(f"[red]{label} unavailable:[/red] {error}")
-    console.print(f"Run root: {run_root(project)}")
-    console.print("Start one with: [bold]plyctl run pipeline.yaml[/bold]")
+    typer.echo(f"{label} unavailable: {error}")
+    typer.echo(f"Run root: {run_root(project)}")
+    typer.echo("Start one with: plyctl run pipeline.yaml")
     raise typer.Exit(1)
 
 

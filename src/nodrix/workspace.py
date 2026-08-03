@@ -149,6 +149,32 @@ def resolve_pipeline_reference(
 ) -> WorkspaceResolution:
     cwd = Path(start or Path.cwd()).expanduser().resolve()
     root = find_workspace(cwd)
+
+    direct_reference = (
+        _direct_pipeline(str(reference), cwd)
+        if reference is not None
+        else None
+    )
+    if direct_reference is not None and direct_reference.is_file():
+        config_path = (root / PROJECT_FILE) if root is not None else None
+        config = _load_yaml(config_path) if config_path is not None else {}
+        defaults = _mapping(config.get("defaults"))
+        return WorkspaceResolution(
+            root=root or cwd,
+            config_path=config_path,
+            config=config,
+            pipeline=direct_reference,
+            pipeline_name=direct_reference.stem,
+            context_name=None,
+            environment_name=None,
+            profile_name=None,
+            view=str(defaults.get("view") or "compact"),
+            runtime_profile=None,
+            variables={},
+            sources=(),
+            checks=(),
+        )
+
     if root is None:
         raw = str(reference) if reference is not None else "pipeline.yaml"
         pipeline = _direct_pipeline(raw, cwd) or (cwd / raw).resolve()
@@ -269,7 +295,9 @@ def resolve_pipeline_reference(
         or defaults.get("view")
         or "compact"
     )
-    checks = environment.get("checks") or ()
+    checks = environment.get("checks")
+    if checks is None:
+        checks = []
     if not isinstance(checks, list):
         raise ValueError("environment checks must be a list")
 

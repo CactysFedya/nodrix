@@ -66,6 +66,39 @@ def test_context_state_overrides_default(tmp_path: Path) -> None:
     assert resolved.view == "operations"
 
 
+def test_explicit_pipeline_inside_workspace_does_not_activate_context(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    create_workspace(root)
+    pipeline = root / "pipelines/direct.yaml"
+    _pipeline(pipeline, "direct")
+
+    config_path = root / "nodrix.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["defaults"]["context"] = "robot"
+    config["contexts"]["robot"] = {
+        "environment": "missing-ros",
+        "profile": "default",
+    }
+    config["environments"]["missing-ros"] = {
+        "shell": {
+            "source": ["/definitely/missing/ros/setup.bash"],
+        },
+    }
+    config_path.write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
+
+    resolved = resolve_pipeline_reference(str(pipeline), start=root)
+
+    assert resolved.pipeline == pipeline.resolve()
+    assert resolved.context_name is None
+    assert resolved.environment_name is None
+    assert resolved.sources == ()
+
+
 def test_direct_pipeline_works_without_workspace(tmp_path: Path) -> None:
     pipeline = tmp_path / "custom.yaml"
     _pipeline(pipeline, "custom")
