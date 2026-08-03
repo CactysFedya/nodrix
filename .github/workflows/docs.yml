@@ -40,8 +40,14 @@ jobs:
           "sphinx-copybutton>=0.5.2"
           "sphinx-rtd-theme>=3,<4"
           "sphinxcontrib-mermaid>=1,<2"
-      - name: Build documentation with warnings as errors
-        run: sphinx-build -W --keep-going -b html docs docs/_build/html
+      - name: Build English and Russian documentation
+        run: |
+          rm -rf docs/_build/site
+          mkdir -p docs/_build/site/en/latest docs/_build/site/ru/latest
+          sphinx-build -W --keep-going -b html docs docs/_build/site/en/latest
+          sphinx-build -W --keep-going -b html docs/ru docs/_build/site/ru/latest
+          cp docs/_landing/index.html docs/_build/site/index.html
+          touch docs/_build/site/.nojekyll
       - name: Configure GitHub Pages
         if: github.event_name == 'push'
         uses: actions/configure-pages@v5
@@ -49,7 +55,7 @@ jobs:
         if: github.event_name == 'push'
         uses: actions/upload-pages-artifact@v4
         with:
-          path: docs/_build/html
+          path: docs/_build/site
 
   deploy:
     if: github.event_name == 'push'

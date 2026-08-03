@@ -1,46 +1,37 @@
 # Plyctl documentation
 
-Plyctl is the Pipeline OS for real-time systems. One typed YAML graph can
-supervise Python and C++ nodes, ROS 2 applications, external processes,
-devices, and transports without coupling the core runtime to one ecosystem.
+Plyctl is a Pipeline OS for real-time local and distributed systems. It runs
+Python and C++ nodes, ROS 2 applications, external processes, devices, and
+transports as one typed and observable graph.
+
+The documentation follows the same top-level organization used by ROS 2:
+installation and first steps, tutorials, task-oriented guides, concepts, and
+reference material.
 
 ```{toctree}
 :maxdepth: 2
-:caption: Start here
+:caption: Documentation
 
 getting-started/index
-concepts/pipeline-os
+tutorials/index
+how-to-guides/index
+concepts/index
+reference/index
+integrations/index
+contributing
+release-notes
 ```
 
-```{toctree}
-:maxdepth: 2
-:caption: Use Plyctl
+## Current release
 
-reference/cli
-integrations/ros2
-```
+This site documents **Plyctl 2.2.0 alpha.5**. Only the current release notes are
+published here. The complete history remains available in `CHANGELOG.md` and
+GitHub Releases.
 
-```{toctree}
-:maxdepth: 2
-:caption: Project
-
-migration/nodrix-to-plyctl
-releases/index
-```
-
-```{toctree}
-:maxdepth: 1
-:caption: Complete 2.x reference library
-:hidden:
-:glob:
-
-[A-Z]*
-```
-
-## Stable compatibility promise
+## Compatibility promise
 
 Plyctl 2.x accepts both `plyctl.dev/v1`/`v2` and the previous
 `nodrix.dev/v1`/`v2` manifest values. The `nodrix` Python import and CLI alias
-also remain available. Native ABI names, `.ndrx` recordings, `nodrix://` URIs,
-and current provider IDs remain unchanged until a separately versioned major
-migration.
+remain available throughout 2.x. Native ABI names, `.ndrx` recordings,
+`nodrix://` URIs, and current provider IDs remain unchanged until a separately
+versioned major migration.

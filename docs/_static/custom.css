@@ -7,6 +7,36 @@
   background: var(--plyctl-accent);
 }
 
+.wy-nav-content {
+  max-width: 1100px;
+}
+
 .rst-content code.literal {
   color: #1f4f9f;
+}
+
+.plyctl-language-switcher {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.75rem;
+  text-align: left;
+}
+
+.plyctl-language-switcher label {
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.plyctl-language-switcher select {
+  width: 100%;
+  min-height: 2rem;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 3px;
+  background: #fff;
+  color: #202020;
+  padding: 0.25rem 0.4rem;
 }

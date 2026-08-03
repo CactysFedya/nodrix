@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plyctl documentation</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #f5f7fa; color: #20242a; }
+    main { max-width: 680px; margin: 12vh auto; padding: 2rem; text-align: center; }
+    h1 { margin-bottom: 0.5rem; }
+    p { color: #59636e; }
+    nav { display: flex; justify-content: center; gap: 1rem; margin-top: 2rem; flex-wrap: wrap; }
+    a { display: inline-block; min-width: 150px; padding: 0.85rem 1rem; border-radius: 4px; background: #2d6cdf; color: #fff; text-decoration: none; font-weight: 600; }
+    a.secondary { background: #fff; color: #2d6cdf; border: 1px solid #2d6cdf; }
+  </style>
+  <script>
+    (function () {
+      var preferred = (navigator.language || "en").toLowerCase().startsWith("ru") ? "ru" : "en";
+      window.setTimeout(function () {
+        window.location.replace(preferred + "/latest/");
+      }, 900);
+    })();
+  </script>
+</head>
+<body>
+  <main>
+    <h1>Plyctl documentation</h1>
+    <p>Choose a documentation language. Русский язык выбирается автоматически для русской локали браузера.</p>
+    <nav>
+      <a href="en/latest/">English</a>
+      <a class="secondary" href="ru/latest/">Русский</a>
+    </nav>
+  </main>
+</body>
+</html>
