@@ -9,6 +9,8 @@ import subprocess
 import time
 from typing import IO, Mapping, Sequence
 
+from .process_metrics import ProcessTreeSampler
+
 
 @dataclass(frozen=True, slots=True)
 class ProcessSnapshot:
@@ -18,6 +20,14 @@ class ProcessSnapshot:
     started_ns: int | None
     uptime_s: float
     command_sha256: str
+    cpu_percent: float
+    rss_bytes: int
+    process_count: int
+    thread_count: int
+    cpu_percent: float
+    rss_bytes: int
+    process_count: int
+    thread_count: int
 
 
 class ManagedProcess:
@@ -50,6 +60,8 @@ class ManagedProcess:
         self._stdout: IO[bytes] | None = None
         self._stderr: IO[bytes] | None = None
         self._started_ns: int | None = None
+        self._metrics = ProcessTreeSampler()
+        self._metrics = ProcessTreeSampler()
 
     def start(self) -> None:
         if self._process is not None:
@@ -79,6 +91,8 @@ class ManagedProcess:
             self._close_logs()
             raise
         self._started_ns = time.time_ns()
+        self._metrics.reset()
+        self._metrics.reset()
 
     def restart(self) -> None:
         """Restart a process that has already exited, preserving supervision."""
@@ -115,16 +129,27 @@ class ManagedProcess:
     def snapshot(self) -> ProcessSnapshot:
         process = self._process
         returncode = None if process is None else process.poll()
+        running = process is not None and returncode is None
         uptime = 0.0
         if self._started_ns is not None:
-            uptime = max((time.time_ns() - self._started_ns) / 1_000_000_000, 0.0)
+            uptime = max(
+                (time.time_ns() - self._started_ns) / 1_000_000_000,
+                0.0,
+            )
+        metrics = self._metrics.sample(
+            process.pid if process is not None and running else None
+        )
         return ProcessSnapshot(
             pid=None if process is None else process.pid,
-            running=process is not None and returncode is None,
+            running=running,
             returncode=returncode,
             started_ns=self._started_ns,
             uptime_s=uptime,
             command_sha256=self.command_sha256,
+            cpu_percent=metrics.cpu_percent,
+            rss_bytes=metrics.rss_bytes,
+            process_count=metrics.process_count,
+            thread_count=metrics.thread_count,
         )
 
     def wait(self, timeout: float | None = None) -> int:

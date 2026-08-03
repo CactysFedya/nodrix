@@ -276,95 +276,187 @@ def _node_line(name: str, raw: dict[str, Any], bottleneck_p95: float) -> Text:
     status = str(health.get("status", "unknown"))
     if status != "healthy":
         text.append(f"  {status}", style="bold red")
-    if p95 > 0 and bottleneck_p95 > 0 and p95 >= bottleneck_p95 * 0.95:
+    if (
+        bool(health.get("participates_in_throughput", True))
+        and p95 > 0
+        and bottleneck_p95 > 0
+        and p95 >= bottleneck_p95 * 0.95
+    ):
         text.append("  BOTTLENECK", style="bold red")
     return text
 
 
 def render_top(data: dict[str, object]) -> Group:
-    raw_nodes = {str(name): dict(raw) for name, raw in dict(data.get("nodes", {})).items()}
+    raw_nodes = {
+        str(name): dict(raw)
+        for name, raw in dict(data.get("nodes", {})).items()
+    }
+    raw_applications = {
+        str(name): dict(raw)
+        for name, raw in dict(data.get("applications", {})).items()
+    }
     system = dict(data.get("system", {}))
-    process: dict[str, Any] = {}
+
+    executor_resources: dict[str, Any] = {}
     for raw in raw_nodes.values():
         resources = dict(raw.get("resources", {}))
         if resources.get("scope") == "executor_shared":
-            process = resources
+            executor_resources = resources
             break
 
     cpu_count = max(int(system.get("cpu_count", 1) or 1), 1)
-    process_cpu = float(process.get("executor_cpu_percent", 0.0))
-    rss = float(process.get("executor_rss_bytes", 0.0))
-    total_memory = float(system.get("memory_total_bytes", 0.0))
+    total_cpu = float(
+        executor_resources.get("executor_cpu_percent", 0.0) or 0.0
+    )
+    total_rss = float(
+        executor_resources.get("executor_rss_bytes", 0.0) or 0.0
+    )
+
+    for application in raw_applications.values():
+        resources = dict(application.get("resources", {}))
+        total_cpu += float(resources.get("cpu_percent", 0.0) or 0.0)
+        total_rss += float(resources.get("rss_bytes", 0.0) or 0.0)
+
+    total_memory = float(system.get("memory_total_bytes", 0.0) or 0.0)
     duration = float(data.get("duration_seconds", 0.0) or 0.0)
 
     header = Text()
     header.append("Plyctl top", style="bold cyan")
     header.append(f" · {data.get('pipeline', '-')}", style="bold")
-    header.append(f" · {str(data.get('status', 'running')).upper()}", style="green")
+    header.append(
+        f" · {str(data.get('status', 'running')).upper()}",
+        style="green",
+    )
     header.append(f" · {duration:,.1f}s")
 
     machine = Text()
-    machine.append(f"CPU  {process_cpu:6.1f}/{cpu_count * 100}% ")
-    machine.append(_bar(process_cpu, cpu_count * 100.0, 24), style="green")
-    machine.append(f"   RAM {_format_bytes(rss)}")
+    machine.append(f"CPU  {total_cpu:6.1f}/{cpu_count * 100}% ")
+    machine.append(
+        _bar(total_cpu, cpu_count * 100.0, 24),
+        style="green",
+    )
+    machine.append(f"   RAM {_format_bytes(total_rss)}")
     if total_memory > 0:
         machine.append(f"/{_format_bytes(total_memory)} ")
-        machine.append(_bar(rss, total_memory, 16), style="blue")
+        machine.append(
+            _bar(total_rss, total_memory, 16),
+            style="blue",
+        )
     temperature = system.get("temperature_c")
     if temperature is not None:
         machine.append(f"   TEMP {float(temperature):.1f}°C")
     load = list(system.get("load_average") or [])
     if load:
-        machine.append("   LOAD " + " ".join(f"{float(item):.2f}" for item in load[:3]))
+        machine.append(
+            "   LOAD "
+            + " ".join(f"{float(item):.2f}" for item in load[:3])
+        )
 
-    node_rates = {name: float(raw.get("rate_hz", 0.0)) for name, raw in raw_nodes.items()}
-    rates = Text()
-    source_names = [name for name in raw_nodes if "source" in name.lower()]
-    detector_names = [name for name in raw_nodes if "detector" in name.lower()]
-    tracker_names = [name for name in raw_nodes if "tracker" in name.lower()]
-    output_names = [name for name in raw_nodes if "encoder" in name.lower() or "output" in name.lower()]
-    for label, names in (
-        ("IN", source_names),
-        ("DET", detector_names),
-        ("TRACK", tracker_names),
-        ("OUT", output_names),
-    ):
-        if names:
-            rates.append(f"{label} {max(node_rates[name] for name in names):.1f} FPS   ", style="bold")
+    throughput_nodes = [
+        raw
+        for raw in raw_nodes.values()
+        if bool(
+            dict(raw.get("health", {})).get(
+                "participates_in_throughput",
+                True,
+            )
+        )
+    ]
+    bottleneck_p95 = max(
+        (
+            float(raw.get("p95_ms", 0.0) or 0.0)
+            for raw in throughput_nodes
+        ),
+        default=0.0,
+    )
+    node_lines = [
+        _node_line(name, raw, bottleneck_p95)
+        for name, raw in raw_nodes.items()
+    ]
 
-    p95_values = [float(raw.get("p95_ms", 0.0)) for raw in raw_nodes.values()]
-    bottleneck_p95 = max(p95_values, default=0.0)
-    node_lines: list[Text] = []
-    for name, raw in raw_nodes.items():
-        node_lines.append(_node_line(name, raw, bottleneck_p95))
+    application_lines = Text()
+    for name, raw in raw_applications.items():
+        resources = dict(raw.get("resources", {}))
+        cpu = float(resources.get("cpu_percent", 0.0) or 0.0)
+        memory = int(resources.get("rss_bytes", 0) or 0)
+        running = bool(raw.get("running", False))
+        status = str(raw.get("status", "unknown"))
+        pid = raw.get("pid")
+        restarts = int(raw.get("restart_count", 0) or 0)
+
+        application_lines.append(f"{name:<18}", style="bold")
+        application_lines.append(
+            f"pid={pid or '-':<8} "
+            f"cpu={cpu:6.1f}% "
+            f"ram={_format_bytes(memory):>10} "
+            f"proc={int(resources.get('process_count', 0) or 0):<3} "
+            f"threads={int(resources.get('thread_count', 0) or 0):<4} "
+            f"restarts={restarts:<3} "
+        )
+        style = (
+            "green"
+            if running and status in {"ok", "healthy", "running"}
+            else "yellow"
+        )
+        application_lines.append(status, style=style)
+        application_lines.append("\n")
 
     edge_lines = Text()
-    edge_count = 0
+    active_edges = 0
     for edge_raw in list(data.get("edges") or []):
         edge = dict(edge_raw)
-        stale = int(edge.get("stale_skips", 0))
-        overflow = int(edge.get("overflow_drops", 0))
-        depth = int(edge.get("depth", 0))
-        capacity = int(edge.get("capacity", 1))
+        stale = int(edge.get("stale_skips", 0) or 0)
+        overflow = int(edge.get("overflow_drops", 0) or 0)
+        depth = int(edge.get("depth", 0) or 0)
+        capacity = int(edge.get("capacity", 1) or 1)
         if stale == 0 and overflow == 0 and depth == 0:
             continue
-        edge_count += 1
-        edge_lines.append(f"{edge.get('source')} → {edge.get('target')}")
-        edge_lines.append(f"  queue {depth}/{capacity} {edge.get('policy')}", style="dim")
+        active_edges += 1
+        edge_lines.append(
+            f"{edge.get('source')} → {edge.get('target')}"
+        )
+        edge_lines.append(
+            f"  queue {depth}/{capacity} {edge.get('policy')}",
+            style="dim",
+        )
         if stale:
-            edge_lines.append(f"  stale-skipped {stale}", style="yellow")
+            edge_lines.append(
+                f"  stale-skipped {stale}",
+                style="yellow",
+            )
         if overflow:
-            edge_lines.append(f"  overflow {overflow}", style="red")
+            edge_lines.append(
+                f"  overflow {overflow}",
+                style="red",
+            )
         edge_lines.append("\n")
-    if edge_count == 0:
-        edge_lines.append("No active queue pressure or overflow", style="dim")
 
-    return Group(
+    if active_edges == 0:
+        edge_lines.append(
+            "No active queue pressure or overflow",
+            style="dim",
+        )
+
+    sections: list[Any] = [
         Panel(header, title="Runtime"),
         machine,
-        rates,
         Text("\n"),
         *node_lines,
-        Text("\n"),
-        Panel(edge_lines, title="Edges"),
+    ]
+    if raw_applications:
+        sections.extend(
+            [
+                Text("\n"),
+                Panel(
+                    application_lines,
+                    title="Managed applications",
+                ),
+            ]
+        )
+    sections.extend(
+        [
+            Text("\n"),
+            Panel(edge_lines, title="Edges"),
+        ]
     )
+    return Group(*sections)

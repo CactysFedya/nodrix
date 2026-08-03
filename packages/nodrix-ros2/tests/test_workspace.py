@@ -127,3 +127,21 @@ def test_readonly_workspace_cannot_build(tmp_path: Path) -> None:
     )
     with pytest.raises(PermissionError, match="build.mode=never"):
         RosWorkspaceManager(spec).prepare()
+
+def test_setup_environment_allows_unset_optional_ros_variables(
+    tmp_path: Path,
+) -> None:
+    setup = tmp_path / "setup.bash"
+    setup.write_text(
+        'test -z "${AMENT_TRACE_SETUP_FILES:-}"\n'
+        'test -z "${AMENT_PYTHON_EXECUTABLE:-}"\n'
+        'export ROS_DISTRO=jazzy\n',
+        encoding="utf-8",
+    )
+
+    environment = capture_sourced_environment(
+        (setup,),
+        base_environment={"PATH": "/usr/bin:/bin"},
+    )
+
+    assert environment["ROS_DISTRO"] == "jazzy"

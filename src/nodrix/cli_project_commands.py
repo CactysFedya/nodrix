@@ -75,6 +75,24 @@ def init(
                       f"[bold]plyctl init {directory} --template vision --force[/bold]")
 
 
+def _manifest_graph_counts(manifest) -> dict[str, int]:
+    internal_edges = sum(
+        1 for edge in manifest.edges if edge.transport is None
+    )
+    transported_edges = sum(
+        1 for edge in manifest.edges if edge.transport is not None
+    )
+    external_edges = transported_edges + len(manifest.links)
+
+    return {
+        "nodes": len(manifest.nodes),
+        "data_plane_edges": internal_edges,
+        "external_edges": external_edges,
+        "applications": len(manifest.applications),
+        "total_edges": internal_edges + external_edges,
+    }
+
+
 @app.command()
 def validate(
     pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
@@ -127,18 +145,21 @@ def validate(
             console.print(f"[red]Invalid:[/red] {exc}")
         raise typer.Exit(1)
     failed = any(item.severity == "error" for item in issues)
+    counts = _manifest_graph_counts(details.manifest)
     if json_output:
         console.print_json(json.dumps({
             "valid": not failed,
             "pipeline": desc["name"],
-            "nodes": len(desc["nodes"]),
-            "edges": len(desc["edges"]),
+            **counts,
             "issues": [item.as_dict() for item in issues],
         }))
     else:
         console.print(
             f"[{'red' if failed else 'green'}]{'Invalid' if failed else 'Valid'}[/{'red' if failed else 'green'}] "
-            f"{desc['name']}: {len(desc['nodes'])} nodes, {len(desc['edges'])} edges"
+            f"{desc['name']}: {counts['nodes']} nodes, "
+            f"{counts['data_plane_edges']} data edges, "
+            f"{counts['external_edges']} external edges, "
+            f"{counts['applications']} applications"
         )
         if issues:
             table = Table("Severity", "Code", "Location", "Message")
@@ -424,8 +445,15 @@ def run(
     if json_output:
         console.print_json(json.dumps(report))
     else:
+        final_status = str(report.get("status", "completed")).lower()
+        if final_status == "stopped":
+            label = "[yellow]Stopped[/yellow]"
+        elif final_status == "completed":
+            label = "[green]Completed[/green]"
+        else:
+            label = f"[red]{final_status.upper()}[/red]"
         console.print(
-            f"[green]Completed[/green] {report['pipeline']} in {report['duration_seconds']:.3f}s\n"
+            f"{label} {report['pipeline']} in {report['duration_seconds']:.3f}s\n"
             f"Artifacts: {report['run_dir']}"
         )
         table = Table("Node", "State", "Health", "CPU", "Memory", "Messages", "Rate Hz", "P95 ms", "E2E P95 ms", "Errors")

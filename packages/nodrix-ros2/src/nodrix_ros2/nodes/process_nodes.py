@@ -175,6 +175,7 @@ class _Ros2ProcessSource(SourceNode):
             deduplicated.setdefault(key, requirement)
         return tuple(deduplicated.values())
 
+
     def _wait_requirements(self) -> None:
         requirements = self._requirements()
         if not requirements:
@@ -294,6 +295,13 @@ class _Ros2ProcessSource(SourceNode):
                 "workspace_built": self._workspace.built,
                 "workspace_fingerprint": self._workspace.fingerprint,
                 "command_sha256": snapshot.command_sha256,
+                "resources": {
+                    "cpu_percent": snapshot.cpu_percent,
+                    "rss_bytes": snapshot.rss_bytes,
+                    "process_count": snapshot.process_count,
+                    "thread_count": snapshot.thread_count,
+                    "scope": "managed_process_tree",
+                },
                 "session": (
                     None
                     if self._session is None
@@ -338,6 +346,17 @@ class _Ros2ProcessSource(SourceNode):
                 "pid": None if snapshot is None else snapshot.pid,
                 "running": False if snapshot is None else snapshot.running,
                 "returncode": None if snapshot is None else snapshot.returncode,
+                "resources": (
+                    {}
+                    if snapshot is None
+                    else {
+                        "cpu_percent": snapshot.cpu_percent,
+                        "rss_bytes": snapshot.rss_bytes,
+                        "process_count": snapshot.process_count,
+                        "thread_count": snapshot.thread_count,
+                        "scope": "managed_process_tree",
+                    }
+                ),
                 "workspace_built": bool(
                     getattr(getattr(self, "_workspace", None), "built", False)
                 ),

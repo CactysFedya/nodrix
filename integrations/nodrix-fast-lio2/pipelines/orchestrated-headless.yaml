@@ -1,0 +1,109 @@
+apiVersion: plyctl.dev/v2
+kind: Pipeline
+metadata:
+  name: livox-mid360s-fastlio2-headless
+  description: Livox MID-360S and FAST-LIO2 without local RViz
+runtime:
+  engine: unified
+  mode: realtime
+  profile: realtime-low-latency
+sessions:
+  ros:
+    uses: ros2.session
+    parameters:
+      distro: ${ROS_DISTRO:-jazzy}
+      underlays:
+      - /opt/ros/${ROS_DISTRO:-jazzy}
+      path: ${ROBOT_WS}
+      trust: explicit
+      environment:
+        ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-26}
+        ROS_AUTOMATIC_DISCOVERY_RANGE: ${ROS_AUTOMATIC_DISCOVERY_RANGE:-SUBNET}
+      build:
+        mode: never
+        symlink_install: true
+        timeout_s: 1800
+applications:
+  livox:
+    uses: ros2.launch
+    bindings:
+      session: ros
+    parameters:
+      package: livox_ros_driver2
+      launch_file: msg_MID360s_launch.py
+      arguments:
+        rviz_enable: false
+      restart_policy: on-failure
+      max_restarts: 3
+      restart_backoff_s: 2
+  fast_lio:
+    uses: ros2.launch
+    bindings:
+      session: ros
+    parameters:
+      package: fast_lio
+      launch_file: mapping.launch.py
+      arguments:
+        use_sim_time: false
+        config_file: ${FASTLIO_CONFIG_FILE:-mid360s_handheld.yaml}
+        rviz: false
+      requirements_timeout_s: 40
+nodes:
+  lidar_health:
+    uses: ros2.topic_monitor
+    bindings:
+      session: ros
+    parameters:
+      mode: graph
+      topic: /livox/lidar
+      message_type: livox_ros_driver2/msg/CustomMsg
+      startup_timeout_s: 30
+  imu_health:
+    uses: ros2.topic_monitor
+    bindings:
+      session: ros
+    parameters:
+      mode: graph
+      topic: /livox/imu
+      message_type: sensor_msgs/msg/Imu
+      startup_timeout_s: 30
+  registered_cloud_health:
+    uses: ros2.topic_monitor
+    bindings:
+      session: ros
+    parameters:
+      mode: graph
+      topic: /cloud_registered
+      message_type: sensor_msgs/msg/PointCloud2
+      startup_timeout_s: 60
+fragments: {}
+edges:
+- from: livox.lidar
+  to: fast_lio.lidar
+  transport:
+    uses: ros2.topic
+    parameters:
+      topic: /livox/lidar
+      message_type: livox_ros_driver2/msg/CustomMsg
+- from: livox.imu
+  to: fast_lio.imu
+  transport:
+    uses: ros2.topic
+    parameters:
+      topic: /livox/imu
+      message_type: sensor_msgs/msg/Imu
+streams: {}
+recording:
+  enabled: false
+  streams: []
+  directory: recordings
+security:
+  require_signed_plugins: false
+  allow_unsigned_local_plugins: true
+  native_plugin_allowlist: []
+  reject_world_writable_plugins: true
+  secret_providers:
+  - environment
+placement:
+  default: local
+  nodes: {}
