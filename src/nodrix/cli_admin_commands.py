@@ -44,7 +44,6 @@ from .runs import (
     resolve_run,
     run_root,
 )
-from .ux import render_top
 
 
 @config_app.command("profiles")

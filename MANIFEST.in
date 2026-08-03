@@ -11,3 +11,4 @@ recursive-include wiki *.md
 recursive-include scripts *.py *.sh
 prune examples/unified_native/.nodrix
 include offline-requirements.txt
+recursive-include integrations/nodrix-fast-lio2 *.yaml *.yml *.md
