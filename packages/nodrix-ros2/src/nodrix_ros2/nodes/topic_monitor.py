@@ -193,18 +193,20 @@ class Ros2TopicMonitor(SourceNode):
         value = dict(super().health())
         if hasattr(self, "_mode"):
             value.update(self._snapshot())
+        value["control_plane"] = True
+        value["participates_in_throughput"] = False
+        value["observed_rate_hz"] = value.get("rate_hz")
+        value["message_age_s"] = value.get("age_s")
         return value
 
     def close(self) -> None:
         self._closed = True
         lease = getattr(self, "_lease", None)
-        subscription = getattr(self, "_subscription", None)
-        if lease is not None and subscription is not None:
+        self._subscription = None
+        if lease is not None:
             try:
-                lease.node.destroy_subscription(subscription)
+                lease.close()
             except Exception:
                 pass
-        if lease is not None:
-            lease.close()
         self._lease = None
         super().close()

@@ -60,3 +60,34 @@ def test_managed_process_can_restart_after_clean_exit(tmp_path: Path) -> None:
     assert process.wait(5) == 0
     process.stop()
     assert (tmp_path / "restart.stdout.log").read_text().count("ready") == 2
+
+def test_managed_process_reports_process_tree_resources(
+    tmp_path: Path,
+) -> None:
+    process = ManagedProcess(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import subprocess, sys, time; "
+                "subprocess.Popen([sys.executable, '-c', "
+                "'import time; time.sleep(3)']); "
+                "time.sleep(3)"
+            ),
+        ],
+        cwd=tmp_path,
+        environment={"PATH": str(Path(sys.executable).parent)},
+        stdout_path=tmp_path / "tree.stdout.log",
+        stderr_path=tmp_path / "tree.stderr.log",
+    )
+    process.start()
+    time.sleep(0.15)
+    process.snapshot()
+    time.sleep(0.15)
+    snapshot = process.snapshot()
+    process.stop(interrupt_timeout_s=0.2, terminate_timeout_s=0.2)
+
+    assert snapshot.process_count >= 1
+    assert snapshot.thread_count >= 1
+    assert snapshot.rss_bytes > 0
+    assert snapshot.cpu_percent >= 0.0

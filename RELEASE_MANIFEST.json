@@ -1,10 +1,13 @@
 {
   "schema": "plyctl-release/v1",
   "name": "Plyctl Rebrand Compatibility",
-  "release": "2.2.0a5",
-  "display_release": "2.2.0-alpha.5",
+  "release": "2.3.0a1",
+  "display_release": "2.3.0-alpha.1",
   "core_contracts": {
-    "provider_api": ["1", "2"],
+    "provider_api": [
+      "1",
+      "2"
+    ],
     "provider_schema": [
       "plyctl-provider/1",
       "plyctl-provider/2",

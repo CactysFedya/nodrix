@@ -308,13 +308,17 @@ def test_signed_provider_uses_trust_store_and_allowlist(tmp_path: Path) -> None:
         signing_key=private_key,
     )
     trust_store = tmp_path / "trust"
-    trust_store.mkdir()
-    (trust_store / "acme.pem").write_bytes(
+    trust_store.mkdir(mode=0o700)
+    trust_store.chmod(0o700)
+
+    key_path = trust_store / "acme.pem"
+    key_path.write_bytes(
         private_key.public_key().public_bytes(
             serialization.Encoding.PEM,
             serialization.PublicFormat.SubjectPublicKeyInfo,
         )
     )
+    key_path.chmod(0o600)
     candidate = discover_providers(
         include_legacy=False,
         paths=[tmp_path],

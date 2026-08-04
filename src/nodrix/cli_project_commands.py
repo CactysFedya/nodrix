@@ -32,6 +32,25 @@ from .ux import (
 from .validation import ValidationIssue, validate_production
 from .lockfile import verify_lock
 
+def _effective_run_root(value: Path | None) -> Path:
+    # Run artifacts belong to the project that invoked Plyctl.
+    selected = value or (Path.cwd() / ".nodrix" / "runs")
+    return selected.expanduser().resolve()
+
+
+def _format_node_memory(stats: dict[str, object]) -> str:
+    resources = dict(stats.get("resources", {}))
+    value = (
+        resources.get("rss_bytes")
+        or resources.get("shared_buffer_bytes")
+        or resources.get("executor_rss_bytes")
+    )
+    rendered = _format_bytes(value)
+    if rendered != "-" and resources.get("scope") == "executor_shared":
+        return f"{rendered} shared"
+    return rendered
+
+
 
 @app.command()
 def init(
@@ -73,6 +92,24 @@ def init(
     else:
         console.print("Add nodes to pipeline.yaml, or create a runnable example with: "
                       f"[bold]plyctl init {directory} --template vision --force[/bold]")
+
+
+def _manifest_graph_counts(manifest) -> dict[str, int]:
+    internal_edges = sum(
+        1 for edge in manifest.edges if edge.transport is None
+    )
+    transported_edges = sum(
+        1 for edge in manifest.edges if edge.transport is not None
+    )
+    external_edges = transported_edges + len(manifest.links)
+
+    return {
+        "nodes": len(manifest.nodes),
+        "data_plane_edges": internal_edges,
+        "external_edges": external_edges,
+        "applications": len(manifest.applications),
+        "total_edges": internal_edges + external_edges,
+    }
 
 
 @app.command()
@@ -127,18 +164,21 @@ def validate(
             console.print(f"[red]Invalid:[/red] {exc}")
         raise typer.Exit(1)
     failed = any(item.severity == "error" for item in issues)
+    counts = _manifest_graph_counts(details.manifest)
     if json_output:
         console.print_json(json.dumps({
             "valid": not failed,
             "pipeline": desc["name"],
-            "nodes": len(desc["nodes"]),
-            "edges": len(desc["edges"]),
+            **counts,
             "issues": [item.as_dict() for item in issues],
         }))
     else:
         console.print(
             f"[{'red' if failed else 'green'}]{'Invalid' if failed else 'Valid'}[/{'red' if failed else 'green'}] "
-            f"{desc['name']}: {len(desc['nodes'])} nodes, {len(desc['edges'])} edges"
+            f"{desc['name']}: {counts['nodes']} nodes, "
+            f"{counts['data_plane_edges']} data edges, "
+            f"{counts['external_edges']} external edges, "
+            f"{counts['applications']} applications"
         )
         if issues:
             table = Table("Severity", "Code", "Location", "Message")
@@ -298,7 +338,7 @@ def inspect(
 
 @app.command()
 def run(
-    pipeline: Annotated[Path, typer.Argument(exists=True, readable=True)] = Path("pipeline.yaml"),
+    pipeline: Annotated[str | None, typer.Argument(help="Pipeline path or workspace alias")] = None,
     run_root: Annotated[Path | None, typer.Option("--run-root", help="Directory for run artifacts")] = None,
     json_output: Annotated[bool, typer.Option("--json", help="Print the complete run report as JSON")] = False,
     locked: Annotated[bool, typer.Option("--locked", help="Require exact nodrix.lock checksums and runtime version")] = False,
@@ -309,6 +349,25 @@ def run(
     production: Annotated[bool, typer.Option("--production", help="Enforce the Manifest v2 production safety gate")] = False,
 ) -> None:
     """Execute a pipeline with reproducibility and optional Prometheus metrics."""
+    from .workspace import (
+        activate_workspace_environment,
+        resolve_pipeline_reference,
+    )
+
+    workspace = resolve_pipeline_reference(pipeline)
+    pipeline = workspace.pipeline
+    activate_workspace_environment(workspace)
+    if run_root is None:
+        run_root = workspace.root / ".nodrix" / "runs"
+    if profile is None:
+        profile = workspace.runtime_profile
+    if not json_output:
+        console.print(
+            f"Workspace {workspace.root} · "
+            f"context {workspace.context_name or '-'} · "
+            f"pipeline {workspace.pipeline_name}"
+        )
+    effective_run_root = _effective_run_root(run_root)
     if locked and (profile is not None or set_values or block_values):
         console.print("[red]--locked cannot be combined with --profile, --set, or --block.[/red] Create or verify the lock for the exact manifest you intend to run.")
         raise typer.Exit(2)
@@ -344,7 +403,7 @@ def run(
         if production:
             runtime = _runtime(
                 pipeline,
-                run_root=run_root,
+                run_root=effective_run_root,
                 profile=profile,
                 overrides=set_values,
                 block_overrides=block_values,
@@ -395,13 +454,28 @@ def run(
         if runtime is None:
             runtime = _runtime(
                 pipeline,
-                run_root=run_root,
+                run_root=effective_run_root,
                 profile=profile,
                 overrides=set_values,
                 block_overrides=block_values,
                 event_callback=runtime_event,
                 production=production,
             )
+        if not json_output:
+            artifacts_root = Path(
+                getattr(runtime, "run_root", effective_run_root)
+            ).resolve()
+            console.print(f"Artifacts root: [bold]{artifacts_root}[/bold]")
+            if (
+                artifacts_root.name == "runs"
+                and artifacts_root.parent.name == ".nodrix"
+            ):
+                monitor_project = artifacts_root.parent.parent
+                console.print(
+                    "Monitor: [bold]"
+                    f"plyctl top --project {monitor_project}"
+                    "[/bold]"
+                )
         metrics_target = metrics_listen or details.manifest.runtime.metrics.listen
         if metrics_target:
             if not hasattr(runtime, "snapshot"):
@@ -424,11 +498,18 @@ def run(
     if json_output:
         console.print_json(json.dumps(report))
     else:
+        final_status = str(report.get("status", "completed")).lower()
+        if final_status == "stopped":
+            label = "[yellow]Stopped[/yellow]"
+        elif final_status == "completed":
+            label = "[green]Completed[/green]"
+        else:
+            label = f"[red]{final_status.upper()}[/red]"
         console.print(
-            f"[green]Completed[/green] {report['pipeline']} in {report['duration_seconds']:.3f}s\n"
+            f"{label} {report['pipeline']} in {report['duration_seconds']:.3f}s\n"
             f"Artifacts: {report['run_dir']}"
         )
-        table = Table("Node", "State", "Health", "CPU", "Memory", "Messages", "Rate Hz", "P95 ms", "E2E P95 ms", "Errors")
+        table = Table("Node", "State", "Health", "CPU", "Memory", "Messages", "Node Hz", "P95 ms", "E2E P95 ms", "Errors")
         for name, stats in report["nodes"].items():
             health = dict(stats.get("health", {}))
             table.add_row(
@@ -436,7 +517,7 @@ def run(
                 str(health.get("state", "-")),
                 str(health.get("status", "-")),
                 f"{float(dict(stats.get('resources', {})).get('cpu_percent', 0.0)):.1f}%",
-                _format_bytes(dict(stats.get('resources', {})).get('rss_bytes') or dict(stats.get('resources', {})).get('shared_buffer_bytes') or dict(stats.get('resources', {})).get('executor_rss_bytes')),
+                _format_node_memory(stats),
                 str(stats["messages"]),
                 f"{stats.get('rate_hz', 0.0):.1f}",
                 f"{stats.get('p95_ms', stats['max_ms']):.3f}",

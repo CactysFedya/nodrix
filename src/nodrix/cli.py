@@ -9,6 +9,7 @@ from . import cli_admin_commands  # noqa: F401  # command registration
 from . import cli_catalog_commands  # noqa: F401  # command registration
 from . import cli_operation_commands  # noqa: F401  # command registration
 from . import cli_project_commands  # noqa: F401  # command registration
+from . import cli_workspace_commands  # noqa: F401  # command registration
 
 
 def main() -> None:

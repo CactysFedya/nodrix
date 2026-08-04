@@ -1,0 +1,20 @@
+schema: nodrix.view/v1
+name: operations
+style:
+  borders: none
+  spacing: compact
+sections:
+  - runtime
+  - applications
+  - monitors
+  - edges
+applications:
+  columns:
+    - name
+    - health
+    - cpu
+    - memory
+    - pid
+    - processes
+    - threads
+    - restarts

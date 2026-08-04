@@ -133,7 +133,7 @@ def capture_sourced_environment(
     base_environment: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     environment = dict(os.environ if base_environment is None else base_environment)
-    commands = ["set -euo pipefail"]
+    commands = ["set -eo pipefail", "set +u"]
     commands.extend(f"source {shlex.quote(str(path))}" for path in setup_files)
     commands.append("env -0")
     completed = subprocess.run(

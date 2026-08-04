@@ -51,7 +51,7 @@ def _write_pipeline(path: Path, *, token: str | None = None) -> Path:
 
 
 def test_v160_version() -> None:
-    assert nodrix.__version__ == "2.2.0a5"
+    assert nodrix.__version__ == "2.3.0a1"
 
 
 def test_execution_plan_is_deterministic_and_secret_free(tmp_path: Path) -> None:

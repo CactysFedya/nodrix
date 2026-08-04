@@ -50,3 +50,4 @@ Makefile.native
 .env.*
 !.env.example
 .pypirc
+.patch-backups/

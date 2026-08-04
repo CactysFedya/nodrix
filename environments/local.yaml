@@ -1,0 +1,6 @@
+schema: nodrix.environment/v1
+name: local
+shell:
+  source: []
+environment: {}
+checks: []

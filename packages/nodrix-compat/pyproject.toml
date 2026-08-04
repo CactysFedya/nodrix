@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "nodrix"
-version = "2.2.0a5"
+version = "2.3.0a1"
 description = "Compatibility installer for the renamed Plyctl runtime"
 requires-python = ">=3.11"
-dependencies = ["plyctl==2.2.0a5"]
+dependencies = ["plyctl==2.3.0a1"]
 readme = "README.md"
 license = {text = "Apache-2.0"}
 classifiers = [

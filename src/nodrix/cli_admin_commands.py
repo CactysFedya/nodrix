@@ -34,14 +34,16 @@ from .packages import (
     verify_package,
 )
 from .profiles import profile_names
+from .workspace import default_view, resolve_project_root
+from .workspace_views import render_top_view
 from .runs import (
     compare_runs,
     latest_run_id,
     list_runs,
     load_run,
     resolve_run,
+    run_root,
 )
-from .ux import render_top
 
 
 @config_app.command("profiles")
@@ -144,6 +146,27 @@ def lock_command(
 def _latest_run_id(project: Path) -> str:
     return latest_run_id(project)
 
+def _format_status_memory(
+    resources: dict[str, object],
+    value: object,
+) -> str:
+    rendered = _format_bytes(value)
+    if rendered != "-" and resources.get("scope") == "executor_shared":
+        return f"{rendered} shared"
+    return rendered
+
+
+def _run_unavailable(
+    label: str,
+    project: Path,
+    error: BaseException,
+) -> None:
+    typer.echo(f"{label} unavailable: {error}")
+    typer.echo(f"Run root: {run_root(project)}")
+    typer.echo("Start one with: plyctl run pipeline.yaml")
+    raise typer.Exit(1)
+
+
 
 @app.command("status")
 def status_command(
@@ -152,17 +175,17 @@ def status_command(
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     """Show the latest live status snapshot or final run summary."""
+    project = resolve_project_root(project)
     try:
         selected = run_id or _latest_run_id(project)
         data = load_run(selected, project)
     except Exception as exc:
-        console.print(f"[red]Status unavailable:[/red] {exc}")
-        raise typer.Exit(1)
+        _run_unavailable("Status", project, exc)
     if json_output:
         console.print_json(json.dumps(data))
         return
     console.print(f"[bold]{data.get('pipeline', selected)}[/bold]")
-    table = Table("Node", "State", "Health", "CPU", "Memory", "Ready", "Messages", "Rate Hz", "Last error")
+    table = Table("Node", "State", "Health", "CPU", "Memory", "Ready", "Messages", "Node Hz", "Last error")
     for name, raw in dict(data.get("nodes", {})).items():
         stats = dict(raw)
         health = dict(stats.get("health", {}))
@@ -170,7 +193,7 @@ def status_command(
         memory_value = resources.get("rss_bytes") or resources.get("shared_buffer_bytes") or resources.get("executor_rss_bytes")
         table.add_row(
             name, str(health.get("state", "-")), str(health.get("status", "-")),
-            f"{float(resources.get('cpu_percent', 0.0)):.1f}%", _format_bytes(memory_value),
+            f"{float(resources.get('cpu_percent', 0.0)):.1f}%", _format_status_memory(resources, memory_value),
             "yes" if health.get("ready") else "no", str(stats.get("messages", 0)),
             f"{float(stats.get('rate_hz', 0.0)):.1f}", str(health.get("last_error") or "-"),
         )
@@ -185,9 +208,13 @@ def health_command(
     interval: Annotated[float, typer.Option("--interval", min=0.1)] = 1.0,
 ) -> None:
     """Show node readiness and health; optionally watch a running pipeline."""
+    project = resolve_project_root(project)
     while True:
-        selected = run_id or _latest_run_id(project)
-        data = load_run(selected, project)
+        try:
+            selected = run_id or _latest_run_id(project)
+            data = load_run(selected, project)
+        except Exception as exc:
+            _run_unavailable("Health", project, exc)
         table = Table("Node", "Alive", "Ready", "Health", "Queue pressure", "Restarts", "Last error")
         for name, raw in dict(data.get("nodes", {})).items():
             health = dict(dict(raw).get("health", {}))
@@ -210,8 +237,12 @@ def metrics_command(
     format_name: Annotated[str, typer.Option("--format", help="json or prometheus")] = "prometheus",
 ) -> None:
     """Print metrics from a live snapshot or completed run."""
-    selected = run_id or _latest_run_id(project)
-    data = load_run(selected, project)
+    project = resolve_project_root(project)
+    try:
+        selected = run_id or _latest_run_id(project)
+        data = load_run(selected, project)
+    except Exception as exc:
+        _run_unavailable("Metrics", project, exc)
     if format_name == "json":
         console.print_json(json.dumps(data))
     elif format_name == "prometheus":
@@ -220,8 +251,12 @@ def metrics_command(
         raise typer.BadParameter("--format must be json or prometheus")
 
 
-def _top_table(data: dict[str, object]):
-    return render_top(data)
+def _top_table(
+    data: dict[str, object],
+    *,
+    view: str,
+):
+    return render_top_view(data, view)
 
 
 @app.command("top")
@@ -231,24 +266,30 @@ def top_command(
     watch: Annotated[bool, typer.Option("--watch/--once")] = True,
     interval: Annotated[float, typer.Option("--interval", min=0.1)] = 1.0,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    view: Annotated[str | None, typer.Option("--view", help="compact, operations, or debug")] = None,
 ) -> None:
     "Show a compact htop-style runtime dashboard."
+    project = resolve_project_root(project)
+    selected_view = view or default_view(project)
 
     def snapshot() -> dict[str, object]:
         # Explicit --run pins the dashboard. Otherwise follow the active run.
         selected = run_id or _latest_run_id(project)
         return load_run(selected, project)
 
-    data = snapshot()
+    try:
+        data = snapshot()
+    except Exception as exc:
+        _run_unavailable("Top", project, exc)
     if json_output:
         console.print_json(json.dumps(data))
         return
     if not watch or not console.is_terminal:
-        console.print(_top_table(data))
+        console.print(_top_table(data, view=selected_view))
         return
 
     with Live(
-        _top_table(data),
+        _top_table(data, view=selected_view),
         console=console,
         refresh_per_second=max(2, int(1.0 / interval)),
         screen=True,
@@ -258,7 +299,7 @@ def top_command(
             while True:
                 time.sleep(interval)
                 live_view.update(
-                    _top_table(snapshot()),
+                    _top_table(snapshot(), view=selected_view),
                     refresh=True,
                 )
         except KeyboardInterrupt:
