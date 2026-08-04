@@ -1,0 +1,37 @@
+schema_version: 1
+
+platforms:
+  - id: upstream-humble-amd64
+    os: ubuntu-22.04
+    architecture: x86_64
+    ros_distro: humble
+    status: candidate
+    qualification_required:
+      - pinned-source-build
+      - reference-bag-replay
+      - output-topic-validation
+      - process-tree-cleanup
+
+  - id: nodrix-jazzy-amd64
+    os: ubuntu-24.04
+    architecture: x86_64
+    ros_distro: jazzy
+    status: experimental
+    qualification_required:
+      - source-port-build
+      - reference-bag-replay
+      - output-topic-validation
+      - qos-validation
+      - long-run-stability
+      - process-tree-cleanup
+      - performance-baseline
+
+  - id: nodrix-jazzy-arm64
+    os: ubuntu-24.04
+    architecture: aarch64
+    ros_distro: jazzy
+    status: planned
+    qualification_required:
+      - all-jazzy-amd64-evidence
+      - raspberry-pi-5-performance-baseline
+      - thermal-soak-test

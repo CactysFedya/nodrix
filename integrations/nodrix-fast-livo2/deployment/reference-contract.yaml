@@ -1,0 +1,54 @@
+schema_version: 1
+profile: mid360-fisheye-compressed
+
+inputs:
+  - role: lidar
+    topic: /livox/lidar
+    message_type: livox_ros_driver2/msg/CustomMsg
+    required: true
+  - role: imu
+    topic: /livox/imu
+    message_type: sensor_msgs/msg/Imu
+    required: true
+  - role: camera
+    topic: /camera/left/jpeg
+    message_type: sensor_msgs/msg/CompressedImage
+    required: true
+
+outputs:
+  - role: registered_cloud
+    topic: /cloud_registered
+    message_type: sensor_msgs/msg/PointCloud2
+    required: true
+  - role: metric_map
+    topic: /Laser_map
+    message_type: sensor_msgs/msg/PointCloud2
+    required: true
+  - role: odometry
+    topic: /aft_mapped_to_init
+    message_type: nav_msgs/msg/Odometry
+    required: true
+  - role: path
+    topic: /path
+    message_type: nav_msgs/msg/Path
+    required: false
+
+replay:
+  clock_topic: /clock
+  clock_publish_frequency_hz: 100.0
+  startup_delay_s: 10
+  read_ahead_queue_size: 2000
+  rate: 1.0
+  loop: false
+  disable_loan_message: false
+
+calibration:
+  artifact_required: true
+  source: deployment
+  expected_parameters:
+    - common.extrin_calib.extrinsic_T
+    - common.extrin_calib.extrinsic_R
+    - common.extrin_calib.Rcl
+    - common.extrin_calib.Pcl
+    - common.time_offset.imu_time_offset
+    - common.time_offset.img_time_offset

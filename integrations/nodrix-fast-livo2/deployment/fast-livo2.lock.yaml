@@ -1,0 +1,34 @@
+schema_version: 1
+implementation:
+  id: v4rl-ucy-fast-livo2-ros2
+  source:
+    repository: https://github.com/v4rl-ucy/FAST-LIVO2-ROS2.git
+    requested_ref: refs/heads/main
+    resolved_commit: 5f98c656831089db0d0e85f604e6a7e20baf94e7
+    resolved_at_utc: '2026-08-04T11:55:44.174951Z'
+  package: fast_livo
+  executable: fastlivo_mapping
+  launch:
+    file: mapping_aviz_metacamedu.launch.py
+    arguments:
+      use_rviz: false
+  license:
+    spdx: GPL-2.0-only
+    commercial_use_requires_upstream_review: true
+qualification:
+  reference_environment:
+    os: ubuntu-22.04
+    ros_distro: humble
+    architecture: x86_64
+    status: upstream-documented
+  target_environment:
+    os: ubuntu-24.04
+    ros_distro: jazzy
+    architecture: x86_64
+    status: experimental
+  evidence:
+    build: pending
+    replay: pending
+    live_mid360: pending
+    process_cleanup: pending
+    performance_baseline: pending

@@ -1,0 +1,169 @@
+apiVersion: plyctl.dev/v2
+kind: Pipeline
+
+metadata:
+  name: fast-livo2-reference-replay
+  description: Reproducible rosbag2 replay for the pinned FAST-LIVO2 ROS 2 candidate
+
+runtime:
+  engine: unified
+  mode: realtime
+  profile: realtime-low-latency
+
+sessions:
+  ros:
+    uses: ros2.session
+    parameters:
+      distro: ${ROS_DISTRO:-humble}
+      underlays:
+        - /opt/ros/${ROS_DISTRO:-humble}
+        - ${LIVOX_WS}
+      path: ${FAST_LIVO2_WS}
+      trust: explicit
+      build:
+        mode: if-needed
+        symlink_install: true
+        parallel_workers: auto
+        timeout_s: 1800
+
+applications:
+  bag_player:
+    uses: ros2.node
+    bindings:
+      session: ros
+    parameters:
+      package: rosbag2_transport
+      executable: player
+      name: fast_livo2_bag_player
+      allow_clean_exit: true
+      startup_grace_s: 0.5
+      heartbeat_interval_s: 0.5
+      ros_parameters:
+        storage.uri: ${FAST_LIVO2_BAG}
+        storage.storage_id: ""
+        play.read_ahead_queue_size: 2000
+        play.rate: 1.0
+        play.loop: false
+        play.clock_publish_frequency: 100.0
+        play.delay.sec: 10
+        play.delay.nsec: 0
+        play.start_paused: false
+        play.disable_keyboard_controls: true
+        play.progress_bar_update_rate: 1
+        play.disable_loan_message: false
+
+  fast_livo2:
+    uses: ros2.launch
+    bindings:
+      session: ros
+    parameters:
+      package: fast_livo
+      launch_file: mapping_aviz_metacamedu.launch.py
+      arguments:
+        use_rviz: false
+      requirements_timeout_s: 30
+      startup_grace_s: 1.0
+      heartbeat_interval_s: 0.5
+
+nodes:
+  lidar_health:
+    uses: ros2.topic_monitor
+    bindings: {session: ros}
+    parameters:
+      mode: graph
+      topic: /livox/lidar
+      message_type: livox_ros_driver2/msg/CustomMsg
+      startup_timeout_s: 30
+
+  imu_health:
+    uses: ros2.topic_monitor
+    bindings: {session: ros}
+    parameters:
+      mode: graph
+      topic: /livox/imu
+      message_type: sensor_msgs/msg/Imu
+      startup_timeout_s: 30
+
+  camera_health:
+    uses: ros2.topic_monitor
+    bindings: {session: ros}
+    parameters:
+      mode: graph
+      topic: /camera/left/jpeg
+      message_type: sensor_msgs/msg/CompressedImage
+      startup_timeout_s: 30
+
+  registered_cloud_health:
+    uses: ros2.topic_monitor
+    bindings: {session: ros}
+    parameters:
+      mode: graph
+      topic: /cloud_registered
+      message_type: sensor_msgs/msg/PointCloud2
+      startup_timeout_s: 120
+
+  metric_map_health:
+    uses: ros2.topic_monitor
+    bindings: {session: ros}
+    parameters:
+      mode: graph
+      topic: /Laser_map
+      message_type: sensor_msgs/msg/PointCloud2
+      startup_timeout_s: 120
+
+  odometry_health:
+    uses: ros2.topic_monitor
+    bindings: {session: ros}
+    parameters:
+      mode: graph
+      topic: /aft_mapped_to_init
+      message_type: nav_msgs/msg/Odometry
+      startup_timeout_s: 120
+
+fragments: {}
+
+edges:
+  - from: bag_player.lidar
+    to: fast_livo2.lidar
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /livox/lidar
+        message_type: livox_ros_driver2/msg/CustomMsg
+
+  - from: bag_player.imu
+    to: fast_livo2.imu
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /livox/imu
+        message_type: sensor_msgs/msg/Imu
+
+  - from: bag_player.camera
+    to: fast_livo2.camera
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /camera/left/jpeg
+        message_type: sensor_msgs/msg/CompressedImage
+
+streams: {}
+
+recording:
+  enabled: false
+  streams: []
+  directory: recordings
+  checkpoint_records: 1024
+  durable: true
+
+security:
+  require_signed_plugins: false
+  allow_unsigned_local_plugins: true
+  native_plugin_allowlist: []
+  reject_world_writable_plugins: true
+  secret_providers:
+    - environment
+
+placement:
+  default: local
+  nodes: {}
