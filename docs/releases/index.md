@@ -1,12 +1,24 @@
-# Releases
+# Current release: 2.3.0 alpha 1
 
-## 2.2.0 alpha.5
+This site documents the branch `feature/2.3.0-workspace-and-operations` and version `2.3.0a1`.
 
-- public rebrand to Plyctl;
-- canonical `plyctl` CLI and Python SDK with `nodrix` aliases;
-- canonical Plyctl manifest and provider namespaces with 2.x compatibility;
-- independently installable Spatial, Mapping, ROS 2, and Spatial ROS 2 packages;
-- Sphinx/MyST documentation with GitHub Pages automation.
+## Highlights
 
-Historical release notes in this repository retain the Nodrix name because it
-was the product name when those releases were published.
+- Workspace file and upward project discovery.
+- Pipeline aliases and named execution contexts.
+- Environment setup scripts, variables, and preflight checks.
+- Hardware/runtime profiles and operator views.
+- `workspace`, `context`, `env`, `use`, `prepare`, and `shell` commands.
+- Background operations: `up`, `down`, `restart`, `ps`, and `logs`.
+- Compact, operations, and debug metric views.
+- Managed ROS 2 process metrics.
+- FAST-LIO2 managed integration and RViz launch path.
+- Provider APIs 1 and 2 with Plyctl naming compatibility.
+
+## Alpha status
+
+This is a prerelease. Pin the exact version or commit, validate manifests in CI, and review migration notes before production deployment.
+
+## Release history
+
+The documentation site intentionally presents only the current release. Full historical details belong in `CHANGELOG.md` and GitHub Releases rather than the main navigation.

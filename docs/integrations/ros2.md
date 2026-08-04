@@ -1,44 +1,61 @@
 # ROS 2 integration
 
-Install the core orchestrator first. Add spatial bridges only when a Plyctl
-algorithm needs typed PointCloud2, IMU, or Odometry payloads.
+The ROS 2 integration is designed around a clear boundary:
+
+- DDS transports ROS messages between ROS 2 processes;
+- Plyctl describes and supervises the operational graph;
+- provider metadata exposes managed applications, external ports, probes, and requirements;
+- sampled health and process metrics are shown in `plyctl top`.
+
+## Why large messages stay in DDS
+
+Copying point clouds, images, and IMU streams through Python solely for orchestration adds latency and memory pressure. When no Plyctl node needs the payload, the integration leaves data in DDS and observes rates, readiness, and process health instead.
+
+## Workspace environment
+
+```yaml
+schema: nodrix.environment/v1
+name: ros2
+shell:
+  source:
+    - /opt/ros/jazzy/setup.bash
+    - ${HOME}/livox_ws/install/setup.bash
+environment:
+  ROS_DISTRO: jazzy
+  ROS_DOMAIN_ID: "26"
+  ROS_AUTOMATIC_DISCOVERY_RANGE: SUBNET
+checks:
+  - type: file
+    path: /opt/ros/jazzy/setup.bash
+  - type: command
+    command: ros2 --help
+```
+
+## Operational workflow
 
 ```bash
-python -m pip install plyctl plyctl-ros2
-python -m pip install plyctl-spatial plyctl-spatial-ros2  # optional
+plyctl use robot
+plyctl env check
+plyctl prepare
+plyctl validate PIPELINE
+plyctl up PIPELINE
+plyctl top
+plyctl logs -f
 ```
 
-ROS 2 remains installed and managed by the operating system. Plyctl discovers
-the ROS environment, sources underlays, fingerprints a colcon workspace,
-builds it in `if-needed` mode, waits for required topics, supervises process
-groups, and writes a separate stdout/stderr log for every process.
-
-## FAST-LIVO2 example
+For native ROS inspection inside the same environment:
 
 ```bash
-export LIVOX_WS=/path/to/livox_ws/install
-export ROBOT_WS=/path/to/robot_ws
-plyctl validate integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml
-plyctl run integrations/nodrix-fast-livo2/pipelines/orchestrated-ros2.yaml
+plyctl shell
+ros2 node list
+ros2 topic list
+ros2 topic hz /topic
 ```
 
-The graph is:
+## External edges and validation
 
-```{mermaid}
-flowchart LR
-  Livox["Livox driver"] --> Topics["/livox/lidar + /livox/imu"]
-  Topics --> Fast["FAST-LIVO2"]
-  Fast --> Cloud["/cloud_registered"]
-  Cloud --> RViz["RViz"]
-```
+Provider descriptors can declare external inputs and outputs. This lets the manifest represent a connection to a ROS topic without pretending that the payload crosses a normal in-process edge. Validation can then reason about the declared external contract while runtime health checks observe the actual DDS graph.
 
-The driver and FAST-LIVO2 remain ordinary ROS 2 packages. No
-algorithm-specific Plyctl plugin is required. RViz may run on the robot, or on
-a laptop in the same correctly configured ROS 2 DDS domain; network discovery,
-firewall, `ROS_DOMAIN_ID`, and middleware settings must match.
+## Resource metrics
 
-Create a generic ROS 2 project with:
-
-```bash
-plyctl init my-robot --template ros2
-```
+Managed ROS 2 applications should report the process tree, not only the supervisor process. The operations view is intended to expose PID, aggregate CPU and memory, process/thread counts, and restart information.

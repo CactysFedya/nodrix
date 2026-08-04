@@ -1,58 +1,18 @@
 # Getting started
 
-## Install
+This section takes a new user from an empty machine to a validated and running Plyctl workspace.
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install plyctl
-plyctl --version
-```
+## Learning path
 
-For a source checkout:
+1. [Install Plyctl 2.3.0a1](installation.md).
+2. [Create and inspect a workspace](first-workspace.md).
+3. [Run and modify a pipeline](first-pipeline.md).
+4. Choose the next path in [Next steps](next-steps.md).
 
-```bash
-python -m pip install -e ".[dev]"
-```
+At the end you should understand:
 
-## Create and run a pipeline
-
-```bash
-plyctl init demo --template core
-cd demo
-plyctl validate pipeline.yaml
-plyctl inspect pipeline.yaml
-plyctl run pipeline.yaml
-```
-
-New projects use `apiVersion: plyctl.dev/v2`. Existing files using
-`nodrix.dev/v1` or `nodrix.dev/v2` need no immediate edits.
-
-## Minimal YAML
-
-```yaml
-apiVersion: plyctl.dev/v2
-kind: Pipeline
-metadata:
-  name: demo
-runtime:
-  engine: unified
-nodes:
-  source:
-    uses: core.synthetic_source
-    parameters: {count: 10}
-  sink:
-    uses: core.counter_sink
-fragments: {}
-edges:
-  - from: source.output
-    to: sink.input
-streams: {}
-recording: {}
-security: {}
-placement: {}
-```
-
-Use `plyctl schema` to write `.plyctl-schema.json` for editor completion and
-validation.
+- where `nodrix.yaml`, pipeline manifests, environments, profiles, and views live;
+- how a context selects an environment, profile, and operational view;
+- why `plyctl prepare` should run before `plyctl run` or `plyctl up`;
+- how a node reference in YAML resolves to a builtin, provider node, or local Python class;
+- where logs and supervisor state are stored.

@@ -1,12 +1,66 @@
 :root {
-  --plyctl-accent: #2d6cdf;
+  --plyctl-accent: #2f7dff;
+  --plyctl-accent-dark: #1e5fc7;
 }
 
-.wy-side-nav-search,
-.wy-nav-top {
-  background: var(--plyctl-accent);
+.wy-side-nav-search {
+  background: #202934;
 }
 
-.rst-content code.literal {
-  color: #1f4f9f;
+.wy-side-nav-search > a,
+.wy-side-nav-search .wy-dropdown > a {
+  font-size: 1.35rem;
+  font-weight: 700;
+}
+
+.plyctl-language-switcher {
+  margin-top: 0.8rem;
+  text-align: left;
+}
+
+.plyctl-language-switcher label {
+  display: block;
+  margin-bottom: 0.25rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 0.78rem;
+}
+
+.plyctl-language-switcher select {
+  width: 100%;
+  padding: 0.38rem 0.5rem;
+  color: #1f2933;
+  background: #fff;
+  border: 0;
+  border-radius: 4px;
+}
+
+.rst-content code.literal,
+.rst-content tt.literal {
+  color: #b03060;
+}
+
+.rst-content .admonition-title {
+  font-weight: 700;
+}
+
+.rst-content h1,
+.rst-content h2,
+.rst-content h3 {
+  line-height: 1.25;
+}
+
+.rst-content table.docutils td,
+.rst-content table.docutils th {
+  white-space: normal;
+}
+
+.plyctl-hero {
+  padding: 1.2rem 1.4rem;
+  margin-bottom: 1.5rem;
+  border-left: 5px solid var(--plyctl-accent);
+  background: #f3f7fd;
+}
+
+.plyctl-hero strong {
+  font-size: 1.15rem;
 }
