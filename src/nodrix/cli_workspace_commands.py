@@ -208,13 +208,74 @@ def environment_check() -> None:
 
 
 @app.command("prepare")
-def prepare_command() -> None:
+def prepare_command(
+    environment: Annotated[
+        str | None,
+        typer.Option("--environment", "-e"),
+    ] = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+) -> None:
+    """Validate the selected environment and run the optional prepare workflow."""
+
+    from .workflow_execution import (
+        check_project_environment,
+        has_workflow,
+        run_workflow,
+    )
+
+    root = find_workspace()
+    if root is not None:
+        try:
+            results = check_project_environment(
+                root,
+                environment_name=environment,
+            )
+        except Exception as exc:
+            console.print(f"[red]Not ready:[/red] {exc}")
+            raise typer.Exit(1)
+        table = Table(box=None, show_edge=False, pad_edge=False)
+        table.add_column("STATUS")
+        table.add_column("CHECK")
+        table.add_column("DETAIL")
+        failed = False
+        for item in results:
+            ok = item["status"] == "ok"
+            failed = failed or not ok
+            table.add_row(
+                "OK" if ok else "ERROR",
+                item["check"],
+                item["detail"],
+                style=None if ok else "red",
+            )
+        if results:
+            console.print(table)
+        if failed:
+            raise typer.Exit(1)
+        if has_workflow(root, "prepare"):
+            result = run_workflow(
+                "prepare",
+                root=root,
+                environment_name=environment,
+                dry_run=dry_run,
+            )
+            for step in result.steps:
+                console.print(
+                    f"{step.status.upper():<10} {step.step_id:<24} {step.log_path}"
+                )
+            console.print(f"Artifacts: {result.run_directory}")
+            if not result.succeeded and not dry_run:
+                raise typer.Exit(1)
+        console.print(f"[green]READY[/green] {root.name}")
+        console.print(f"Project: {root}")
+        console.print(f"Environment: {environment or 'default'}")
+        return
+
     try:
         resolution = resolve_pipeline_reference()
         results = check_environment(resolution)
-        failed = [item for item in results if item["status"] != "ok"]
-        if failed:
-            rendered = "; ".join(item["detail"] for item in failed)
+        failed_items = [item for item in results if item["status"] != "ok"]
+        if failed_items:
+            rendered = "; ".join(item["detail"] for item in failed_items)
             raise RuntimeError(rendered)
         build_environment(resolution)
     except Exception as exc:
@@ -224,7 +285,6 @@ def prepare_command() -> None:
     console.print(f"Project: {resolution.root}")
     console.print(f"Context: {resolution.context_name or '-'}")
     console.print(f"Pipeline: {resolution.pipeline}")
-
 
 @app.command("shell")
 def shell_command() -> None:
