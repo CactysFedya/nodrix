@@ -31,7 +31,7 @@ def _v2(api_version: str) -> dict[str, object]:
 
 
 def test_public_imports_share_contract_identity() -> None:
-    assert plyctl.__version__ == nodrix.__version__ == "2.3.0a1"
+    assert plyctl.__version__ == nodrix.__version__ == "2.3.0b1"
     assert plyctl.Message is nodrix.Message
     assert plyctl.PipelineManifest is nodrix.PipelineManifest
     assert plyctl_manifest.PipelineManifest is PipelineManifest
@@ -65,4 +65,4 @@ def test_plyctl_provider_schema_and_entry_point_are_public() -> None:
 def test_cli_uses_new_brand() -> None:
     result = CliRunner().invoke(app, ["--version"])
     assert result.exit_code == 0
-    assert result.output.strip() == "Plyctl 2.3.0a1"
+    assert result.output.strip() == "Plyctl 2.3.0b1"

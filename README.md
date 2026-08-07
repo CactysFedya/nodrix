@@ -1,9 +1,18 @@
-# Plyctl 2.2.0 alpha.5
+# Plyctl 2.3.0 beta 1
 
 [![PyPI](https://img.shields.io/pypi/v/plyctl.svg)](https://pypi.org/project/plyctl/)
 [![Python](https://img.shields.io/pypi/pyversions/plyctl.svg)](https://pypi.org/project/plyctl/)
-[![CI](https://github.com/CactysFedya/plyctl/actions/workflows/ci.yml/badge.svg)](https://github.com/CactysFedya/plyctl/actions/workflows/ci.yml)
+[![CI](https://github.com/CactysFedya/nodrix/actions/workflows/ci.yml/badge.svg)](https://github.com/CactysFedya/nodrix/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
+<!-- plyctl-2.3.0b1-stabilization -->
+> **Beta status.** `2.3.0b1` stabilizes workspace/operations behavior,
+> local Python node loading, release metadata, and bilingual documentation.
+> The FAST-LIVO2 semantic-mapping vertical slice is hardware-tested but remains
+> experimental until non-empty semantic output and map-file persistence are
+> qualified. See [the current release notes](docs/releases/2.3.0b1.md) and
+> [the product principles](docs/PRINCIPLES.md).
+
 
 Plyctl is the Pipeline OS for real-time systems. It composes Python, C++, ROS 2,
 processes, devices, and transports in one typed YAML graph, preserves zero-copy
@@ -11,7 +20,7 @@ paths where the memory domain permits, and makes every copy, drop, restart,
 queue, and network export observable.
 
 
-## Plyctl 2.2 alpha.5 highlights
+## Plyctl 2.3 beta stabilization highlights
 
 This release introduces the `plyctl` product, Python package, CLI, manifest API,
 and independently installable integration packages. The previous `nodrix`

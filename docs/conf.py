@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "src"))
 project = "Plyctl"
 author = "Plyctl contributors"
 copyright = "2026, Plyctl contributors"
-release = "2.3.0a1"
+release = "2.3.0b1"
 version = "2.3"
 
 extensions = [
@@ -43,7 +43,7 @@ exclude_patterns = [
 ]
 
 html_theme = "sphinx_rtd_theme"
-html_title = "Plyctl 2.3 Documentation"
+html_title = f"Plyctl {release} Documentation"
 html_logo = None
 html_favicon = None
 html_static_path = ["_static"]
@@ -62,7 +62,7 @@ html_context = {
     "display_github": True,
     "github_user": "CactysFedya",
     "github_repo": "nodrix",
-    "github_version": "feature/2.3.0-workspace-and-operations",
+    "github_version": "release/2.3.0b1-stabilization",
     "conf_py_path": "/docs/",
     "doc_language": "en",
     "doc_version": "latest",

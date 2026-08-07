@@ -5,7 +5,7 @@
 - пакет PyPI называется `plyctl`;
 - установка: `pip install plyctl`;
 - CLI: `plyctl` и `plyctl-viewer`;
-- репозиторий: `CactysFedya/plyctl`;
+- репозиторий: `CactysFedya/nodrix`;
 - CI проверяет Python 3.11–3.14 и C++ runtime;
 - workflow `publish.yml` собирает Linux x86-64, Linux ARM64, macOS Apple
   Silicon и Windows x86-64 wheels;
@@ -46,7 +46,7 @@ scripts/create_github_repo.sh CactysFedya plyctl public
 
 ```bash
 git branch -M main
-git remote add origin git@github.com:CactysFedya/plyctl.git
+git remote add origin git@github.com:CactysFedya/nodrix.git
 git push -u origin main
 ```
 

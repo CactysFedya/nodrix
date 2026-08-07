@@ -4,3 +4,4 @@
 - [Фоновый запуск](background.md)
 - [Диагностика](debug.md)
 - [Подготовка к production](production.md)
+- [Перенос проекта на другое устройство](portable-deployment.md)

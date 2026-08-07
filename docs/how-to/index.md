@@ -6,3 +6,4 @@ Use these task-focused guides after completing the tutorials.
 - [Run pipelines in the background](background.md)
 - [Debug validation and runtime failures](debug.md)
 - [Prepare a production deployment](production.md)
+- [Deploy the same project to another device](portable-deployment.md)

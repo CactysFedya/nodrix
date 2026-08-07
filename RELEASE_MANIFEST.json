@@ -1,8 +1,8 @@
 {
   "schema": "plyctl-release/v1",
-  "name": "Plyctl Rebrand Compatibility",
-  "release": "2.3.0a1",
-  "display_release": "2.3.0-alpha.1",
+  "name": "Plyctl 2.3 Beta Stabilization",
+  "release": "2.3.0b1",
+  "display_release": "2.3.0-beta.1",
   "core_contracts": {
     "provider_api": [
       "1",
@@ -56,6 +56,6 @@
     "canonical_integration_validation": "passed",
     "independent_wheels": "passed",
     "ros2_jazzy_smoke": "configured in modular CI",
-    "ros2_hardware_validation": "pending on Ubuntu 24.04 / ROS 2 Jazzy"
+    "ros2_hardware_validation": "Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy hardware smoke passed; semantic mapping remains experimental"
   }
 }

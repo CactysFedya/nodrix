@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plyctl"
-version = "2.3.0a1"
+version = "2.3.0b1"
 description = "The Pipeline OS for real-time local and distributed systems"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -83,11 +83,11 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/CactysFedya/plyctl"
-Documentation = "https://cactysfedya.github.io/plyctl/"
-Repository = "https://github.com/CactysFedya/plyctl.git"
-Issues = "https://github.com/CactysFedya/plyctl/issues"
-Changelog = "https://github.com/CactysFedya/plyctl/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/CactysFedya/nodrix"
+Documentation = "https://cactysfedya.github.io/nodrix/"
+Repository = "https://github.com/CactysFedya/nodrix.git"
+Issues = "https://github.com/CactysFedya/nodrix/issues"
+Changelog = "https://github.com/CactysFedya/nodrix/blob/main/CHANGELOG.md"
 
 [project.scripts]
 plyctl = "plyctl.cli:app"

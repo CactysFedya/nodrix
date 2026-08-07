@@ -6,7 +6,7 @@ _parent = Path(__file__).resolve().parents[1] / "conf.py"
 exec(compile(_parent.read_text(encoding="utf-8"), str(_parent), "exec"), globals())
 
 language = "ru"
-html_title = "Документация Plyctl 2.3"
+html_title = f"Документация Plyctl {release}"
 html_static_path = ["../_static"]
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 html_context = {

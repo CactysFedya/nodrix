@@ -1,11 +1,15 @@
 # Contributing to Plyctl
 
+<!-- nodrix-principles-link -->
+All architectural and public-contract changes must follow [the product principles](docs/PRINCIPLES.md). Changes to those principles require a decision issue and an ADR.
+
+
 Plyctl accepts bug fixes, documentation improvements, performance work, new typed-message codecs, and carefully scoped runtime features.
 
 ## Development setup
 
 ```bash
-git clone https://github.com/CactysFedya/plyctl.git
+git clone https://github.com/CactysFedya/nodrix.git
 cd nodrix
 python3 -m venv .venv
 source .venv/bin/activate

@@ -1,5 +1,25 @@
 # Changelog
 
+## 2.3.0b1 — Beta stabilization
+
+- Added one canonical module instance per local Python file, registered it in
+  `sys.modules` before execution, removed failed imports from the cache, and
+  added regression tests for dataclasses and class identity across nodes.
+- Normalized package, native, compatibility, citation, release-manifest, test,
+  README, and documentation version metadata to `2.3.0b1`.
+- Corrected public repository URLs to the actual `CactysFedya/nodrix`
+  repository.
+- Added release-metadata consistency tests and a release-critical
+  documentation checker.
+- Added bilingual product principles, stabilization register, portable
+  deployment guide, FAST-LIVO2 semantic-mapping qualification notes, and
+  current release notes.
+- Documented Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy hardware-smoke
+  evidence without marking semantic mapping production-ready.
+- Kept FAST-LIVO2, Livox, ROS 2, Vision, and semantic mapping outside Core as
+  providers, managed applications, project-owned packages, and reference
+  integrations.
+
 ## 2.2.0a5 — Plyctl compatibility rebrand
 
 - Renamed the public product, distribution, CLI, Python SDK, manifest API,

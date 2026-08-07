@@ -326,7 +326,9 @@ class RuntimeExecutionMixin:
             for thread, loaded in zip(threads, self.nodes.values(), strict=True)
             if isinstance(loaded.node, SourceNode)
         }
-        while any(thread.is_alive() for thread in threads) or self._applications_active():
+        while any(thread.is_alive() for thread in threads) or (
+            not self._stop.is_set() and self._applications_active()
+        ):
             try:
                 if deadline is None and (
                     self._errors
@@ -365,8 +367,13 @@ class RuntimeExecutionMixin:
                     self._record_error("runtime", TimeoutError("graceful shutdown timeout exceeded"))
         self._stop.set()
         watchdog.join(timeout=1.0)
-        # Capture process RSS/CPU before isolated children and shared pools close.
-        self.snapshot(max((time.perf_counter_ns() - started_ns) / 1e9, 1e-9))
+        if metrics_recorder is not None:
+            metrics_recorder.close()
+            self._metrics_recorder = None
+        # Capture final telemetry while nodes and provider sessions are still open.
+        final_snapshot = self.snapshot(
+            max((time.perf_counter_ns() - started_ns) / 1e9, 1e-9)
+        )
         self._close_nodes()
         self._nodes_closed = True
         session_report = {
@@ -393,9 +400,6 @@ class RuntimeExecutionMixin:
                 self._record_error("recording", exc)
             finally:
                 self._recording_writer = None
-        if metrics_recorder is not None:
-            metrics_recorder.close()
-            self._metrics_recorder = None
         finished_ns = time.perf_counter_ns()
         duration = (finished_ns - started_ns) / 1e9
         error = self._errors[0] if self._errors else None
@@ -422,10 +426,7 @@ class RuntimeExecutionMixin:
             "run_dir": str(run_dir),
             "duration_seconds": duration,
             "error": None if error is None else f"{error[0]}: {type(error[1]).__name__}: {error[1]}",
-            "nodes": {
-                name: self._node_report(loaded, duration)
-                for name, loaded in self.nodes.items()
-            },
+            "nodes": final_snapshot["nodes"],
             "sessions": session_report,
             "resources": resource_report,
             "applications": application_report,
@@ -473,6 +474,12 @@ class RuntimeExecutionMixin:
             and watchdog is not threading.current_thread()
         ):
             watchdog.join(timeout=1.0)
+        if self._metrics_recorder is not None:
+            try:
+                self._metrics_recorder.close()
+            except BaseException:
+                pass
+            self._metrics_recorder = None
         if not self._nodes_closed:
             for loaded in reversed(tuple(self.nodes.values())):
                 if loaded.node.lifecycle_state == LifecycleState.CREATED.value:
@@ -491,12 +498,6 @@ class RuntimeExecutionMixin:
             except BaseException:
                 pass
             self._recording_writer = None
-        if self._metrics_recorder is not None:
-            try:
-                self._metrics_recorder.close()
-            except BaseException:
-                pass
-            self._metrics_recorder = None
         if self._stream_publisher is not None:
             try:
                 self._stream_publisher.close()

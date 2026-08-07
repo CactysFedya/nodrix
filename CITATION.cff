@@ -4,7 +4,7 @@ message: "If you use Plyctl in research, please cite the software repository and
 type: software
 authors:
   - name: CactysFedya
-version: 2.3.0a1
+version: 2.3.0b1
 date-released: 2026-08-02
 repository-code: "https://github.com/CactysFedya/plyctl"
 url: "https://pypi.org/project/plyctl/"

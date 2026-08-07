@@ -76,7 +76,7 @@ def _manifest(*, tls: dict[str, object] | None = None) -> PipelineManifest:
 
 
 def test_v180_version() -> None:
-    assert nodrix.__version__ == "2.3.0a1"
+    assert nodrix.__version__ == "2.3.0b1"
 
 
 def test_tls_stream_round_trip(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 # Reference
 
-Reference pages describe the exact public interfaces used by Plyctl 2.3.0a1.
+Reference pages describe the exact public interfaces used by Plyctl 2.3.0b1.
 
 - [CLI reference](cli.md)
 - [Workspace schemas](workspace.md)
@@ -9,3 +9,4 @@ Reference pages describe the exact public interfaces used by Plyctl 2.3.0a1.
 - [Provider SDK](provider-sdk.md)
 - [Native/plugin SDK](plugin-sdk.md)
 - [Compatibility policy](compatibility.md)
+- [2.3 beta stabilization register](stabilization-register.md)

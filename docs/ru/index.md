@@ -2,7 +2,7 @@
 
 <div class="plyctl-hero">
 <strong>Plyctl — runtime и операционный слой для модульных конвейеров реального времени.</strong><br>
-Версия 2.3 добавляет workspace, контексты, воспроизводимые окружения, фоновое управление, операционные представления, управление ROS 2-процессами и интеграцию FAST-LIO2.
+Версия 2.3 добавляет workspace, контексты, воспроизводимые окружения, фоновые операции, operator views, управление ROS 2-процессами и квалифицируемые reference integrations.
 </div>
 
 Plyctl позволяет описать граф один раз, проверить его до запуска, выполнять Python- и native-узлы, управлять внешними приложениями и наблюдать систему через единый CLI.
@@ -12,6 +12,11 @@ plyctl workspace init robot-project
 cd robot-project
 plyctl prepare
 plyctl run
+```
+
+```{admonition} Статус beta 2.3.0b1
+:class: note
+`2.3.0b1` стабилизирует загрузку локальных Python nodes, release metadata и двуязычную документацию. FAST-LIVO2 semantic mapping имеет hardware-smoke evidence на Raspberry Pi 5, но остаётся экспериментальным до закрытия release blockers.
 ```
 
 ```{admonition} Имена в серии 2.x
@@ -24,8 +29,8 @@ plyctl run
 - Новый пользователь: [Установка](getting-started/installation.md) → [Первый workspace](getting-started/first-workspace.md).
 - Автор pipeline: [Manifest API v2](reference/manifest.md) и [Python SDK](reference/python-sdk.md).
 - Автор интеграции: [Создание provider](tutorials/provider.md) и [Provider SDK](reference/provider-sdk.md).
-- Разработчик робота: [ROS 2](integrations/ros2.md) и [FAST-LIO2](integrations/fast-lio2.md).
-- Оператор: [Управление workspace](tutorials/workspace-operations.md) и [Эксплуатация](how-to/production.md).
+- Разработчик робота: [ROS 2](integrations/ros2.md), [FAST-LIO2](integrations/fast-lio2.md) и [qualification FAST-LIVO2 semantic mapping](integrations/fast-livo2-semantic-mapping.md).
+- Оператор: [Управление workspace](tutorials/workspace-operations.md), [Эксплуатация](how-to/production.md) и [Перенос на другое устройство](how-to/portable-deployment.md).
 
 ```{toctree}
 :maxdepth: 2
@@ -58,6 +63,7 @@ how-to/environments
 how-to/background
 how-to/debug
 how-to/production
+how-to/portable-deployment
 ```
 
 ```{toctree}
@@ -82,6 +88,7 @@ reference/python-sdk
 reference/provider-sdk
 reference/plugin-sdk
 reference/compatibility
+reference/stabilization-register
 ```
 
 ```{toctree}
@@ -91,6 +98,7 @@ reference/compatibility
 integrations/index
 integrations/ros2
 integrations/fast-lio2
+integrations/fast-livo2-semantic-mapping
 integrations/media
 examples/index
 ```
@@ -99,6 +107,12 @@ examples/index
 :maxdepth: 2
 :caption: Проект
 
+PRINCIPLES
+COMPATIBILITY
+adr/README
+planning/index
 releases/index
 contributing/index
 ```
+
+- [English documentation](../index.md)
