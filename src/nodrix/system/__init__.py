@@ -1,5 +1,18 @@
 """Nodrix 2.5 canonical backend-neutral System Model."""
 
+from .backend import (
+    BackendCapabilities,
+    BackendContext,
+    BackendContractError,
+    BackendDiagnostic,
+    BackendExecutionHandle,
+    BackendExecutionState,
+    BackendExecutionStatus,
+    BackendValidationError,
+    BackendValidationReport,
+    ExecutionBackend,
+    PreparedExecution,
+)
 from .catalog import DefinitionCatalog
 from .compatibility import (
     CompatibilityResult,
@@ -67,6 +80,17 @@ from .validation import (
 __all__ = [
     "ApplicationInstance",
     "Artifact",
+    "BackendCapabilities",
+    "BackendContext",
+    "BackendContractError",
+    "BackendDiagnostic",
+    "BackendExecutionHandle",
+    "BackendExecutionState",
+    "BackendExecutionStatus",
+    "BackendValidationError",
+    "BackendValidationReport",
+    "ExecutionBackend",
+    "PreparedExecution",
     "CompatibilityDisposition",
     "CompatibilityEntry",
     "CompatibilityError",
