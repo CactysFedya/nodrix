@@ -9,6 +9,7 @@ from typing import Any, Generic, TypeVar, Union, get_args, get_origin, get_type_
 
 from .cv_types import TYPE_REGISTRY, register_message_type
 from .integration import ManagedResource, ResourceContext
+from .lifecycle import LifecycleState
 from .messages import Message
 from .node import Node, NodeContext, SinkNode, SourceNode
 
@@ -267,6 +268,126 @@ def _analyze_callable(
     )
 
 
+def _analyze_constructor(
+    cls: type[Any],
+    *,
+    component_name: str,
+    localns: Mapping[str, Any] | None = None,
+) -> ComponentSpec:
+    initializer = cls.__dict__.get("__init__")
+    if initializer is None:
+        return ComponentSpec(component_name, (), (), (), (), cls)
+
+    signature = inspect.signature(initializer)
+    hints = get_type_hints(
+        initializer,
+        globalns=getattr(initializer, "__globals__", None),
+        localns=dict(localns or {}),
+        include_extras=True,
+    )
+    parameters: list[ParameterSpec] = []
+    dependencies: list[DependencySpec] = []
+
+    for argument in signature.parameters.values():
+        if argument.name in {"self", "cls"}:
+            continue
+        if argument.kind in {inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD}:
+            raise TypeError(
+                f"Stateful node {component_name!r} cannot infer variadic constructor argument "
+                f"{argument.name!r}"
+            )
+        if argument.kind is inspect.Parameter.POSITIONAL_ONLY:
+            raise TypeError(
+                f"Stateful node {component_name!r} constructor argument {argument.name!r} "
+                "must be keyword-compatible"
+            )
+        annotation = hints.get(argument.name, argument.annotation)
+        if annotation is inspect.Signature.empty:
+            raise TypeError(
+                f"Cannot infer constructor argument {argument.name!r} in node {component_name!r}; "
+                "add a type annotation"
+            )
+        if annotation is NodeContext or annotation is Context:
+            dependencies.append(DependencySpec(argument.name, "context", annotation))
+            continue
+        is_resource, inner = _unwrap_marker(annotation, Resource)
+        if is_resource:
+            dependencies.append(DependencySpec(argument.name, "resource", inner))
+            continue
+        is_input, _ = _unwrap_marker(annotation, Input)
+        if is_input:
+            raise TypeError(
+                f"Stateful node {component_name!r} constructor argument {argument.name!r} "
+                "cannot be Input[T]; pipeline inputs belong in process()"
+            )
+        is_param, inner = _unwrap_marker(annotation, Param)
+        parameters.append(
+            ParameterSpec(
+                argument.name,
+                inner if is_param else annotation,
+                argument.default is inspect.Signature.empty,
+                None if argument.default is inspect.Signature.empty else argument.default,
+            )
+        )
+
+    return ComponentSpec(
+        component_name,
+        (),
+        (),
+        tuple(parameters),
+        tuple(dependencies),
+        cls,
+    )
+
+
+def _analyze_injected_method(
+    method: Any | None,
+    *,
+    component_name: str,
+    phase: str,
+    localns: Mapping[str, Any] | None = None,
+) -> tuple[DependencySpec, ...]:
+    if method is None:
+        return ()
+    signature = inspect.signature(method)
+    hints = get_type_hints(
+        method,
+        globalns=getattr(method, "__globals__", None),
+        localns=dict(localns or {}),
+        include_extras=True,
+    )
+    dependencies: list[DependencySpec] = []
+    for argument in signature.parameters.values():
+        if argument.name in {"self", "cls"}:
+            continue
+        annotation = hints.get(argument.name, argument.annotation)
+        if annotation is NodeContext or annotation is Context:
+            dependencies.append(DependencySpec(argument.name, "context", annotation))
+            continue
+        is_resource, inner = _unwrap_marker(annotation, Resource)
+        if is_resource:
+            dependencies.append(DependencySpec(argument.name, "resource", inner))
+            continue
+        raise TypeError(
+            f"Stateful node {component_name!r} {phase}() argument {argument.name!r} "
+            "must be Context or Resource[T]"
+        )
+    return tuple(dependencies)
+
+
+def _merge_dependencies(*groups: tuple[DependencySpec, ...]) -> tuple[DependencySpec, ...]:
+    merged: list[DependencySpec] = []
+    seen: set[tuple[str, str, Any]] = set()
+    for group in groups:
+        for item in group:
+            key = (item.name, item.kind, item.annotation)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(item)
+    return tuple(merged)
+
+
 def _resolve_parameters(spec: ComponentSpec, supplied: Mapping[str, Any] | None) -> dict[str, Any]:
     values = dict(supplied or {})
     known = {item.name for item in spec.parameters}
@@ -328,7 +449,31 @@ def _wrap_outputs(spec: ComponentSpec, value: Any, inputs: Mapping[str, Message]
     }
 
 
-def _invoke_arguments(instance: Node, spec: ComponentSpec, inputs: Mapping[str, Message]) -> dict[str, Any]:
+def _dependency_arguments(
+    instance: Node,
+    dependencies: tuple[DependencySpec, ...],
+    *,
+    component_name: str,
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for dependency in dependencies:
+        if instance.context is None:
+            raise RuntimeError(f"Node {component_name!r} has not been configured")
+        if dependency.kind == "context":
+            values[dependency.name] = instance.context
+        elif dependency.kind == "resource":
+            resource = instance.context.binding(dependency.name)
+            values[dependency.name] = getattr(resource, "value", resource)
+    return values
+
+
+def _invoke_arguments(
+    instance: Node,
+    spec: ComponentSpec,
+    inputs: Mapping[str, Message],
+    *,
+    parameters: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     values: dict[str, Any] = {}
     for port in spec.inputs:
         message = inputs.get(port.name)
@@ -339,17 +484,17 @@ def _invoke_arguments(instance: Node, spec: ComponentSpec, inputs: Mapping[str, 
             raise KeyError(f"Node {spec.name!r} requires input {port.name!r}")
         values[port.name] = message.payload
 
-    values.update(instance._simple_parameters)  # type: ignore[attr-defined]
-    for dependency in spec.dependencies:
-        if dependency.kind == "context":
-            if instance.context is None:
-                raise RuntimeError(f"Node {spec.name!r} has not been configured")
-            values[dependency.name] = instance.context
-        elif dependency.kind == "resource":
-            if instance.context is None:
-                raise RuntimeError(f"Node {spec.name!r} has not been configured")
-            resource = instance.context.binding(dependency.name)
-            values[dependency.name] = getattr(resource, "value", resource)
+    if parameters is None:
+        values.update(instance._simple_parameters)  # type: ignore[attr-defined]
+    else:
+        values.update(parameters)
+    values.update(
+        _dependency_arguments(
+            instance,
+            spec.dependencies,
+            component_name=spec.name,
+        )
+    )
     return values
 
 
@@ -373,15 +518,42 @@ def _build_function_node(spec: ComponentSpec, function: Any) -> type[Node]:
             super().__init__(parameters)
             self._simple_parameters = _resolve_parameters(spec, parameters)
 
-        def process(self, inputs: dict[str, Message]) -> dict[str, Message] | None | Any:
-            arguments = _invoke_arguments(self, spec, inputs)
-            value = function(**arguments)
-            if inspect.isawaitable(value):
-                async def finish() -> dict[str, Message] | None:
-                    resolved = await value
-                    return _wrap_outputs(spec, resolved, inputs, self.context.name if self.context else "")
-                return finish()
-            return _wrap_outputs(spec, value, inputs, self.context.name if self.context else "")
+    if not issubclass(base_class, SourceNode):
+        if inspect.iscoroutinefunction(function):
+            async def process_async(
+                self: Node,
+                inputs: dict[str, Message],
+            ) -> dict[str, Message] | None:
+                arguments = _invoke_arguments(self, spec, inputs)
+                value = await function(**arguments)
+                return _wrap_outputs(
+                    spec,
+                    value,
+                    inputs,
+                    self.context.name if self.context else "",
+                )
+
+            FunctionNode.process = process_async  # type: ignore[assignment]
+        else:
+            def process_sync(
+                self: Node,
+                inputs: dict[str, Message],
+            ) -> dict[str, Message] | None:
+                arguments = _invoke_arguments(self, spec, inputs)
+                value = function(**arguments)
+                if inspect.isawaitable(value):
+                    raise TypeError(
+                        f"Node {spec.name!r} returned an awaitable from a synchronous function; "
+                        "declare the node with 'async def'"
+                    )
+                return _wrap_outputs(
+                    spec,
+                    value,
+                    inputs,
+                    self.context.name if self.context else "",
+                )
+
+            FunctionNode.process = process_sync  # type: ignore[assignment]
 
     if issubclass(base_class, SourceNode):
         def produce(self: SourceNode) -> Iterator[dict[str, Message]] | AsyncIterator[dict[str, Message]]:
@@ -425,6 +597,339 @@ def _build_function_node(spec: ComponentSpec, function: Any) -> type[Node]:
     return FunctionNode
 
 
+def _build_class_node(
+    component_spec: ComponentSpec,
+    constructor_spec: ComponentSpec,
+    process_spec: ComponentSpec,
+    user_class: type[Any],
+    lifecycle_dependencies: Mapping[str, tuple[DependencySpec, ...]],
+) -> type[Node]:
+    base_class: type[Node]
+    if not process_spec.inputs and process_spec.outputs:
+        base_class = SourceNode
+    elif process_spec.inputs and not process_spec.outputs:
+        base_class = SinkNode
+    else:
+        base_class = Node
+
+    user_process = getattr(user_class, "process")
+    user_start = user_class.__dict__.get("start")
+    user_drain = user_class.__dict__.get("drain")
+    user_stop = user_class.__dict__.get("stop")
+    user_health = user_class.__dict__.get("health")
+
+    class StatefulNode(base_class):
+        input_types = {item.name: item.type_id for item in process_spec.inputs}
+        output_types = {item.name: item.type_id for item in process_spec.outputs}
+        optional_inputs = frozenset(item.name for item in process_spec.inputs if item.optional)
+        __plyctl_component_spec__ = component_spec
+        __plyctl_constructor_spec__ = constructor_spec
+        __plyctl_process_spec__ = process_spec
+        __plyctl_original__ = user_class
+
+        def __init__(self, parameters: dict[str, Any] | None = None) -> None:
+            super().__init__(parameters)
+            self._simple_parameters = _resolve_parameters(constructor_spec, parameters)
+            self._simple_instance: Any | None = None
+            if not constructor_spec.dependencies:
+                self._simple_instance = user_class(**self._simple_parameters)
+
+        @property
+        def implementation(self) -> Any | None:
+            """Return the wrapped user object after it has been constructed."""
+
+            return self._simple_instance
+
+        def _ensure_instance(self) -> Any:
+            if self._simple_instance is None:
+                arguments = dict(self._simple_parameters)
+                arguments.update(
+                    _dependency_arguments(
+                        self,
+                        constructor_spec.dependencies,
+                        component_name=component_spec.name,
+                    )
+                )
+                self._simple_instance = user_class(**arguments)
+            return self._simple_instance
+
+        def open(self, context: NodeContext) -> Any:
+            self.context = context
+            self._ensure_instance()
+            return None
+
+        def start(self) -> Any:
+            implementation = self._ensure_instance()
+            if user_start is None:
+                return super().start()
+            arguments = _dependency_arguments(
+                self,
+                lifecycle_dependencies["start"],
+                component_name=component_spec.name,
+            )
+            result = implementation.start(**arguments)
+            if inspect.isawaitable(result):
+                async def finish_start() -> Any:
+                    resolved = await result
+                    self._lifecycle.transition(LifecycleState.RUNNING)
+                    return resolved
+
+                return finish_start()
+            self._lifecycle.transition(LifecycleState.RUNNING)
+            return result
+
+        def stop(self) -> Any:
+            self._lifecycle.transition(LifecycleState.STOPPING)
+            implementation = self._simple_instance
+            if implementation is None or user_stop is None:
+                self._lifecycle.transition(LifecycleState.STOPPED)
+                return None
+            arguments = _dependency_arguments(
+                self,
+                lifecycle_dependencies["stop"],
+                component_name=component_spec.name,
+            )
+            try:
+                result = implementation.stop(**arguments)
+            except BaseException:
+                self._lifecycle.transition(LifecycleState.STOPPED)
+                raise
+            if inspect.isawaitable(result):
+                async def finish_stop() -> Any:
+                    try:
+                        return await result
+                    finally:
+                        self._lifecycle.transition(LifecycleState.STOPPED)
+
+                return finish_stop()
+            self._lifecycle.transition(LifecycleState.STOPPED)
+            return result
+
+        def health(self) -> dict[str, Any]:
+            base = super().health()
+            implementation = self._simple_instance
+            if implementation is None or user_health is None:
+                return base
+            arguments = _dependency_arguments(
+                self,
+                lifecycle_dependencies["health"],
+                component_name=component_spec.name,
+            )
+            details = implementation.health(**arguments)
+            if inspect.isawaitable(details):
+                raise TypeError(
+                    f"Stateful node {component_spec.name!r} health() must be synchronous"
+                )
+            if details is None:
+                return base
+            if not isinstance(details, Mapping):
+                raise TypeError(
+                    f"Stateful node {component_spec.name!r} health() must return a mapping or None"
+                )
+            return {**base, "details": dict(details)}
+
+    if issubclass(base_class, SourceNode):
+        def produce(
+            self: SourceNode,
+        ) -> Iterator[dict[str, Message]] | AsyncIterator[dict[str, Message]]:
+            implementation = self._ensure_instance()  # type: ignore[attr-defined]
+            arguments = _invoke_arguments(self, process_spec, {}, parameters={})
+            produced = implementation.process(**arguments)
+            source_id = self.context.name if self.context else ""
+
+            if inspect.isasyncgen(produced):
+                async def async_stream() -> AsyncIterator[dict[str, Message]]:
+                    async for item in produced:
+                        wrapped = _wrap_outputs(process_spec, item, {}, source_id)
+                        if wrapped is not None:
+                            yield wrapped
+
+                return async_stream()
+            if inspect.isawaitable(produced):
+                async def async_once() -> AsyncIterator[dict[str, Message]]:
+                    item = await produced
+                    wrapped = _wrap_outputs(process_spec, item, {}, source_id)
+                    if wrapped is not None:
+                        yield wrapped
+
+                return async_once()
+            if isinstance(produced, Iterator):
+                def stream() -> Iterator[dict[str, Message]]:
+                    for item in produced:
+                        wrapped = _wrap_outputs(process_spec, item, {}, source_id)
+                        if wrapped is not None:
+                            yield wrapped
+
+                return stream()
+            wrapped = _wrap_outputs(process_spec, produced, {}, source_id)
+            return iter(()) if wrapped is None else iter((wrapped,))
+
+        StatefulNode.produce = produce  # type: ignore[assignment]
+    elif inspect.iscoroutinefunction(user_process):
+        async def process_async(
+            self: Node,
+            inputs: dict[str, Message],
+        ) -> dict[str, Message] | None:
+            implementation = self._ensure_instance()  # type: ignore[attr-defined]
+            arguments = _invoke_arguments(self, process_spec, inputs, parameters={})
+            value = await implementation.process(**arguments)
+            return _wrap_outputs(
+                process_spec,
+                value,
+                inputs,
+                self.context.name if self.context else "",
+            )
+
+        StatefulNode.process = process_async  # type: ignore[assignment]
+    else:
+        def process_sync(
+            self: Node,
+            inputs: dict[str, Message],
+        ) -> dict[str, Message] | None:
+            implementation = self._ensure_instance()  # type: ignore[attr-defined]
+            arguments = _invoke_arguments(self, process_spec, inputs, parameters={})
+            value = implementation.process(**arguments)
+            if inspect.isawaitable(value):
+                raise TypeError(
+                    f"Stateful node {component_spec.name!r} process() returned an awaitable "
+                    "from a synchronous method; declare process() with 'async def'"
+                )
+            return _wrap_outputs(
+                process_spec,
+                value,
+                inputs,
+                self.context.name if self.context else "",
+            )
+
+        StatefulNode.process = process_sync  # type: ignore[assignment]
+
+    if user_drain is not None:
+        if inspect.iscoroutinefunction(user_drain):
+            async def flush_async(self: Node) -> dict[str, Message] | None:
+                implementation = self._ensure_instance()  # type: ignore[attr-defined]
+                arguments = _dependency_arguments(
+                    self,
+                    lifecycle_dependencies["drain"],
+                    component_name=component_spec.name,
+                )
+                value = await implementation.drain(**arguments)
+                return _wrap_outputs(
+                    process_spec,
+                    value,
+                    {},
+                    self.context.name if self.context else "",
+                )
+
+            StatefulNode.flush = flush_async  # type: ignore[assignment]
+        else:
+            def flush_sync(self: Node) -> dict[str, Message] | None:
+                implementation = self._ensure_instance()  # type: ignore[attr-defined]
+                arguments = _dependency_arguments(
+                    self,
+                    lifecycle_dependencies["drain"],
+                    component_name=component_spec.name,
+                )
+                value = implementation.drain(**arguments)
+                if inspect.isawaitable(value):
+                    raise TypeError(
+                        f"Stateful node {component_spec.name!r} drain() returned an awaitable "
+                        "from a synchronous method; declare drain() with 'async def'"
+                    )
+                return _wrap_outputs(
+                    process_spec,
+                    value,
+                    {},
+                    self.context.name if self.context else "",
+                )
+
+            StatefulNode.flush = flush_sync  # type: ignore[assignment]
+
+    StatefulNode.__name__ = user_class.__name__
+    StatefulNode.__qualname__ = user_class.__qualname__
+    StatefulNode.__module__ = user_class.__module__
+    StatefulNode.__doc__ = user_class.__doc__
+    return StatefulNode
+
+
+def _decorate_class_node(
+    user_class: type[Any],
+    *,
+    name: str | None,
+    output: str | None,
+    decorator_locals: Mapping[str, Any],
+) -> type[Node]:
+    if issubclass(user_class, Node):
+        raise TypeError(
+            "@node class syntax is for plain Python classes; existing Node subclasses "
+            "already use the advanced SDK directly"
+        )
+    user_process = getattr(user_class, "process", None)
+    if user_process is None or not callable(user_process):
+        raise TypeError(f"@node class {user_class.__name__!r} must define process()")
+
+    namespace = _default_namespace(user_class.__module__)
+    local_name = name or _snake_case(user_class.__name__)
+    component_name = local_name if "." in local_name else f"{namespace}.{local_name}"
+    localns = {**dict(decorator_locals), user_class.__name__: user_class}
+
+    constructor_spec = _analyze_constructor(
+        user_class,
+        component_name=component_name,
+        localns=localns,
+    )
+    process_spec = _analyze_callable(
+        user_process,
+        component_name=component_name,
+        output_name=output,
+        localns=localns,
+    )
+    if process_spec.parameters:
+        names = ", ".join(item.name for item in process_spec.parameters)
+        raise TypeError(
+            f"Stateful node {component_name!r} process() contains configuration parameter(s): "
+            f"{names}. Move configuration to __init__(); use Input[T] for primitive ports."
+        )
+    if process_spec.inputs and (
+        inspect.isgeneratorfunction(user_process) or inspect.isasyncgenfunction(user_process)
+    ):
+        raise TypeError(
+            f"Stateful node {component_name!r} process() cannot be a generator when it has inputs"
+        )
+
+    lifecycle_dependencies = {
+        phase: _analyze_injected_method(
+            user_class.__dict__.get(phase),
+            component_name=component_name,
+            phase=phase,
+            localns=localns,
+        )
+        for phase in ("start", "drain", "stop", "health")
+    }
+    if inspect.iscoroutinefunction(user_class.__dict__.get("health")):
+        raise TypeError(f"Stateful node {component_name!r} health() must be synchronous")
+
+    dependencies = _merge_dependencies(
+        constructor_spec.dependencies,
+        process_spec.dependencies,
+        *lifecycle_dependencies.values(),
+    )
+    component_spec = ComponentSpec(
+        name=component_name,
+        inputs=process_spec.inputs,
+        outputs=process_spec.outputs,
+        parameters=constructor_spec.parameters,
+        dependencies=dependencies,
+        implementation=user_class,
+    )
+    return _build_class_node(
+        component_spec,
+        constructor_spec,
+        process_spec,
+        user_class,
+        lifecycle_dependencies,
+    )
+
+
 def node(
     target: Any = None,
     /,
@@ -432,11 +937,12 @@ def node(
     name: str | None = None,
     output: str | None = None,
 ) -> Any:
-    """Turn a typed Python function into a Nodrix Node class.
+    """Turn a typed Python function or stateful class into a Nodrix Node class.
 
-    This first simplified-SDK implementation intentionally supports functions.
-    Stateful class adapters are reserved for the next patch so the initial API
-    can be tested against real pipelines before lifecycle magic is expanded.
+    Functions remain the smallest SDK surface. Plain classes add persistent
+    state: ``__init__`` defines configuration/dependencies, ``process`` defines
+    ports, and optional ``start``/``drain``/``stop``/``health`` methods extend
+    the runtime lifecycle without requiring inheritance from :class:`Node`.
     """
 
     caller_frame = inspect.currentframe()
@@ -452,19 +958,26 @@ def node(
         name = target
         target = None
 
-    def decorate(function: Any) -> type[Node]:
-        if not inspect.isfunction(function):
-            raise TypeError("@node currently supports functions; subclass Node for stateful components")
-        namespace = _default_namespace(function.__module__)
-        local_name = name or function.__name__
-        component_name = local_name if "." in local_name else f"{namespace}.{local_name}"
-        spec = _analyze_callable(
-            function,
-            component_name=component_name,
-            output_name=output,
-            localns=decorator_locals,
-        )
-        return _build_function_node(spec, function)
+    def decorate(component: Any) -> type[Node]:
+        if inspect.isclass(component):
+            return _decorate_class_node(
+                component,
+                name=name,
+                output=output,
+                decorator_locals=decorator_locals,
+            )
+        if inspect.isfunction(component):
+            namespace = _default_namespace(component.__module__)
+            local_name = name or component.__name__
+            component_name = local_name if "." in local_name else f"{namespace}.{local_name}"
+            spec = _analyze_callable(
+                component,
+                component_name=component_name,
+                output_name=output,
+                localns=decorator_locals,
+            )
+            return _build_function_node(spec, component)
+        raise TypeError("@node can decorate typed functions or plain Python classes")
 
     return decorate if target is None else decorate(target)
 
