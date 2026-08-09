@@ -229,11 +229,13 @@ def _runtime_info_text(info: dict[str, Any]) -> str:
 
 
 
+
 def render_runtime_event(
     event: dict[str, Any],
     indexes: dict[str, int],
     total: int,
 ) -> Text:
+    _ = indexes
     kind = str(event.get("kind", "event"))
     text = Text()
 
@@ -242,11 +244,9 @@ def render_runtime_event(
 
     if kind == "node_ready":
         name = str(event.get("node", "?"))
-        index = indexes.get(name, 0)
         text.append("✓ ", style="green")
         text.append(f"{name:<14}", style="bold")
         text.append(" ready", style="green")
-        text.append(f"  {index}/{total}", style="dim")
         uses = str(event.get("uses", "") or "")
         if uses:
             text.append(f" · {uses}", style="dim")
@@ -263,6 +263,8 @@ def render_runtime_event(
         return text
 
     if kind == "pipeline_running":
+        text.append(f"✓ {total}/{total} ready", style="green")
+        text.append("\n")
         text.append("● RUNNING", style="bold green")
         text.append(" · Ctrl+C to stop", style="dim")
         return text
@@ -280,7 +282,6 @@ def render_runtime_event(
         return text
 
     if kind == "pipeline_stopped":
-        # The final run summary owns the terminal status.
         return text
 
     text.append(kind, style="dim")

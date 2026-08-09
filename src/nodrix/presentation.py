@@ -879,6 +879,20 @@ def render_health(data: dict[str, object]) -> Group:
     return Group(*sections)
 
 
+def _short_artifact_path(value: object) -> str:
+    text = str(value or "")
+    if not text:
+        return "-"
+    normalized = text.replace("\\", "/")
+    marker = "/.nodrix/"
+    if marker in normalized:
+        return ".nodrix/" + normalized.split(marker, 1)[1]
+    if normalized.endswith("/.nodrix"):
+        return ".nodrix"
+    return text
+
+
+
 def render_run_summary(report: Mapping[str, object]) -> Group:
     nodes = _nodes(report)
     status = str(report.get("status", "completed"))
@@ -898,10 +912,7 @@ def render_run_summary(report: Mapping[str, object]) -> Group:
     )
     if drop_count == 0:
         drop_count = sum(
-            int(
-                _mapping(raw.get("resources", {})).get("overflow_drops", 0)
-                or 0
-            )
+            int(_mapping(raw.get("resources", {})).get("overflow_drops", 0) or 0)
             for raw in nodes.values()
         )
 
@@ -919,9 +930,24 @@ def render_run_summary(report: Mapping[str, object]) -> Group:
     if run_dir:
         artifacts = Text()
         artifacts.append("Artifacts  ", style="dim")
-        artifacts.append(str(run_dir))
+        artifacts.append(_short_artifact_path(run_dir), style="cyan")
         sections.extend([Text(""), artifacts])
     return Group(*sections)
+
+
+def render_run_active_info(
+    artifacts_root: object,
+    *,
+    monitor_command: str | None = None,
+) -> Group:
+    lines = Text()
+    lines.append("Artifacts  ", style="dim")
+    lines.append(_short_artifact_path(artifacts_root), style="cyan")
+    if monitor_command:
+        lines.append("\n")
+        lines.append("Monitor    ", style="dim")
+        lines.append(monitor_command, style="cyan")
+    return Group(Text(""), lines)
 
 
 def _join_pairs(values: Mapping[str, Any]) -> str:

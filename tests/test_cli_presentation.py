@@ -7,12 +7,14 @@ from rich.console import Console
 from nodrix.presentation import (
     format_duration,
     render_health,
+    render_run_active_info,
     render_run_summary,
     render_status,
     render_system_plan,
     render_top_view,
 )
 from nodrix.workspace import create_workspace, default_view, set_active_context
+from nodrix.ux import render_runtime_event
 from nodrix.system import (
     ApplicationInstance,
     Artifact,
@@ -270,7 +272,7 @@ def test_run_summary_is_borderless_and_compact() -> None:
     report = _runtime_snapshot()
     report["status"] = "completed"
     report["duration_seconds"] = 0.048
-    report["run_dir"] = "/tmp/run-1"
+    report["run_dir"] = "/tmp/project/.nodrix/runs/run-1"
     for raw in report["nodes"].values():
         raw["messages"] = 5
         raw["errors"] = 0
@@ -278,6 +280,51 @@ def test_run_summary_is_borderless_and_compact() -> None:
     assert "COMPLETED" in output
     assert "48 ms" in output
     assert "5 messages · 0 errors · 0 drops" in output
-    assert "/tmp/run-1" in output
+    assert ".nodrix/runs/run-1" in output
+    assert "/tmp/project" not in output
     assert "Node State Health CPU" not in output
     assert not any(char in output for char in "┏┓┗┛┃╭╮╰╯")
+
+
+
+def test_runtime_ready_events_use_completion_summary() -> None:
+    indexes = {"source": 1, "writer": 4}
+    ready = _plain(
+        render_runtime_event(
+            {
+                "kind": "node_ready",
+                "node": "writer",
+                "uses": "sink.jsonl",
+            },
+            indexes,
+            4,
+        )
+    )
+    assert "writer" in ready
+    assert "ready" in ready
+    assert "4/4" not in ready
+    assert "1/4" not in ready
+
+    running = _plain(
+        render_runtime_event(
+            {"kind": "pipeline_running"},
+            indexes,
+            4,
+        )
+    )
+    assert "4/4 ready" in running
+    assert "RUNNING" in running
+
+
+def test_run_active_info_uses_short_workspace_artifact_path() -> None:
+    output = _plain(
+        render_run_active_info(
+            "/Users/demo/project/.nodrix/runs",
+            monitor_command="plyctl top",
+        )
+    )
+    assert "Artifacts" in output
+    assert ".nodrix/runs" in output
+    assert "/Users/demo/project" not in output
+    assert "Monitor" in output
+    assert "plyctl top" in output

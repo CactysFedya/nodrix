@@ -22,7 +22,7 @@ from .manifest_schema import write_manifest_schema
 from .metrics import MetricsServer
 from .migration import migrate_manifest
 from .project_templates import TEMPLATES, create_project
-from .presentation import render_run_summary
+from .presentation import render_run_active_info, render_run_summary
 from .runs import resolve_run
 from .ux import (
     render_node_details,
@@ -391,10 +391,21 @@ def run(
             for index, name in enumerate(details.manifest.nodes, start=1)
         }
 
+
         def runtime_event(event: dict[str, object]) -> None:
-            console.print(
-                render_runtime_event(event, indexes, len(indexes))
-            )
+            rendered = render_runtime_event(event, indexes, len(indexes))
+            if rendered.plain:
+                console.print(rendered)
+            if (
+                not json_output
+                and str(event.get("kind", "")) == "pipeline_running"
+            ):
+                console.print(
+                    render_run_active_info(
+                        effective_run_root,
+                        monitor_command="plyctl top",
+                    )
+                )
 
         if production:
             runtime = _runtime(
@@ -457,21 +468,7 @@ def run(
                 event_callback=runtime_event,
                 production=production,
             )
-        if not json_output:
-            artifacts_root = Path(
-                getattr(runtime, "run_root", effective_run_root)
-            ).resolve()
-            console.print(f"Artifacts root: [bold]{artifacts_root}[/bold]")
-            if (
-                artifacts_root.name == "runs"
-                and artifacts_root.parent.name == ".nodrix"
-            ):
-                monitor_project = artifacts_root.parent.parent
-                console.print(
-                    "Monitor: [bold]"
-                    f"plyctl top --project {monitor_project}"
-                    "[/bold]"
-                )
+
         metrics_target = metrics_listen or details.manifest.runtime.metrics.listen
         if metrics_target:
             if not hasattr(runtime, "snapshot"):
