@@ -44,7 +44,9 @@ jobs:
             src/nodrix/cli_system_commands.py \
             src/nodrix/cli_system_run_orchestration.py \
             src/nodrix/system/__init__.py \
+            src/nodrix/system/local_backend.py \
             src/nodrix/system/orchestration.py \
+            tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
             tests/test_system_run_cli.py \
             tests/test_system_planning.py
@@ -52,6 +54,7 @@ jobs:
       - name: Run orchestration contract tests
         run: |
           pytest -q \
+            tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
             tests/test_system_run_cli.py \
             tests/test_system_planning.py
