@@ -13,6 +13,7 @@ from . import cli_dev_commands  # noqa: F401  # command registration
 from . import cli_foundation_commands  # noqa: F401  # command registration
 from . import cli_workspace_commands  # noqa: F401  # command registration
 from . import cli_system_commands  # noqa: F401  # command registration
+from . import cli_system_run_orchestration  # noqa: F401  # 2.8 run override
 
 
 def main() -> None:
