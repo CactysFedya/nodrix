@@ -305,6 +305,42 @@ def _render_build_explain(result: WorkflowPlanResult, step_id: str) -> None:
         console.print(f"  {item}")
 
 
+def _require_build_configuration(*, json_output: bool) -> None:
+    """Fail with an actionable message when this project has no build definition."""
+
+    try:
+        workflows = list_workflows()
+    except Exception as exc:
+        console.print(f"[red]Build configuration check failed:[/red] {exc}")
+        raise typer.Exit(1)
+    if "build" in workflows:
+        return
+
+    message = (
+        "Build is not configured for this project. "
+        "Add a 'build:' section to nodrix.yaml or register workflows.build."
+    )
+    if json_output:
+        console.print_json(
+            json.dumps(
+                {
+                    "status": "not_configured",
+                    "workflow": "build",
+                    "message": message,
+                },
+                ensure_ascii=False,
+            )
+        )
+    else:
+        console.print("[yellow]Build is not configured for this project.[/yellow]")
+        console.print(
+            "Add a [bold]build:[/bold] section to nodrix.yaml "
+            "or register [bold]workflows.build[/bold]."
+        )
+        console.print("Available recipes: [bold]plyctl project recipes[/bold]")
+    raise typer.Exit(1)
+
+
 @app.command("build")
 def build_command(
     environment: Annotated[
@@ -327,6 +363,8 @@ def build_command(
     ] = None,
 ) -> None:
     """Run or inspect the project's build workflow."""
+
+    _require_build_configuration(json_output=json_output)
 
     if plan_only or explain is not None:
         if dry_run:
