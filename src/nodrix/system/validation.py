@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping
+from types import UnionType
+from typing import Any, Iterable, Mapping, Union, get_args, get_origin
 
-from ..sdk.definitions import NodeDefinition, ParameterDefinition, ResourceDefinition
+from ..sdk.definitions import (
+    DependencyDefinition,
+    NodeDefinition,
+    ParameterDefinition,
+    ResourceDefinition,
+)
 from .catalog import DefinitionCatalog
 from .graph import Graph, split_local_endpoint, split_system_endpoint
 from .instances import NodeInstance, ResourceInstance
@@ -90,12 +96,90 @@ def _validate_parameters(
             )
 
 
-def _node_resource_slots(definition: NodeDefinition) -> set[str]:
+def _node_resource_dependencies(
+    definition: NodeDefinition,
+) -> dict[str, DependencyDefinition]:
     return {
-        item.name
+        item.name: item
         for item in definition.dependencies
         if item.kind == "resource"
     }
+
+
+def _type_name(annotation: Any) -> str:
+    if annotation is Any:
+        return "Any"
+    name = getattr(annotation, "__qualname__", None) or getattr(annotation, "__name__", None)
+    if name:
+        module = getattr(annotation, "__module__", "")
+        return f"{module}.{name}" if module not in {"", "builtins"} else str(name)
+    return str(annotation)
+
+
+def _resource_type_compatible(required: Any, provided: Any) -> bool:
+    """Return whether a resource exposing ``provided`` can satisfy ``required``."""
+
+    if required in (Any, object) or provided is Any:
+        return True
+    if required == provided:
+        return True
+
+    required_origin = get_origin(required)
+    provided_origin = get_origin(provided)
+
+    if required_origin in (Union, UnionType):
+        return any(
+            _resource_type_compatible(option, provided)
+            for option in get_args(required)
+            if option is not type(None)
+        )
+
+    required_runtime = required_origin or required
+    provided_runtime = provided_origin or provided
+
+    try:
+        if isinstance(required_runtime, type) and isinstance(provided_runtime, type):
+            return issubclass(provided_runtime, required_runtime)
+    except TypeError:
+        pass
+
+    return required_runtime == provided_runtime
+
+
+def _message_contract_version(type_id: str) -> tuple[str, int] | None:
+    stem, marker, version = type_id.rpartition("/v")
+    if not marker or not stem:
+        return None
+    try:
+        return stem, int(version)
+    except ValueError:
+        return None
+
+
+def _message_contracts_compatible(
+    source_type: str,
+    target_type: str,
+    *,
+    catalog: DefinitionCatalog | None,
+) -> bool:
+    if source_type == target_type:
+        return True
+    if catalog is None:
+        return False
+
+    source_version = _message_contract_version(source_type)
+    target_version = _message_contract_version(target_type)
+    if source_version is None or target_version is None:
+        return False
+    source_stem, source_number = source_version
+    target_stem, _ = target_version
+    if source_stem != target_stem:
+        return False
+
+    target_definition = catalog.messages.get(target_type)
+    if target_definition is None:
+        return False
+    return source_number in target_definition.compatible_versions
 
 
 def _validate_node_definition(
@@ -103,7 +187,8 @@ def _validate_node_definition(
     node: NodeInstance,
     path: str,
     definition: NodeDefinition,
-    known_resources: set[str],
+    resources: Mapping[str, ResourceInstance],
+    catalog: DefinitionCatalog,
     diagnostics: list[SystemDiagnostic],
 ) -> None:
     _validate_parameters(
@@ -113,7 +198,8 @@ def _validate_node_definition(
         diagnostics=diagnostics,
     )
 
-    slots = _node_resource_slots(definition)
+    dependencies = _node_resource_dependencies(definition)
+    slots = set(dependencies)
     unknown_slots = sorted(set(node.resources) - slots)
     for slot in unknown_slots:
         diagnostics.append(
@@ -136,13 +222,50 @@ def _validate_node_definition(
         )
 
     for slot, resource_name in node.resources.items():
-        if resource_name not in known_resources:
+        resource_instance = resources.get(resource_name)
+        if resource_instance is None:
             diagnostics.append(
                 SystemDiagnostic(
                     "error",
                     "SYS125",
                     f"{path}.resources.{slot}",
                     f"unknown ResourceInstance {resource_name!r}",
+                )
+            )
+            continue
+
+        dependency = dependencies.get(slot)
+        if dependency is None:
+            continue
+
+        resource_definition = catalog.resources.get(resource_instance.uses)
+        if resource_definition is None:
+            # SYS101 is reported at the ResourceInstance itself.
+            continue
+
+        provided_type = resource_definition.provided_type
+        if provided_type is None:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "warning",
+                    "SYS126",
+                    f"{path}.resources.{slot}",
+                    f"ResourceDefinition {resource_instance.uses!r} does not declare "
+                    "its provided Python type; use a return annotation or "
+                    "@resource(provides=...) to enable type validation",
+                )
+            )
+            continue
+
+        if not _resource_type_compatible(dependency.annotation, provided_type):
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS127",
+                    f"{path}.resources.{slot}",
+                    "resource type mismatch: "
+                    f"node requires {_type_name(dependency.annotation)}, "
+                    f"{resource_instance.uses!r} provides {_type_name(provided_type)}",
                 )
             )
 
@@ -199,6 +322,7 @@ def validate_system(
 
     target_names = {item.name for item in system.targets}
     resource_names = {item.name for item in system.resources}
+    resource_map = {item.name: item for item in system.resources}
     application_names = {item.name for item in system.applications}
     graph_names = {item.name for item in system.graphs}
 
@@ -305,7 +429,8 @@ def validate_system(
                         node=node,
                         path=path,
                         definition=definition,
-                        known_resources=resource_names,
+                        resources=resource_map,
+                        catalog=catalog,
                         diagnostics=diagnostics,
                     )
 
@@ -373,7 +498,11 @@ def validate_system(
                     )
                     continue
 
-                if source_contract.type_id != target_contract.type_id:
+                if not _message_contracts_compatible(
+                    source_contract.type_id,
+                    target_contract.type_id,
+                    catalog=catalog,
+                ):
                     diagnostics.append(
                         SystemDiagnostic(
                             "error",
@@ -396,8 +525,14 @@ def validate_system(
                         )
                     )
 
-    def resolve_system_endpoint(path: str, value: str) -> None:
-        graph_name, instance_name, _ = split_system_endpoint(value)
+    def resolve_system_endpoint(
+        path: str,
+        value: str,
+        *,
+        direction: str,
+        missing_port_code: str,
+    ) -> tuple[str, str | None]:
+        graph_name, instance_name, port_name = split_system_endpoint(value)
         if graph_name is None:
             if instance_name not in application_names:
                 diagnostics.append(
@@ -408,7 +543,8 @@ def validate_system(
                         f"unknown ApplicationInstance {instance_name!r}",
                     )
                 )
-            return
+                return "invalid", None
+            return "application", None
 
         if graph_name not in graph_names:
             diagnostics.append(
@@ -419,8 +555,10 @@ def validate_system(
                     f"unknown Graph {graph_name!r}",
                 )
             )
-            return
-        if instance_name not in graph_node_maps.get(graph_name, {}):
+            return "invalid", None
+
+        node = graph_node_maps.get(graph_name, {}).get(instance_name)
+        if node is None:
             diagnostics.append(
                 SystemDiagnostic(
                     "error",
@@ -429,14 +567,131 @@ def validate_system(
                     f"unknown NodeInstance {instance_name!r} in Graph {graph_name!r}",
                 )
             )
+            return "invalid", None
+
+        if catalog is None:
+            return "graph", None
+
+        definition = catalog.nodes.get(node.uses)
+        if definition is None:
+            # SYS102 is reported at the NodeInstance itself.
+            return "graph", None
+
+        is_source = direction == "source"
+        port = _definition_port(
+            definition,
+            port_name,
+            output=is_source,
+        )
+        if port is None:
+            expected = "output" if is_source else "input"
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    missing_port_code,
+                    path,
+                    f"NodeDefinition {node.uses!r} has no {expected} port {port_name!r}",
+                )
+            )
+            return "graph", None
+
+        return "graph", port.type_id
 
     for index, link in enumerate(system.links):
-        resolve_system_endpoint(f"links[{index}].from", link.source)
-        resolve_system_endpoint(f"links[{index}].to", link.target)
+        path = f"links[{index}]"
+        source_kind, source_type = resolve_system_endpoint(
+            f"{path}.from",
+            link.source,
+            direction="source",
+            missing_port_code="SYS141",
+        )
+        target_kind, target_type = resolve_system_endpoint(
+            f"{path}.to",
+            link.target,
+            direction="target",
+            missing_port_code="SYS142",
+        )
+
+        if (
+            source_type is not None
+            and target_type is not None
+            and not _message_contracts_compatible(
+                source_type,
+                target_type,
+                catalog=catalog,
+            )
+        ):
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS143",
+                    path,
+                    "system link message contract mismatch: "
+                    f"{source_type!r} -> {target_type!r}",
+                )
+            )
+
+        if link.type_id is not None:
+            if source_type is not None and source_type != link.type_id:
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS144",
+                        f"{path}.type_id",
+                        "explicit SystemLink type does not match the source output: "
+                        f"{link.type_id!r} != {source_type!r}",
+                    )
+                )
+            if (
+                target_type is not None
+                and not _message_contracts_compatible(
+                    link.type_id,
+                    target_type,
+                    catalog=catalog,
+                )
+            ):
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS146",
+                        f"{path}.type_id",
+                        "explicit SystemLink type is not accepted by the target input: "
+                        f"{link.type_id!r} -> {target_type!r}",
+                    )
+                )
+        elif "application" in {source_kind, target_kind}:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "warning",
+                    "SYS145",
+                    path,
+                    "application boundary has no explicit type_id; graph-side ports "
+                    "are validated, but the application contract cannot be checked "
+                    "until application definitions become first-class",
+                )
+            )
 
     for index, artifact in enumerate(system.artifacts):
-        if artifact.producer is not None:
-            resolve_system_endpoint(f"artifacts[{index}].producer", artifact.producer)
+        if artifact.producer is None:
+            continue
+
+        path = f"artifacts[{index}].producer"
+        producer_kind, _ = resolve_system_endpoint(
+            path,
+            artifact.producer,
+            direction="source",
+            missing_port_code="SYS161",
+        )
+        if producer_kind == "application":
+            diagnostics.append(
+                SystemDiagnostic(
+                    "warning",
+                    "SYS162",
+                    path,
+                    "artifact is produced by an ApplicationInstance whose output "
+                    "contract is not yet represented by a first-class definition",
+                )
+            )
 
     return SystemValidationReport(tuple(diagnostics))
 

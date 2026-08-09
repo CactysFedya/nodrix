@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Generator, Iterator, Mapping
 from types import UnionType
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
@@ -388,7 +388,68 @@ def analyze_class_node(
     )
 
 
-def analyze_resource_factory(factory: Any, *, component_name: str) -> ResourceDefinition:
+
+_RESOURCE_LIFECYCLE_ORIGINS = frozenset(
+    {
+        Iterator,
+        Generator,
+        AsyncIterator,
+        AsyncGenerator,
+    }
+)
+
+
+def infer_resource_provided_type(
+    factory: Any,
+    *,
+    explicit: Any | None = None,
+) -> Any | None:
+    """Infer the value exposed by a simplified resource.
+
+    Normal/async factories expose their return annotation directly. Generator
+    resources expose the yielded type from Iterator[T]/Generator[T, ...] (and
+    their async equivalents). ``@resource(provides=T)`` remains available for
+    unannotated factories or cases where the factory's lifecycle annotation
+    cannot express the runtime resource type precisely.
+    """
+
+    signature = inspect.signature(factory)
+    hints = get_type_hints(factory, include_extras=True)
+    annotation = hints.get("return", signature.return_annotation)
+
+    inferred: Any | None = None
+    if annotation not in (inspect.Signature.empty, None, type(None)):
+        origin = get_origin(annotation)
+        if origin in _RESOURCE_LIFECYCLE_ORIGINS:
+            args = get_args(annotation)
+            inferred = args[0] if args else None
+        else:
+            inferred = annotation
+
+    if explicit is not None and inferred is not None and explicit != inferred:
+        try:
+            compatible = (
+                inspect.isclass(explicit)
+                and inspect.isclass(inferred)
+                and issubclass(explicit, inferred)
+            )
+        except TypeError:
+            compatible = False
+        if not compatible:
+            raise TypeError(
+                f"@resource provides={explicit!r} disagrees with return annotation "
+                f"{annotation!r} on {factory.__qualname__}"
+            )
+
+    return explicit if explicit is not None else inferred
+
+
+def analyze_resource_factory(
+    factory: Any,
+    *,
+    component_name: str,
+    provided_type: Any | None = None,
+) -> ResourceDefinition:
     signature = inspect.signature(factory)
     hints = get_type_hints(factory, include_extras=True)
     parameters: list[ParameterDefinition] = []
@@ -412,6 +473,10 @@ def analyze_resource_factory(factory: Any, *, component_name: str) -> ResourceDe
         name=component_name,
         parameters=tuple(parameters),
         implementation=factory,
+        provided_type=infer_resource_provided_type(
+            factory,
+            explicit=provided_type,
+        ),
     )
 
 
@@ -423,6 +488,7 @@ __all__ = [
     "analyze_function_node",
     "analyze_injected_method",
     "analyze_resource_factory",
+    "infer_resource_provided_type",
     "merge_dependencies",
     "message_type_for",
     "resolve_output",

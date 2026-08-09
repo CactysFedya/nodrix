@@ -70,6 +70,7 @@ class ResourceDefinition:
     parameters: tuple[ParameterDefinition, ...]
     implementation: Any
     dependencies: tuple[DependencyDefinition, ...] = ()
+    provided_type: Any | None = None
 
 
 @dataclass(frozen=True, slots=True)

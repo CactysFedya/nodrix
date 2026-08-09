@@ -151,6 +151,7 @@ def resource(
     /,
     *,
     name: str | None = None,
+    provides: Any | None = None,
 ) -> Any:
     """Turn a factory or generator function into a pipeline-scoped resource."""
 
@@ -166,7 +167,11 @@ def resource(
         namespace = default_namespace(factory.__module__)
         local_name = name or factory.__name__
         component_name = local_name if "." in local_name else f"{namespace}.{local_name}"
-        definition = analyze_resource_factory(factory, component_name=component_name)
+        definition = analyze_resource_factory(
+            factory,
+            component_name=component_name,
+            provided_type=provides,
+        )
         return build_resource(definition)
 
     return decorate if target is None else decorate(target)
