@@ -5,6 +5,12 @@ from .compatibility import (
     CompatibilityResult,
     CompatibilityWarning,
     pipeline_manifest_to_system,
+    CompatibilityDisposition,
+    CompatibilityEntry,
+    CompatibilityError,
+    CompatibilityReport,
+    compatibility_report_from_system,
+    restore_pipeline_manifest,
 )
 from .graph import (
     Connection,
@@ -46,6 +52,12 @@ from .validation import (
 __all__ = [
     "ApplicationInstance",
     "Artifact",
+    "CompatibilityDisposition",
+    "CompatibilityEntry",
+    "CompatibilityError",
+    "CompatibilityReport",
+    "compatibility_report_from_system",
+    "restore_pipeline_manifest",
     "CompatibilityResult",
     "CompatibilityWarning",
     "Connection",

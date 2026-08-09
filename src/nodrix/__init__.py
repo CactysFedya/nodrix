@@ -61,6 +61,11 @@ from .system import (
     loads_system,
     system_json_schema,
     system_to_canonical,
+    CompatibilityEntry,
+    CompatibilityError,
+    CompatibilityReport,
+    compatibility_report_from_system,
+    restore_pipeline_manifest,
 )
 from .package_sdk import (
     CompiledPackage,
@@ -136,6 +141,11 @@ __all__ = [
     "loads_system",
     "system_json_schema",
     "system_to_canonical",
+    "CompatibilityEntry",
+    "CompatibilityError",
+    "CompatibilityReport",
+    "compatibility_report_from_system",
+    "restore_pipeline_manifest",
     "PackageDefinition",
     "CompiledPackage",
     "MessageContract",
