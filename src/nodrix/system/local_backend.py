@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
+import re
 import threading
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
@@ -199,6 +200,13 @@ def _session_resource_names(context: BackendContext) -> frozenset[str]:
             names.add(bound)
 
     return frozenset(names)
+
+
+def _scope_file_token(value: str) -> str:
+    """Return a portable file token for an orchestration scope label."""
+
+    token = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-._")
+    return token or "scope"
 
 
 def lower_local_context(context: BackendContext) -> LocalLoweringResult:
@@ -391,6 +399,7 @@ class LocalBackend(ExecutionBackend):
         run_root: str | Path | None = None,
         stop_timeout_seconds: float = 10.0,
         runtime_factory: Callable[[PipelineManifest, Path, Path | None], Any] | None = None,
+        scope_name: str | None = None,
     ) -> None:
         super().__init__(
             "local",
@@ -430,6 +439,11 @@ class LocalBackend(ExecutionBackend):
             raise ValueError("stop_timeout_seconds cannot be negative")
         self.stop_timeout_seconds = float(stop_timeout_seconds)
         self.runtime_factory = runtime_factory or _default_runtime_factory
+        self.scope_name = (
+            _scope_file_token(scope_name)
+            if scope_name is not None
+            else None
+        )
 
     def _validate(self, context: BackendContext):
         diagnostics: list[BackendDiagnostic] = []
@@ -483,8 +497,10 @@ class LocalBackend(ExecutionBackend):
 
         generated_dir = project_root / ".nodrix" / "system-generated"
         generated_dir.mkdir(parents=True, exist_ok=True)
+        scope_suffix = f"-{self.scope_name}" if self.scope_name else ""
         manifest_path = generated_dir / (
-            f"{context.plan.system}-{context.plan.system_sha256[:12]}-local.yaml"
+            f"{context.plan.system}-{context.plan.system_sha256[:12]}"
+            f"{scope_suffix}-local.yaml"
         )
         dump_manifest(lowering.manifest, manifest_path)
 
