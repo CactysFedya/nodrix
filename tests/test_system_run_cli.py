@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 
-from click import unstyle
 from typer.testing import CliRunner
 
 import nodrix.cli_system_commands as system_cli
@@ -25,6 +25,11 @@ from nodrix.system import (
 
 
 runner = CliRunner()
+_ANSI_ESCAPE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
+
+
+def _plain(output: str) -> str:
+    return _ANSI_ESCAPE.sub("", output)
 
 
 class FakeLocalBackend(ExecutionBackend):
@@ -131,13 +136,13 @@ def _write_local_system(path: Path, *, name: str = "run-test") -> None:
 def test_system_help_lists_run_command() -> None:
     result = runner.invoke(app, ["system", "--help"])
     assert result.exit_code == 0, result.output
-    assert "run" in unstyle(result.output)
+    assert "run" in _plain(result.output)
 
 
 def test_system_run_help_exposes_execution_options() -> None:
     result = runner.invoke(app, ["system", "run", "--help"])
     assert result.exit_code == 0, result.output
-    output = unstyle(result.output)
+    output = _plain(result.output)
     assert "--project" in output
     assert "--run-root" in output
     assert "--stop-timeout" in output
