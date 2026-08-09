@@ -38,6 +38,20 @@ from .manifest import (
 from .shared_memory import SharedBufferDescriptor, SharedBufferPool
 from .node import Node, NodeContext, SinkNode, SourceNode
 from .simplified_sdk import Context, Input, Outputs, Param, Resource, message, node, resource
+from .system import (
+    ApplicationInstance,
+    Artifact,
+    Connection,
+    DefinitionCatalog,
+    Graph,
+    NodeInstance,
+    ResourceInstance,
+    SystemLink,
+    SystemModel,
+    Target,
+    pipeline_manifest_to_system,
+    validate_system,
+)
 from .package_sdk import (
     CompiledPackage,
     MessageContract,
@@ -90,6 +104,18 @@ __all__ = [
     "Resource",
     "Outputs",
     "Context",
+    "SystemModel",
+    "Graph",
+    "NodeInstance",
+    "ResourceInstance",
+    "ApplicationInstance",
+    "Target",
+    "Artifact",
+    "Connection",
+    "SystemLink",
+    "DefinitionCatalog",
+    "validate_system",
+    "pipeline_manifest_to_system",
     "PackageDefinition",
     "CompiledPackage",
     "MessageContract",
