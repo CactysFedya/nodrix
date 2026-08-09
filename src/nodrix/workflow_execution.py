@@ -217,6 +217,7 @@ def project_environment(
     root: str | Path | None = None,
     *,
     environment_name: str | None = None,
+    source_shell: bool = True,
 ) -> tuple[dict[str, str], dict[str, Any], str | None]:
     project_root = _project_root(root)
     config = _load_yaml(project_root / PROJECT_FILE)
@@ -288,7 +289,12 @@ def project_environment(
         context_name = str(raw_context) if raw_context else None
     if context_name:
         base["NODRIX_CONTEXT"] = context_name
-    return _source_environment(project_root, base, sources), environment, selected_name
+    resolved = (
+        _source_environment(project_root, base, sources)
+        if source_shell
+        else base
+    )
+    return resolved, environment, selected_name
 
 
 def _normalized_machine(value: str) -> str:

@@ -461,9 +461,10 @@ def system_run(
                 f"{item.path or '-'} · {item.message}"
             )
 
+    execution_root = find_workspace(resolved_path.parent) or resolved_path.parent
     backend = LocalBackend(
         project=effective_project,
-        working_directory=resolved_path.parent,
+        working_directory=execution_root,
         run_root=run_root,
         stop_timeout_seconds=stop_timeout,
     )

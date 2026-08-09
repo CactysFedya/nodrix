@@ -51,3 +51,8 @@ Makefile.native
 !.env.example
 .pypirc
 .patch-backups/
+
+# Raspberry Pi 5 reference-system acquired/build artifacts
+/sources/
+/workspaces/
+/artifacts/

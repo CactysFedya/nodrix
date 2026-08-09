@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
+import platform
 from typing import Any
 
 from .workflow_execution import (
@@ -82,6 +83,46 @@ def _string_list(value: Any, field: str) -> tuple[str, ...]:
     return tuple(str(item) for item in value)
 
 
+def _normalized_machine(value: str) -> str:
+    normalized = value.strip().lower()
+    return {
+        "arm64": "aarch64",
+        "amd64": "x86_64",
+    }.get(normalized, normalized)
+
+
+def _platform_condition_matches(condition: Any) -> bool:
+    # Return False only when a step is impossible on this host.
+    # Command/file/environment conditions are intentionally not checked here.
+    if condition in (None, {}, True):
+        return True
+    if condition is False:
+        return False
+    if not isinstance(condition, dict):
+        return True
+
+    expected_system = condition.get("system")
+    if (
+        expected_system
+        and platform.system().lower() != str(expected_system).lower()
+    ):
+        return False
+
+    expected_arch = condition.get("architecture")
+    if expected_arch:
+        values = (
+            [expected_arch]
+            if isinstance(expected_arch, str)
+            else list(expected_arch)
+        )
+        accepted = {_normalized_machine(str(value)) for value in values}
+        actual = _normalized_machine(platform.machine())
+        if actual not in accepted:
+            return False
+
+    return True
+
+
 def _cache_state(path: Path) -> dict[str, Any] | None:
     if not path.is_file():
         return None
@@ -114,9 +155,16 @@ def plan_workflow(
     """Resolve execution/cache decisions without running any workflow command."""
 
     workflow, workflow_path, project_root = load_workflow(name, root=root)
+    raw_steps = list(workflow.get("steps") or [])
+    source_shell = any(
+        not isinstance(step, dict)
+        or _platform_condition_matches(step.get("when"))
+        for step in raw_steps
+    )
     env, _, selected_environment = project_environment(
         project_root,
         environment_name=environment_name,
+        source_shell=source_shell,
     )
     workflow_env = dict(workflow.get("environment") or {})
     env.update({str(key): str(value) for key, value in workflow_env.items()})

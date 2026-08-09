@@ -167,6 +167,40 @@ def _legacy_mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
 
+def _session_resource_names(context: BackendContext) -> frozenset[str]:
+    """Infer resources that must lower to the legacy runtime session namespace.
+
+    The public System model intentionally exposes one ResourceInstance concept.
+    The existing 2.x runtime still has a separate ``sessions`` namespace.
+    Preserve converted legacy roles, and infer the compatibility namespace from
+    explicit consumer binding slots named ``session`` for newly-authored Systems.
+    """
+
+    declared = {item.name for item in context.resources}
+    names = {
+        item.name
+        for item in context.resources
+        if item.extensions.get("legacy_role") == "session"
+    }
+
+    for resource in context.resources:
+        bound = resource.bindings.get("session")
+        if bound in declared:
+            names.add(bound)
+
+    for application in context.applications:
+        bound = application.resources.get("session")
+        if bound in declared:
+            names.add(bound)
+
+    for node in context.nodes:
+        bound = node.resources.get("session")
+        if bound in declared:
+            names.add(bound)
+
+    return frozenset(names)
+
+
 def lower_local_context(context: BackendContext) -> LocalLoweringResult:
     """Lower one local BackendContext to the existing 2.x PipelineManifest.
 
@@ -199,13 +233,13 @@ def lower_local_context(context: BackendContext) -> LocalLoweringResult:
             )
 
     aliases = _node_aliases(context)
+    session_names = _session_resource_names(context)
 
     sessions: dict[str, Any] = {}
     resources: dict[str, Any] = {}
     for resource in context.resources:
         legacy = _legacy_mapping(resource.extensions.get("legacy"))
-        legacy_role = resource.extensions.get("legacy_role")
-        if legacy_role == "session":
+        if resource.name in session_names:
             sessions[resource.name] = {
                 "uses": resource.uses,
                 "parameters": dict(resource.parameters),
@@ -414,13 +448,9 @@ class LocalBackend(ExecutionBackend):
                 )
             )
 
-        session_names = {
-            item.name
-            for item in context.resources
-            if item.extensions.get("legacy_role") == "session"
-        }
+        session_names = _session_resource_names(context)
         for resource in context.resources:
-            if resource.extensions.get("legacy_role") == "session":
+            if resource.name in session_names:
                 continue
             unsupported = sorted(
                 set(resource.bindings.values()) - session_names

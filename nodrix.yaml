@@ -3,6 +3,7 @@ name: nodrix-development
 
 defaults:
   pipeline: fastlio2
+  system: rpi5-mapping
   context: robot
   view: compact
 
@@ -10,9 +11,20 @@ pipelines:
   fastlio2: integrations/nodrix-fast-lio2/pipelines/fastlio2.yaml
   fastlio2-rviz: integrations/nodrix-fast-lio2/pipelines/fastlio2-rviz.yaml
 
+systems:
+  rpi5-mapping: systems/rpi5-mapping.yaml
+
+workflows:
+  prepare: workflows/prepare.yaml
+  test: workflows/test.yaml
+
 contexts:
   robot:
     environment: ros2
+    profile: mid360s
+    view: operations
+  rpi5-mapping:
+    environment: rpi5-jazzy
     profile: mid360s
     view: operations
   local:
@@ -22,8 +34,84 @@ contexts:
 
 environments:
   ros2: environments/ros2.yaml
+  rpi5-jazzy: environments/rpi5-jazzy.yaml
   local: environments/local.yaml
 
 profiles:
   mid360s: profiles/mid360s.yaml
   default: profiles/default.yaml
+
+build:
+  nodrix-core:
+    uses: python.editable
+    source: .
+    args: [--no-deps]
+    when: {system: Linux, architecture: aarch64}
+
+  nodrix-ros2:
+    uses: python.editable
+    source: packages/nodrix-ros2
+    depends_on: [nodrix-core]
+    args: [--no-deps]
+    when: {system: Linux, architecture: aarch64}
+
+  nodrix-spatial:
+    uses: python.editable
+    source: packages/nodrix-spatial
+    depends_on: [nodrix-core]
+    args: [--no-deps]
+    when: {system: Linux, architecture: aarch64}
+
+  nodrix-spatial-ros2:
+    uses: python.editable
+    source: packages/nodrix-spatial-ros2
+    depends_on: [nodrix-ros2, nodrix-spatial]
+    args: [--no-deps]
+    when: {system: Linux, architecture: aarch64}
+
+  nodrix-mapping:
+    uses: python.editable
+    source: packages/nodrix-mapping
+    depends_on: [nodrix-spatial]
+    args: [--no-deps]
+    environment:
+      NODRIX_MAPPING_NATIVE_ARCH_NATIVE: "1"
+      NODRIX_MAPPING_NATIVE_LTO: "1"
+    when: {system: Linux, architecture: aarch64}
+
+  livox-sdk2:
+    uses: cmake.release
+    source: sources/Livox-SDK2
+    install: true
+    install_prefix: .nodrix/prefix/livox-sdk2
+    parallel: 4
+    cache: auto
+    when: {system: Linux, architecture: aarch64}
+
+  livox-driver:
+    uses: ros2.colcon
+    workspace: workspaces/livox_ws
+    packages: [livox_ros_driver2]
+    depends_on: [livox-sdk2]
+    setup:
+      - /opt/ros/jazzy/setup.bash
+    cmake_args:
+      - -DROS_EDITION=ROS2
+      - -DDISTRO_ROS=jazzy
+    environment:
+      CMAKE_BUILD_PARALLEL_LEVEL: "4"
+    cache: auto
+    when: {system: Linux, architecture: aarch64}
+
+  fast-lio2:
+    uses: ros2.colcon
+    workspace: workspaces/fast_lio2_ws
+    packages: [fast_lio]
+    depends_on: [livox-driver]
+    setup:
+      - /opt/ros/jazzy/setup.bash
+      - workspaces/livox_ws/install/setup.bash
+    environment:
+      CMAKE_BUILD_PARALLEL_LEVEL: "4"
+    cache: auto
+    when: {system: Linux, architecture: aarch64}

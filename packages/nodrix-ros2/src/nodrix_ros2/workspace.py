@@ -38,6 +38,19 @@ def _expand_path(
     return path.resolve()
 
 
+def _expand_environment_value(
+    value: object,
+    *,
+    base_dir: Path | None = None,
+) -> str:
+    text = os.path.expanduser(str(value))
+    if base_dir is not None:
+        root = str(base_dir.expanduser().resolve())
+        text = text.replace("${PROJECT_ROOT}", root)
+        text = text.replace("${NODRIX_PROJECT_ROOT}", root)
+    return os.path.expandvars(text)
+
+
 _SAFE_ENVIRONMENT_NAMES = {
     "HOME", "USER", "LOGNAME", "PATH", "SHELL", "LANG", "LANGUAGE",
     "TMPDIR", "TEMP", "TMP", "TERM", "DISPLAY", "XAUTHORITY",
@@ -226,7 +239,10 @@ class RosWorkspaceSpec:
                 else _expand_path(path_value, base_dir=base_dir)
             ),
             build=RosBuildSpec.from_mapping(data.get("build")),
-            environment={str(k): str(v) for k, v in dict(data.get("environment") or {}).items()},
+            environment={
+                str(k): _expand_environment_value(v, base_dir=base_dir)
+                for k, v in dict(data.get("environment") or {}).items()
+            },
             inherit_environment=bool(data.get("inherit_environment", False)),
             pass_environment=tuple(
                 str(item) for item in data.get("pass_environment", ())
