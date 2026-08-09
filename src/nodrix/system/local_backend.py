@@ -83,15 +83,19 @@ def _default_runtime_factory(
 
 
 def _compile_local_project(path: Path):
-    from ..local_dev import compile_local_project
+    from ..local_dev import compile_local_project, reset_local_development_modules
 
+    # The reserved ``local`` namespace intentionally represents one active
+    # development project. Drop stale implicit-project modules before compiling
+    # another project in the same Python process.
+    reset_local_development_modules()
     return compile_local_project(path)
 
 
-def __activate_local_project(project):
+def _activate_local_project(project):
     from ..local_dev import activate_local_project
 
-    return _activate_local_project(project)
+    return activate_local_project(project)
 
 
 def _legacy_snapshot(plan) -> PipelineManifest | None:
