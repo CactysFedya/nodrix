@@ -8,6 +8,7 @@ on:
       - "src/nodrix/cli_system*.py"
       - "src/nodrix/system/**"
       - "tests/test_system_*.py"
+      - "tests/test_v270_rpi5_mapping_m4.py"
   workflow_dispatch:
 
 permissions:
@@ -50,7 +51,8 @@ jobs:
             tests/test_system_orchestration.py \
             tests/test_system_run_cli.py \
             tests/test_system_run_multi_local_integration.py \
-            tests/test_system_planning.py
+            tests/test_system_planning.py \
+            tests/test_v270_rpi5_mapping_m4.py
 
       - name: Run orchestration contract tests
         run: |
@@ -59,4 +61,5 @@ jobs:
             tests/test_system_orchestration.py \
             tests/test_system_run_cli.py \
             tests/test_system_run_multi_local_integration.py \
-            tests/test_system_planning.py
+            tests/test_system_planning.py \
+            tests/test_v270_rpi5_mapping_m4.py::test_nested_registered_system_executes_from_workspace_root
