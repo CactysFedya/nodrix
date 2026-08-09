@@ -43,7 +43,7 @@ def project_init(
     console.print(f"[green]Created[/green] {directory.expanduser().resolve()}")
     for path in created:
         console.print(f"  {path}")
-    console.print("Add the first resource: [bold]plyctl project add pipeline main --default[/bold]")
+    console.print("Add a System: [bold]plyctl project add system main --default[/bold]")
 
 
 @project_app.command("add")
@@ -51,7 +51,7 @@ def project_add(
     kind: Annotated[
         str,
         typer.Argument(
-            help="pipeline, workflow, environment, profile, or component"
+            help="system, pipeline, workflow, environment, profile, or component"
         ),
     ],
     name: Annotated[str, typer.Argument()],
@@ -61,7 +61,7 @@ def project_add(
     ] = None,
     make_default: Annotated[
         bool,
-        typer.Option("--default", help="Set pipeline/environment/profile as default"),
+        typer.Option("--default", help="Set system/pipeline/environment/profile as default"),
     ] = False,
     force: Annotated[bool, typer.Option("--force")] = False,
 ) -> None:
@@ -159,12 +159,14 @@ def _execute_workflow(
     environment: str | None,
     dry_run: bool,
     json_output: bool,
+    rebuild: bool = False,
 ) -> None:
     try:
         result = run_workflow(
             name,
             environment_name=environment,
             dry_run=dry_run,
+            force=rebuild,
         )
     except Exception as exc:
         console.print(f"[red]Workflow failed before execution:[/red] {exc}")
@@ -204,10 +206,14 @@ def workflow_run(
     ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    rebuild: Annotated[
+        bool,
+        typer.Option("--rebuild", help="Ignore successful step cache entries"),
+    ] = False,
 ) -> None:
     """Run a declared workflow and persist logs and summary artifacts."""
 
-    _execute_workflow(name, environment, dry_run, json_output)
+    _execute_workflow(name, environment, dry_run, json_output, rebuild)
 
 
 @app.command("build")
@@ -218,10 +224,14 @@ def build_command(
     ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
     json_output: Annotated[bool, typer.Option("--json")] = False,
+    rebuild: Annotated[
+        bool,
+        typer.Option("--rebuild", help="Ignore successful build cache entries"),
+    ] = False,
 ) -> None:
     """Run the project's build workflow."""
 
-    _execute_workflow("build", environment, dry_run, json_output)
+    _execute_workflow("build", environment, dry_run, json_output, rebuild)
 
 
 @app.command("test")

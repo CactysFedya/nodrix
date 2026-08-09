@@ -214,6 +214,10 @@ def prepare_command(
         typer.Option("--environment", "-e"),
     ] = None,
     dry_run: Annotated[bool, typer.Option("--dry-run")] = False,
+    rebuild: Annotated[
+        bool,
+        typer.Option("--rebuild", help="Ignore successful prepare cache entries"),
+    ] = False,
 ) -> None:
     """Validate the selected environment and run the optional prepare workflow."""
 
@@ -257,6 +261,7 @@ def prepare_command(
                 root=root,
                 environment_name=environment,
                 dry_run=dry_run,
+                force=rebuild,
             )
             for step in result.steps:
                 console.print(

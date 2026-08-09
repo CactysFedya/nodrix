@@ -14,6 +14,7 @@ from .workspace import PROJECT_FILE, find_workspace
 
 _RESOURCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _RESOURCE_SECTIONS = {
+    "system": ("systems", "systems"),
     "pipeline": ("pipelines", "pipelines"),
     "workflow": ("workflows", "workflows"),
     "environment": ("environments", "environments"),
@@ -103,6 +104,7 @@ def create_progressive_project(
         "schema": "nodrix.project/v1",
         "name": root.name.replace(" ", "-").lower(),
         "defaults": {"view": "compact"},
+        "systems": {},
         "pipelines": {},
         "workflows": {},
         "components": {},
@@ -141,6 +143,21 @@ def _pipeline_document(name: str) -> dict[str, Any]:
         "security": {},
         "placement": {},
         "streams": {"exports": []},
+    }
+
+
+def _system_document(name: str) -> dict[str, Any]:
+    """Create the smallest canonical System document.
+
+    System details are added progressively; the generated file is already a
+    valid ``nodrix.system/v1`` document and can immediately be validated or
+    planned.
+    """
+
+    return {
+        "apiVersion": "nodrix.system/v1",
+        "kind": "System",
+        "name": name,
     }
 
 
@@ -231,6 +248,10 @@ def _resource_document(
     name: str,
     template: str | None,
 ) -> dict[str, Any]:
+    if kind == "system":
+        if template not in {None, "empty"}:
+            raise ValueError("System currently supports only the empty template")
+        return _system_document(name)
     if kind == "pipeline":
         if template not in {None, "empty"}:
             raise ValueError("Pipeline currently supports only the empty template")
@@ -289,12 +310,13 @@ def add_project_resource(
         raise FileExistsError(f"{target} already exists")
 
     if make_default and normalized_kind not in {
+        "system",
         "pipeline",
         "environment",
         "profile",
     }:
         raise ValueError(
-            "--default is supported for pipeline, environment and profile"
+            "--default is supported for system, pipeline, environment and profile"
         )
 
     document = _resource_document(normalized_kind, normalized_name, template)
@@ -334,3 +356,74 @@ def list_project_resources(
         resource_kind: dict(config.get(section) or {})
         for resource_kind, (section, _) in _RESOURCE_SECTIONS.items()
     }
+
+def resolve_project_resource(
+    kind: str,
+    name: str | None = None,
+    *,
+    root: str | Path | None = None,
+) -> ProjectResource:
+    """Resolve a registered resource by explicit name or project default.
+
+    When no explicit/default name exists, a section containing exactly one
+    resource resolves automatically.  Multiple resources remain explicit so a
+    command never guesses which System/Pipeline the user meant.
+    """
+
+    normalized_kind = kind.strip().lower().replace("_", "-")
+    if normalized_kind not in _RESOURCE_SECTIONS:
+        available = ", ".join(sorted(_RESOURCE_SECTIONS))
+        raise ValueError(
+            f"Unknown resource kind {normalized_kind!r}; choose: {available}"
+        )
+
+    project_root = _project_root(root)
+    project_file = project_root / PROJECT_FILE
+    config = _load_yaml(project_file)
+    section, _ = _RESOURCE_SECTIONS[normalized_kind]
+    entries = dict(config.get(section) or {})
+
+    selected = name.strip() if name is not None else ""
+    if not selected:
+        default = dict(config.get("defaults") or {}).get(normalized_kind)
+        selected = str(default).strip() if default else ""
+    if not selected and len(entries) == 1:
+        selected = str(next(iter(entries)))
+    if not selected:
+        if not entries:
+            raise LookupError(
+                f"No {normalized_kind} is registered in {project_file}; "
+                f"add one with 'plyctl project add {normalized_kind} NAME'"
+            )
+        available = ", ".join(sorted(str(item) for item in entries))
+        raise LookupError(
+            f"No default {normalized_kind} is selected; available: {available}. "
+            f"Use --default when adding one or pass an explicit path/name."
+        )
+
+    raw = entries.get(selected)
+    if raw is None:
+        available = ", ".join(sorted(str(item) for item in entries)) or "none"
+        raise LookupError(
+            f"Unknown {normalized_kind} {selected!r}; registered: {available}"
+        )
+    if not isinstance(raw, str):
+        raise ValueError(
+            f"Project {section}.{selected} must be a path string, got "
+            f"{type(raw).__name__}"
+        )
+
+    target = Path(os.path.expandvars(os.path.expanduser(raw)))
+    if not target.is_absolute():
+        target = project_root / target
+    target = target.resolve()
+    if not target.is_file():
+        raise FileNotFoundError(
+            f"Registered {normalized_kind} {selected!r} does not exist: {target}"
+        )
+    return ProjectResource(
+        kind=normalized_kind,
+        name=selected,
+        path=target,
+        project_file=project_file,
+    )

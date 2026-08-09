@@ -16,6 +16,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Iterator
 
+import yaml
+
 from .cv_types import unregister_message_type
 from .package_sdk import (
     CompiledPackage,
@@ -153,6 +155,16 @@ def reset_local_development_modules() -> None:
     importlib.invalidate_caches()
 
 
+def _is_progressive_project_manifest(path: Path) -> bool:
+    """Return True for ``nodrix.project/v1`` rather than SDK package YAML."""
+
+    try:
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return False
+    return isinstance(raw, dict) and raw.get("schema") == "nodrix.project/v1"
+
+
 def compile_local_project(path: str | Path = ".") -> LocalProject:
     """Compile a package project or implicit ``components/`` local project."""
 
@@ -160,7 +172,8 @@ def compile_local_project(path: str | Path = ".") -> LocalProject:
     if not root.is_dir():
         raise ValueError(f"project directory does not exist: {root}")
 
-    if (root / "nodrix.yaml").is_file():
+    manifest = root / "nodrix.yaml"
+    if manifest.is_file() and not _is_progressive_project_manifest(manifest):
         compiled = compile_package(root)
         return LocalProject(
             root=root,

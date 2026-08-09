@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -427,12 +428,201 @@ def _shell_command(command: str) -> list[str]:
     return [shell, "-e", "-c", command]
 
 
+_CACHE_IGNORED_DIRECTORIES = frozenset(
+    {
+        ".git",
+        ".nodrix",
+        ".venv",
+        "__pycache__",
+        "build",
+        "install",
+        "log",
+        "logs",
+    }
+)
+
+
+def _cache_spec(step: dict[str, Any]) -> dict[str, Any] | None:
+    raw = step.get("cache")
+    if raw in (None, False):
+        return None
+    if raw is True:
+        return {"inputs": [str(step.get("cwd") or ".")], "outputs": [], "environment": []}
+    if not isinstance(raw, dict):
+        raise ValueError("step.cache must be a boolean or mapping")
+    inputs = raw.get("inputs", [str(step.get("cwd") or ".")])
+    outputs = raw.get("outputs", [])
+    environment = raw.get("environment", [])
+    if isinstance(inputs, str):
+        inputs = [inputs]
+    if isinstance(outputs, str):
+        outputs = [outputs]
+    if isinstance(environment, str):
+        environment = [environment]
+    if (
+        not isinstance(inputs, list)
+        or not isinstance(outputs, list)
+        or not isinstance(environment, list)
+    ):
+        raise ValueError(
+            "step.cache inputs/outputs/environment must be strings or arrays"
+        )
+    return {
+        "inputs": [str(item) for item in inputs],
+        "outputs": [str(item) for item in outputs],
+        "environment": [str(item) for item in environment],
+    }
+
+
+def _expand_cache_path(root: Path, value: str, env: dict[str, str]) -> Path:
+    text = value
+    # Workflow environment values are intentionally available to cache paths.
+    for key, replacement in env.items():
+        text = text.replace("${" + key + "}", replacement)
+    path = Path(os.path.expandvars(os.path.expanduser(text)))
+    if not path.is_absolute():
+        path = root / path
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(f"Workflow cache path escapes the project root: {resolved}") from exc
+    return resolved
+
+
+def _stat_fingerprint(digest, path: Path, *, root: Path) -> None:
+    """Hash cheap file metadata rather than file contents for fast local rebuilds.
+
+    This cache is an execution acceleration cache, not a release/reproducibility
+    lock.  Release locks continue to use the stronger existing lock/fingerprint
+    mechanisms.
+    """
+
+    relative = path.relative_to(root).as_posix()
+    if not path.exists() and not path.is_symlink():
+        digest.update(f"missing:{relative}\n".encode())
+        return
+    if path.is_symlink():
+        stat = path.lstat()
+        digest.update(
+            f"symlink:{relative}:{os.readlink(path)}:{stat.st_mtime_ns}\n".encode()
+        )
+        return
+    if path.is_file():
+        stat = path.stat()
+        digest.update(
+            f"file:{relative}:{stat.st_size}:{stat.st_mtime_ns}\n".encode()
+        )
+        return
+
+    digest.update(f"dir:{relative}\n".encode())
+    for current, directories, files in os.walk(path):
+        directories[:] = sorted(
+            item for item in directories if item not in _CACHE_IGNORED_DIRECTORIES
+        )
+        current_path = Path(current)
+        for name in sorted(files):
+            _stat_fingerprint(digest, current_path / name, root=root)
+
+
+def _step_cache_fingerprint(
+    *,
+    root: Path,
+    step_id: str,
+    command: str,
+    step: dict[str, Any],
+    env: dict[str, str],
+    selected_environment: str | None,
+    spec: dict[str, Any],
+) -> str:
+    digest = hashlib.sha256()
+    digest.update(b"nodrix.workflow-step-cache/1\n")
+    digest.update(f"step:{step_id}\n".encode())
+    digest.update(f"command:{command}\n".encode())
+    digest.update(f"environment:{selected_environment or ''}\n".encode())
+    digest.update(f"system:{platform.system()}\nmachine:{platform.machine()}\n".encode())
+    for key, value in sorted(dict(step.get("environment") or {}).items()):
+        digest.update(f"step-env:{key}={value}\n".encode())
+    for key in sorted(spec["environment"]):
+        digest.update(f"resolved-env:{key}={env.get(key, '')}\n".encode())
+    for raw in spec["inputs"]:
+        _stat_fingerprint(
+            digest,
+            _expand_cache_path(root, raw, env),
+            root=root,
+        )
+    return digest.hexdigest()
+
+
+def _cache_state_path(root: Path, workflow: str, step_id: str) -> Path:
+    safe_workflow = "".join(
+        item if item.isalnum() or item in "-_" else "-" for item in workflow
+    ).strip("-") or "workflow"
+    safe_step = "".join(
+        item if item.isalnum() or item in "-_" else "-" for item in step_id
+    ).strip("-") or "step"
+    return root / ".nodrix" / "cache" / "workflows" / safe_workflow / f"{safe_step}.json"
+
+
+def _cache_outputs_exist(
+    root: Path,
+    spec: dict[str, Any],
+    env: dict[str, str],
+) -> bool:
+    return all(_expand_cache_path(root, raw, env).exists() for raw in spec["outputs"])
+
+
+def _cache_hit(
+    *,
+    state_path: Path,
+    fingerprint: str,
+    root: Path,
+    spec: dict[str, Any],
+    env: dict[str, str],
+) -> bool:
+    if not state_path.is_file() or not _cache_outputs_exist(root, spec, env):
+        return False
+    try:
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return raw.get("fingerprint") == fingerprint and raw.get("status") == "succeeded"
+
+
+def _write_cache_state(
+    *,
+    state_path: Path,
+    fingerprint: str,
+    command: str,
+    spec: dict[str, Any],
+) -> None:
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(
+            {
+                "schema": "nodrix.workflow-step-cache/v1",
+                "status": "succeeded",
+                "fingerprint": fingerprint,
+                "command": command,
+                "outputs": spec["outputs"],
+                "environment": spec["environment"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            indent=2,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def run_workflow(
     name: str,
     *,
     root: str | Path | None = None,
     environment_name: str | None = None,
     dry_run: bool = False,
+    force: bool = False,
 ) -> WorkflowRunResult:
     workflow, workflow_path, project_root = load_workflow(name, root=root)
     env, _, selected_environment = project_environment(
@@ -489,6 +679,50 @@ def run_workflow(
                 )
             )
             continue
+
+        cache_spec = _cache_spec(step)
+        cache_state = None
+        cache_fingerprint = None
+        cache_env = dict(env)
+        cache_env.update(
+            {
+                str(key): str(value)
+                for key, value in dict(step.get("environment") or {}).items()
+            }
+        )
+        if cache_spec is not None:
+            cache_state = _cache_state_path(project_root, name, step_id)
+            cache_fingerprint = _step_cache_fingerprint(
+                root=project_root,
+                step_id=step_id,
+                command=command,
+                step=step,
+                env=cache_env,
+                selected_environment=selected_environment,
+                spec=cache_spec,
+            )
+            if not force and _cache_hit(
+                state_path=cache_state,
+                fingerprint=cache_fingerprint,
+                root=project_root,
+                spec=cache_spec,
+                env=cache_env,
+            ):
+                detail = "inputs unchanged and cached outputs are present"
+                log_path.write_text(f"CACHED: {detail}\n", encoding="utf-8")
+                step_results.append(
+                    WorkflowStepResult(
+                        step_id=step_id,
+                        status="cached",
+                        command=command,
+                        returncode=0,
+                        duration_seconds=0.0,
+                        log_path=str(log_path),
+                        detail=detail,
+                    )
+                )
+                continue
+
         if dry_run:
             log_path.write_text(command + "\n", encoding="utf-8")
             step_results.append(
@@ -561,6 +795,19 @@ def run_workflow(
                 detail=f"timeout after {timeout} seconds",
             )
         step_results.append(result)
+        if (
+            result.status == "succeeded"
+            and cache_spec is not None
+            and cache_state is not None
+            and cache_fingerprint is not None
+            and _cache_outputs_exist(project_root, cache_spec, cache_env)
+        ):
+            _write_cache_state(
+                state_path=cache_state,
+                fingerprint=cache_fingerprint,
+                command=command,
+                spec=cache_spec,
+            )
         if result.status == "failed":
             failed = True
             if not bool(step.get("continue_on_error", False)):

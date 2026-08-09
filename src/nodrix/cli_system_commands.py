@@ -10,10 +10,13 @@ from typing import Annotated
 
 from rich.table import Table
 import typer
+import yaml
 
 from .cli_context import app, console
 from .local_dev import compile_local_project, reset_local_development_modules
 from .manifest import load_manifest
+from .project_foundation import resolve_project_resource
+from .workspace import find_workspace
 from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefinition
 from .system import (
     BackendContext,
@@ -34,6 +37,49 @@ system_app = typer.Typer(
     help="Validate, inspect, plan, run, convert, and describe nodrix.system/v1 documents."
 )
 app.add_typer(system_app, name="system")
+
+
+def _project_has_local_components(root: Path) -> bool:
+    project_file = root / "nodrix.yaml"
+    try:
+        project = yaml.safe_load(project_file.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError):
+        return False
+    if not isinstance(project, dict) or project.get("schema") != "nodrix.project/v1":
+        return False
+    components = root / "components"
+    return components.is_dir() and any(
+        path.is_file() and "__pycache__" not in path.parts
+        for path in components.rglob("*.py")
+    )
+
+
+def _resolve_system_cli_inputs(
+    path: Path | None,
+    project: Path | None = None,
+) -> tuple[Path, Path | None]:
+    """Resolve an explicit System or the project's default registered System."""
+
+    project_root: Path | None = None
+    if path is None:
+        resource = resolve_project_resource(
+            "system",
+            root=project if project is not None else Path.cwd(),
+        )
+        resolved_path = resource.path.resolve()
+        project_root = resource.project_file.parent.resolve()
+    else:
+        resolved_path = path.expanduser().resolve()
+        project_root = find_workspace(resolved_path.parent)
+
+    effective_project = project.expanduser().resolve() if project is not None else None
+    if (
+        effective_project is None
+        and project_root is not None
+        and _project_has_local_components(project_root)
+    ):
+        effective_project = project_root
+    return resolved_path, effective_project
 
 
 def _diagnostic_dict(item) -> dict[str, str]:
@@ -96,9 +142,9 @@ def _catalog_for_project(path: Path) -> DefinitionCatalog:
 @system_app.command("validate")
 def system_validate(
     path: Annotated[
-        Path,
+        Path | None,
         typer.Argument(help="System YAML/JSON document"),
-    ],
+    ] = None,
     project: Annotated[
         Path | None,
         typer.Option(
@@ -127,8 +173,13 @@ def system_validate(
     """
 
     try:
-        system = load_system(path)
-        catalog = _catalog_for_project(project) if project is not None else None
+        resolved_path, effective_project = _resolve_system_cli_inputs(path, project)
+        system = load_system(resolved_path)
+        catalog = (
+            _catalog_for_project(effective_project)
+            if effective_project is not None
+            else None
+        )
         report = validate_system(system, catalog=catalog)
     except Exception as exc:
         if json_output:
@@ -136,7 +187,7 @@ def system_validate(
                 json.dumps(
                     {
                         "ok": False,
-                        "path": str(path),
+                        "path": str(path) if path is not None else "<project-default>",
                         "error": str(exc),
                     },
                     ensure_ascii=False,
@@ -148,9 +199,9 @@ def system_validate(
 
     payload = {
         "ok": report.valid and not (warnings_as_errors and report.warnings),
-        "path": str(path.expanduser().resolve()),
+        "path": str(resolved_path),
         "system": system.name,
-        "catalog": project is not None,
+        "catalog": effective_project is not None,
         "errors": [_diagnostic_dict(item) for item in report.errors],
         "warnings": [_diagnostic_dict(item) for item in report.warnings],
     }
@@ -160,7 +211,7 @@ def system_validate(
     else:
         status = "VALID" if payload["ok"] else "INVALID"
         color = "green" if payload["ok"] else "red"
-        mode = "definitions resolved" if project is not None else "structural"
+        mode = "definitions resolved" if effective_project is not None else "structural"
         console.print(
             f"[{color}]{status}[/{color}] "
             f"[bold]{system.name}[/bold] · {mode}"
@@ -497,9 +548,9 @@ def _render_system_plan(plan) -> None:
 @system_app.command("plan")
 def system_plan(
     path: Annotated[
-        Path,
+        Path | None,
         typer.Argument(help="System YAML/JSON document"),
-    ],
+    ] = None,
     project: Annotated[
         Path | None,
         typer.Option(
@@ -523,8 +574,13 @@ def system_plan(
     """Resolve a System document into nodrix.system-execution-plan/v1."""
 
     try:
-        system = load_system(path)
-        catalog = _catalog_for_project(project) if project is not None else None
+        resolved_path, effective_project = _resolve_system_cli_inputs(path, project)
+        system = load_system(resolved_path)
+        catalog = (
+            _catalog_for_project(effective_project)
+            if effective_project is not None
+            else None
+        )
         plan = plan_system(system, catalog=catalog)
     except Exception as exc:
         if json_output:
@@ -532,7 +588,7 @@ def system_plan(
                 json.dumps(
                     {
                         "ok": False,
-                        "path": str(path),
+                        "path": str(path) if path is not None else "<project-default>",
                         "error": str(exc),
                     },
                     ensure_ascii=False,
@@ -604,9 +660,9 @@ def _render_run_status(system_name: str, status) -> None:
 @system_app.command("run")
 def system_run(
     path: Annotated[
-        Path,
+        Path | None,
         typer.Argument(help="System YAML/JSON document"),
-    ],
+    ] = None,
     project: Annotated[
         Path | None,
         typer.Option(
@@ -648,11 +704,14 @@ def system_run(
     orchestrator is introduced.
     """
 
-    resolved_path = path.expanduser().resolve()
-
     try:
+        resolved_path, effective_project = _resolve_system_cli_inputs(path, project)
         system = load_system(resolved_path)
-        catalog = _catalog_for_project(project) if project is not None else None
+        catalog = (
+            _catalog_for_project(effective_project)
+            if effective_project is not None
+            else None
+        )
         plan = plan_system(system, catalog=catalog)
     except Exception as exc:
         console.print(f"[red]System run failed:[/red] {exc}")
@@ -688,7 +747,7 @@ def system_run(
             )
 
     backend = LocalBackend(
-        project=project,
+        project=effective_project,
         working_directory=resolved_path.parent,
         run_root=run_root,
         stop_timeout_seconds=stop_timeout,
@@ -781,9 +840,9 @@ def system_run(
 @system_app.command("show")
 def system_show(
     path: Annotated[
-        Path,
+        Path | None,
         typer.Argument(help="System YAML/JSON document"),
-    ],
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Print canonical System JSON"),
@@ -800,7 +859,8 @@ def system_show(
         raise typer.Exit(2)
 
     try:
-        system = load_system(path)
+        resolved_path, _ = _resolve_system_cli_inputs(path)
+        system = load_system(resolved_path)
     except Exception as exc:
         console.print(f"[red]Cannot load System:[/red] {exc}")
         raise typer.Exit(1)
