@@ -370,12 +370,21 @@ class RuntimeExecutionMixin:
         if metrics_recorder is not None:
             metrics_recorder.close()
             self._metrics_recorder = None
-        # Capture final telemetry while nodes and provider sessions are still open.
+        # Capture final performance/resource telemetry while nodes and provider
+        # sessions are still open. Some native/process-backed diagnostics are no
+        # longer available after stop().
         final_snapshot = self.snapshot(
             max((time.perf_counter_ns() - started_ns) / 1e9, 1e-9)
         )
         self._close_nodes()
         self._nodes_closed = True
+
+        # The terminal run report must describe the terminal lifecycle state,
+        # not the live state captured immediately before shutdown. Preserve the
+        # pre-stop telemetry above, but refresh health after every node has
+        # completed stop()/close().
+        for name, loaded in self.nodes.items():
+            final_snapshot["nodes"][name]["health"] = loaded.node.health()
         session_report = {
             name: self._session_health(loaded)
             for name, loaded in self.sessions.items()
