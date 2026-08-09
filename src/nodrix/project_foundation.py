@@ -104,6 +104,7 @@ def create_progressive_project(
         "schema": "nodrix.project/v1",
         "name": root.name.replace(" ", "-").lower(),
         "defaults": {"view": "compact"},
+        "build": {},
         "systems": {},
         "pipelines": {},
         "workflows": {},

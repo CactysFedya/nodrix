@@ -8,6 +8,7 @@ from rich.table import Table
 import typer
 import yaml
 
+from .build_recipes import available_build_recipes
 from .cli_context import app, console
 from .project_foundation import (
     add_project_resource,
@@ -108,6 +109,32 @@ def project_list(
             continue
         for name, path in sorted(entries.items()):
             table.add_row(resource_kind, str(name), str(path))
+    console.print(table)
+
+
+@project_app.command("recipes")
+def project_recipes(
+    json_output: Annotated[bool, typer.Option("--json")] = False,
+) -> None:
+    """List high-level Build Recipe SDK entries available to the project."""
+
+    recipes = available_build_recipes()
+    if json_output:
+        console.print_json(
+            json.dumps(
+                [
+                    {"name": item.name, "description": item.description}
+                    for item in recipes
+                ],
+                ensure_ascii=False,
+            )
+        )
+        return
+    table = Table(box=None, show_edge=False, pad_edge=False)
+    table.add_column("RECIPE")
+    table.add_column("DESCRIPTION")
+    for item in recipes:
+        table.add_row(item.name, item.description)
     console.print(table)
 
 

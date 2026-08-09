@@ -105,10 +105,15 @@ def list_workflows(
 ) -> dict[str, str]:
     project_root = _project_root(root)
     config = _load_yaml(project_root / PROJECT_FILE)
-    return {
+    result = {
         str(name): str(path)
         for name, path in dict(config.get("workflows") or {}).items()
     }
+    from .build_recipes import project_has_build_recipes
+
+    if project_has_build_recipes(project_root):
+        result.setdefault("build", "nodrix.yaml#build")
+    return result
 
 
 def has_workflow(
@@ -117,6 +122,11 @@ def has_workflow(
 ) -> bool:
     project_root = _project_root(root)
     config = _load_yaml(project_root / PROJECT_FILE)
+    if name == "build":
+        from .build_recipes import project_has_build_recipes
+
+        if project_has_build_recipes(project_root):
+            return True
     entries = dict(config.get("workflows") or {})
     if name in entries:
         return True
@@ -130,12 +140,20 @@ def load_workflow(
 ) -> tuple[dict[str, Any], Path, Path]:
     project_root = _project_root(root)
     config = _load_yaml(project_root / PROJECT_FILE)
-    workflow, path = _declared_document(
-        project_root,
-        config,
-        "workflows",
-        name,
-    )
+    generated = None
+    if name == "build":
+        from .build_recipes import compile_project_build_workflow
+
+        generated = compile_project_build_workflow(project_root, project=config)
+    if generated is not None:
+        workflow, path = generated
+    else:
+        workflow, path = _declared_document(
+            project_root,
+            config,
+            "workflows",
+            name,
+        )
     schema = str(workflow.get("schema") or "")
     if schema != "nodrix.workflow/v1":
         raise ValueError(
