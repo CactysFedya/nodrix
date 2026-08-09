@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+import time
 from typing import Annotated
 
 from rich.table import Table
@@ -16,7 +17,9 @@ from .manifest import load_manifest
 from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefinition
 from .system import (
     BackendContext,
+    BackendExecutionState,
     DefinitionCatalog,
+    LocalBackend,
     dump_system,
     dump_system_schema,
     load_system,
@@ -28,7 +31,7 @@ from .system import (
 
 
 system_app = typer.Typer(
-    help="Validate, inspect, convert, and describe nodrix.system/v1 documents."
+    help="Validate, inspect, plan, run, convert, and describe nodrix.system/v1 documents."
 )
 app.add_typer(system_app, name="system")
 
@@ -550,6 +553,228 @@ def system_plan(
         _render_system_plan(plan)
 
     if warnings_as_errors and plan.diagnostics:
+        raise typer.Exit(1)
+
+
+def _render_backend_validation(report) -> None:
+    if not report.diagnostics:
+        return
+
+    table = Table(
+        title=f"BACKEND {report.backend.upper()} DIAGNOSTICS",
+        box=None,
+        show_edge=False,
+        pad_edge=False,
+    )
+    table.add_column("LEVEL")
+    table.add_column("CODE")
+    table.add_column("PATH")
+    table.add_column("MESSAGE")
+    for item in report.diagnostics:
+        table.add_row(
+            item.level.upper(),
+            item.code,
+            item.path or "-",
+            item.message,
+            style="red" if item.level == "error" else "yellow",
+        )
+    console.print(table)
+
+
+def _render_run_status(system_name: str, status) -> None:
+    state = status.state.value.upper()
+    color = (
+        "green"
+        if status.state in {
+            BackendExecutionState.COMPLETED,
+            BackendExecutionState.STOPPED,
+        }
+        else "red"
+        if status.state is BackendExecutionState.FAILED
+        else "yellow"
+    )
+    suffix = f" · {status.message}" if status.message else ""
+    console.print(
+        f"[{color}]{state}[/{color}] "
+        f"[bold]{system_name}[/bold] · "
+        f"{status.backend}:{status.execution_id}{suffix}"
+    )
+
+
+@system_app.command("run")
+def system_run(
+    path: Annotated[
+        Path,
+        typer.Argument(help="System YAML/JSON document"),
+    ],
+    project: Annotated[
+        Path | None,
+        typer.Option(
+            "--project",
+            "-p",
+            help=(
+                "Optional local/package SDK project used for typed "
+                "definitions and execution"
+            ),
+        ),
+    ] = None,
+    run_root: Annotated[
+        Path | None,
+        typer.Option(
+            "--run-root",
+            help="Optional runtime output root passed to the LocalBackend",
+        ),
+    ] = None,
+    stop_timeout: Annotated[
+        float,
+        typer.Option(
+            "--stop-timeout",
+            min=0.0,
+            help="Seconds to wait for a local runtime to stop after Ctrl+C",
+        ),
+    ] = 10.0,
+    warnings_as_errors: Annotated[
+        bool,
+        typer.Option(
+            "--warnings-as-errors",
+            help="Refuse execution when planner warnings are present",
+        ),
+    ] = False,
+) -> None:
+    """Plan and execute a System through the local execution backend.
+
+    Nodrix 2.6 intentionally runs one backend scope here. Systems that resolve
+    to non-local or multiple backends are rejected until a multi-backend
+    orchestrator is introduced.
+    """
+
+    resolved_path = path.expanduser().resolve()
+
+    try:
+        system = load_system(resolved_path)
+        catalog = _catalog_for_project(project) if project is not None else None
+        plan = plan_system(system, catalog=catalog)
+    except Exception as exc:
+        console.print(f"[red]System run failed:[/red] {exc}")
+        raise typer.Exit(1)
+
+    backend_names = _plan_backend_names(plan)
+    if backend_names != ("local",):
+        found = ", ".join(backend_names) if backend_names else "<none>"
+        console.print(
+            "[red]System run failed:[/red] "
+            "RUN101: Nodrix 2.6 system run supports exactly one 'local' "
+            f"backend; plan resolves to: {found}"
+        )
+        raise typer.Exit(1)
+
+    if warnings_as_errors and plan.diagnostics:
+        console.print(
+            "[red]System run refused:[/red] "
+            "RUN102: planner warnings are present and "
+            "--warnings-as-errors was set"
+        )
+        _render_system_plan(plan)
+        raise typer.Exit(1)
+
+    if plan.diagnostics:
+        console.print(
+            f"[yellow]Planner warnings:[/yellow] {len(plan.diagnostics)}"
+        )
+        for item in plan.diagnostics:
+            console.print(
+                f"[yellow]{item.code}[/yellow] "
+                f"{item.path or '-'} · {item.message}"
+            )
+
+    backend = LocalBackend(
+        project=project,
+        working_directory=resolved_path.parent,
+        run_root=run_root,
+        stop_timeout_seconds=stop_timeout,
+    )
+
+    report = backend.validate_plan(plan)
+    if report.diagnostics:
+        _render_backend_validation(report)
+
+    if not report.valid:
+        console.print(
+            "[red]System run failed:[/red] "
+            "RUN103: LocalBackend rejected the execution plan"
+        )
+        raise typer.Exit(1)
+
+    try:
+        prepared = backend.prepare_plan(plan)
+    except Exception as exc:
+        console.print(f"[red]System prepare failed:[/red] {exc}")
+        raise typer.Exit(1)
+
+    manifest_path = prepared.metadata.get("manifest_path")
+    console.print(
+        f"[green]PREPARED[/green] [bold]{system.name}[/bold] · backend=local"
+        + (f" · {manifest_path}" if manifest_path else "")
+    )
+
+    handle = None
+    try:
+        handle = backend.start(prepared)
+        console.print(
+            f"[green]STARTED[/green] [bold]{system.name}[/bold] · "
+            f"local:{handle.execution_id}"
+        )
+
+        previous_state = None
+        while True:
+            status = backend.inspect(handle)
+            if status.state is not previous_state:
+                _render_run_status(system.name, status)
+                previous_state = status.state
+
+            if status.terminal:
+                if status.state is BackendExecutionState.FAILED:
+                    raise typer.Exit(1)
+                return
+
+            time.sleep(0.1)
+
+    except KeyboardInterrupt:
+        if handle is None:
+            console.print("[yellow]Interrupted before execution started.[/yellow]")
+            raise typer.Exit(130)
+
+        console.print(
+            f"[yellow]Stopping[/yellow] [bold]{system.name}[/bold] · "
+            f"local:{handle.execution_id}"
+        )
+        try:
+            status = backend.stop(
+                handle,
+                timeout_seconds=stop_timeout,
+            )
+        except Exception as exc:
+            console.print(f"[red]System stop failed:[/red] {exc}")
+            raise typer.Exit(130)
+
+        _render_run_status(system.name, status)
+        if status.state is BackendExecutionState.STOPPING:
+            console.print(
+                "[yellow]Runtime is still stopping after the requested "
+                "timeout.[/yellow]"
+            )
+        raise typer.Exit(130)
+
+    except typer.Exit:
+        raise
+
+    except Exception as exc:
+        console.print(f"[red]System execution failed:[/red] {exc}")
+        if handle is not None:
+            try:
+                backend.stop(handle, timeout_seconds=stop_timeout)
+            except Exception:
+                pass
         raise typer.Exit(1)
 
 
