@@ -1,4 +1,4 @@
-"""Nodrix 2.5 canonical backend-neutral System Model."""
+"""Nodrix canonical backend-neutral System Model and execution control plane."""
 
 from .backend import (
     BackendCapabilities,
@@ -61,6 +61,22 @@ from .local_backend import (
     lower_local_context,
 )
 from .model import SYSTEM_MODEL_API_VERSION, SystemModel
+from .orchestration import (
+    ExecutionScope,
+    OrchestrationDiagnostic,
+    OrchestrationError,
+    OrchestrationValidationError,
+    OrchestrationValidationReport,
+    PreparedScopeExecution,
+    PreparedSystemExecution,
+    RunningScopeExecution,
+    ScopeExecutionStatus,
+    SystemExecutionHandle,
+    SystemExecutionStatus,
+    SystemOrchestrator,
+    backend_context_for_scope,
+    plan_execution_scopes,
+)
 from .planning import (
     SYSTEM_EXECUTION_PLAN_SCHEMA,
     PlannedApplication,
@@ -128,6 +144,20 @@ __all__ = [
     "LocalPreparedPayload",
     "lower_local_context",
     "SYSTEM_MODEL_API_VERSION",
+    "ExecutionScope",
+    "OrchestrationDiagnostic",
+    "OrchestrationError",
+    "OrchestrationValidationError",
+    "OrchestrationValidationReport",
+    "PreparedScopeExecution",
+    "PreparedSystemExecution",
+    "RunningScopeExecution",
+    "ScopeExecutionStatus",
+    "SystemExecutionHandle",
+    "SystemExecutionStatus",
+    "SystemOrchestrator",
+    "backend_context_for_scope",
+    "plan_execution_scopes",
     "SystemDiagnostic",
     "SystemLink",
     "SystemModel",
