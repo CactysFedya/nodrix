@@ -1,12 +1,11 @@
 schema: nodrix.view/v1
-name: operations
+name: overview
 style:
   borders: none
   spacing: compact
 sections:
   - runtime
   - health
+  - graph
   - applications
-  - monitors
-  - queues
   - attention

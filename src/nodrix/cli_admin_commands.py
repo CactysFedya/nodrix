@@ -36,6 +36,7 @@ from .packages import (
 from .profiles import profile_names
 from .workspace import default_view, resolve_project_root
 from .workspace_views import render_top_view
+from .presentation import render_health, render_status
 from .runs import (
     compare_runs,
     latest_run_id,
@@ -184,20 +185,7 @@ def status_command(
     if json_output:
         console.print_json(json.dumps(data))
         return
-    console.print(f"[bold]{data.get('pipeline', selected)}[/bold]")
-    table = Table("Node", "State", "Health", "CPU", "Memory", "Ready", "Messages", "Node Hz", "Last error")
-    for name, raw in dict(data.get("nodes", {})).items():
-        stats = dict(raw)
-        health = dict(stats.get("health", {}))
-        resources = dict(stats.get("resources", {}))
-        memory_value = resources.get("rss_bytes") or resources.get("shared_buffer_bytes") or resources.get("executor_rss_bytes")
-        table.add_row(
-            name, str(health.get("state", "-")), str(health.get("status", "-")),
-            f"{float(resources.get('cpu_percent', 0.0)):.1f}%", _format_status_memory(resources, memory_value),
-            "yes" if health.get("ready") else "no", str(stats.get("messages", 0)),
-            f"{float(stats.get('rate_hz', 0.0)):.1f}", str(health.get("last_error") or "-"),
-        )
-    console.print(table)
+    console.print(render_status(data, run_id=selected))
 
 
 @app.command("health")
@@ -215,16 +203,8 @@ def health_command(
             data = load_run(selected, project)
         except Exception as exc:
             _run_unavailable("Health", project, exc)
-        table = Table("Node", "Alive", "Ready", "Health", "Queue pressure", "Restarts", "Last error")
-        for name, raw in dict(data.get("nodes", {})).items():
-            health = dict(dict(raw).get("health", {}))
-            table.add_row(
-                name, "yes" if health.get("alive") else "no", "yes" if health.get("ready") else "no",
-                str(health.get("status", "unknown")), f"{float(health.get('queue_pressure', 0.0)):.2f}",
-                str(health.get("restart_count", 0)), str(health.get("last_error") or "-"),
-            )
         console.clear() if watch else None
-        console.print(table)
+        console.print(render_health(data))
         if not watch:
             return
         time.sleep(interval)
@@ -255,8 +235,9 @@ def _top_table(
     data: dict[str, object],
     *,
     view: str,
+    project: Path | None = None,
 ):
-    return render_top_view(data, view)
+    return render_top_view(data, view, project=project)
 
 
 @app.command("top")
@@ -266,9 +247,9 @@ def top_command(
     watch: Annotated[bool, typer.Option("--watch/--once")] = True,
     interval: Annotated[float, typer.Option("--interval", min=0.1)] = 1.0,
     json_output: Annotated[bool, typer.Option("--json")] = False,
-    view: Annotated[str | None, typer.Option("--view", help="compact, operations, or debug")] = None,
+    view: Annotated[str | None, typer.Option("--view", help="Workspace view name; built-ins: overview, performance, operations, debug (compact aliases overview)")] = None,
 ) -> None:
-    "Show a compact htop-style runtime dashboard."
+    "Show a semantic, borderless runtime dashboard."
     project = resolve_project_root(project)
     selected_view = view or default_view(project)
 
@@ -285,11 +266,11 @@ def top_command(
         console.print_json(json.dumps(data))
         return
     if not watch or not console.is_terminal:
-        console.print(_top_table(data, view=selected_view))
+        console.print(_top_table(data, view=selected_view, project=project))
         return
 
     with Live(
-        _top_table(data, view=selected_view),
+        _top_table(data, view=selected_view, project=project),
         console=console,
         refresh_per_second=max(2, int(1.0 / interval)),
         screen=True,
@@ -299,7 +280,7 @@ def top_command(
             while True:
                 time.sleep(interval)
                 live_view.update(
-                    _top_table(snapshot(), view=selected_view),
+                    _top_table(snapshot(), view=selected_view, project=project),
                     refresh=True,
                 )
         except KeyboardInterrupt:

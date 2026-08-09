@@ -1,207 +1,106 @@
+"""Workspace-selectable human views for Nodrix runtime telemetry."""
+
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Any, Mapping
 
-from rich.console import Group
-from rich.table import Table
-from rich.text import Text
+import yaml
 
-from .ux import render_top
-
-
-def _bytes(value: object) -> str:
-    number = float(value or 0)
-    units = ("B", "KiB", "MiB", "GiB", "TiB")
-    index = 0
-    while abs(number) >= 1024 and index < len(units) - 1:
-        number /= 1024.0
-        index += 1
-    return f"{number:.1f} {units[index]}"
+from .presentation import TOP_VIEW_SPECS, TopViewSpec
+from .presentation import render_top_view as _render_top_view
 
 
-def _heading(value: str) -> Text:
-    return Text(value, style="bold cyan")
+_SECTION_NAMES = {
+    "runtime",
+    "health",
+    "graph",
+    "performance",
+    "applications",
+    "monitors",
+    "queues",
+    "attention",
+    "debug",
+}
 
 
-def _applications(data: dict[str, object]) -> dict[str, dict[str, Any]]:
-    raw = (
-        data.get("applications")
-        or data.get("managed_applications")
-        or {}
+def _mapping(value: object) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _builtin(view: str) -> TopViewSpec:
+    selected = view.strip().lower()
+    if selected == "compact":
+        # Compatibility name, overview behavior.
+        base = TOP_VIEW_SPECS["overview"]
+        return TopViewSpec(**{**base.__dict__, "name": "compact"})
+    try:
+        return TOP_VIEW_SPECS[selected]
+    except KeyError as exc:
+        choices = "compact, overview, performance, operations, debug"
+        raise ValueError(f"Unknown top view {view!r}; choose {choices}") from exc
+
+
+def _from_sections(name: str, sections: list[str]) -> TopViewSpec:
+    selected = {item.strip().lower() for item in sections if item.strip()}
+    unknown = selected - _SECTION_NAMES
+    if unknown:
+        values = ", ".join(sorted(unknown))
+        raise ValueError(f"Unknown section(s) in view {name!r}: {values}")
+    performance = "performance" in selected
+    return TopViewSpec(
+        name=name,
+        show_runtime="runtime" in selected,
+        show_health="health" in selected,
+        show_graph="graph" in selected or performance,
+        show_applications="applications" in selected,
+        show_monitors="monitors" in selected,
+        show_node_performance=performance,
+        show_all_edges="queues" in selected,
+        show_attention="attention" in selected,
+        show_debug_details="debug" in selected,
     )
-    return {
-        str(name): dict(value)
-        for name, value in dict(raw).items()
-    }
 
 
-def _compact(data: dict[str, object], *, operations: bool) -> Group:
-    nodes = {
-        str(name): dict(value)
-        for name, value in dict(data.get("nodes", {})).items()
-    }
-    system = dict(data.get("system", {}))
-    status = str(data.get("status", "running")).upper()
-    duration = float(data.get("duration_seconds", 0.0) or 0.0)
+def resolve_top_view(view: str, project: Path | None = None) -> TopViewSpec:
+    """Resolve a built-in view or a workspace ``nodrix.view/v1`` template.
 
-    header = Text()
-    header.append(str(data.get("pipeline", "-")), style="bold")
-    header.append(f"  {status}", style="bold green")
-    header.append(f"  {duration:,.1f}s", style="dim")
+    Custom view names are allowed when ``views/<name>.yaml`` declares
+    ``sections``. A legacy/template file without ``sections`` inherits the
+    built-in view with the same name, preserving existing workspaces.
+    """
 
-    machine = Text()
-    machine.append(
-        f"CPU {float(system.get('process_cpu_percent', system.get('cpu_percent', 0.0))):.1f}%"
+    path = (
+        Path(project).expanduser().resolve() / "views" / f"{view}.yaml"
+        if project is not None
+        else None
     )
-    machine.append(
-        f"   RAM {_bytes(system.get('process_rss_bytes', system.get('rss_bytes', 0)))}"
-    )
-    if system.get("temperature_c") is not None:
-        machine.append(
-            f"   TEMP {float(system['temperature_c']):.1f}°C"
-        )
-    load = list(system.get("load_average") or [])
-    if load:
-        machine.append(
-            "   LOAD " + " ".join(f"{float(item):.2f}" for item in load[:3])
-        )
-
-    application_table = Table(
-        box=None,
-        show_edge=False,
-        pad_edge=False,
-        header_style="bold",
-        expand=False,
-    )
-    application_table.add_column("APPLICATION")
-    application_table.add_column("STATE")
-    application_table.add_column("CPU", justify="right")
-    application_table.add_column("MEMORY", justify="right")
-    application_table.add_column("PID", justify="right")
-    if operations:
-        application_table.add_column("PROCESSES", justify="right")
-        application_table.add_column("THREADS", justify="right")
-        application_table.add_column("RESTARTS", justify="right")
-
-    applications = _applications(data)
-    if applications:
-        for name, raw in applications.items():
-            resources = dict(raw.get("resources", raw))
-            health = str(raw.get("health", raw.get("status", "unknown")))
-            application_table.add_row(
-                name,
-                health,
-                f"{float(resources.get('cpu_percent', raw.get('cpu_percent', 0.0))):.1f}%",
-                _bytes(resources.get("rss_bytes", raw.get("rss_bytes", 0))),
-                str(raw.get("pid", "-")),
-                *(
-                    [
-                        str(raw.get("process_count", raw.get("proc", "-"))),
-                        str(raw.get("thread_count", raw.get("threads", "-"))),
-                        str(raw.get("restarts", 0)),
-                    ]
-                    if operations
-                    else []
-                ),
+    if path is not None and path.is_file():
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        config = _mapping(raw)
+        schema = str(config.get("schema") or "")
+        if schema and schema != "nodrix.view/v1":
+            raise ValueError(
+                f"Unsupported view schema {schema!r} in {path}; expected 'nodrix.view/v1'"
             )
-    else:
-        application_table.add_row("-", "none", "-", "-", "-")
+        raw_sections = config.get("sections")
+        if raw_sections is not None:
+            if not isinstance(raw_sections, list) or not all(
+                isinstance(item, str) for item in raw_sections
+            ):
+                raise ValueError(f"View sections must be a list of strings in {path}")
+            return _from_sections(str(config.get("name") or view), raw_sections)
 
-    monitor_table = Table(
-        box=None,
-        show_edge=False,
-        pad_edge=False,
-        header_style="bold",
-        expand=False,
-    )
-    monitor_table.add_column("MONITOR")
-    monitor_table.add_column("STATE")
-    monitor_table.add_column("LOOP RATE", justify="right")
-    monitor_table.add_column("P95", justify="right")
-    if operations:
-        monitor_table.add_column("MESSAGES", justify="right")
-        monitor_table.add_column("MEMORY", justify="right")
-
-    monitors = {
-        name: raw
-        for name, raw in nodes.items()
-        if name.endswith("_health")
-        or "topic_monitor" in str(raw.get("uses", ""))
-    }
-    for name, raw in monitors.items():
-        health = dict(raw.get("health", {}))
-        resources = dict(raw.get("resources", {}))
-        memory = (
-            resources.get("rss_bytes")
-            or resources.get("executor_rss_bytes")
-            or 0
-        )
-        scope = " shared" if resources.get("scope") == "executor_shared" else ""
-        monitor_table.add_row(
-            name.removesuffix("_health"),
-            str(health.get("status", "unknown")),
-            f"{float(raw.get('rate_hz', 0.0)):.1f} Hz",
-            f"{float(raw.get('p95_ms', 0.0)):.2f} ms",
-            *(
-                [
-                    str(raw.get("messages", 0)),
-                    _bytes(memory) + scope,
-                ]
-                if operations
-                else []
-            ),
-        )
-    if not monitors:
-        monitor_table.add_row("-", "none", "-", "-")
-
-    edges = Text()
-    active = 0
-    for raw in list(data.get("edges") or []):
-        edge = dict(raw)
-        depth = int(edge.get("depth", 0))
-        stale = int(edge.get("stale_skips", 0))
-        overflow = int(edge.get("overflow_drops", 0))
-        if not (depth or stale or overflow):
-            continue
-        active += 1
-        edges.append(
-            f"{edge.get('source')} → {edge.get('target')} "
-            f"queue={depth}/{int(edge.get('capacity', 0))}"
-        )
-        if stale:
-            edges.append(f" stale={stale}", style="yellow")
-        if overflow:
-            edges.append(f" overflow={overflow}", style="red")
-        edges.append("\n")
-    if active == 0:
-        edges.append("No queue pressure or overflow", style="dim")
-
-    return Group(
-        header,
-        machine,
-        Text(""),
-        _heading("APPLICATIONS"),
-        application_table,
-        Text(""),
-        _heading("MONITORS"),
-        monitor_table,
-        Text(""),
-        _heading("EDGES"),
-        edges,
-    )
+    return _builtin(view)
 
 
 def render_top_view(
     data: dict[str, object],
     view: str = "compact",
+    *,
+    project: Path | None = None,
 ):
-    selected = view.strip().lower()
-    if selected == "debug":
-        return render_top(data)
-    if selected == "operations":
-        return _compact(data, operations=True)
-    if selected == "compact":
-        return _compact(data, operations=False)
-    raise ValueError(
-        f"Unknown top view {view!r}; choose compact, operations, or debug"
-    )
+    return _render_top_view(data, resolve_top_view(view, project))
+
+
+__all__ = ["TOP_VIEW_SPECS", "TopViewSpec", "resolve_top_view", "render_top_view"]

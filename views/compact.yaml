@@ -5,6 +5,7 @@ style:
   spacing: compact
 sections:
   - runtime
+  - health
+  - graph
   - applications
-  - monitors
-  - edges
+  - attention

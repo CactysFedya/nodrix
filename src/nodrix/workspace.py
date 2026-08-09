@@ -448,7 +448,11 @@ def default_view(start: str | Path | None = None) -> str:
     if root is None:
         return "compact"
     config = _load_yaml(root / PROJECT_FILE)
-    return str(_mapping(config.get("defaults")).get("view") or "compact")
+    defaults = _mapping(config.get("defaults"))
+    context_name = _active_context(root, config)
+    contexts = _mapping(config.get("contexts"))
+    context = _mapping(contexts.get(context_name)) if context_name else {}
+    return str(context.get("view") or defaults.get("view") or "compact")
 
 
 def create_workspace(directory: Path, *, force: bool = False) -> list[Path]:

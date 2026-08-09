@@ -15,11 +15,11 @@ import yaml
 from .cli_context import app, console
 from .local_dev import compile_local_project, reset_local_development_modules
 from .manifest import load_manifest
+from .presentation import render_system_plan as render_system_plan_view, render_validation
 from .project_foundation import resolve_project_resource
 from .workspace import find_workspace
 from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefinition
 from .system import (
-    BackendContext,
     BackendExecutionState,
     DefinitionCatalog,
     LocalBackend,
@@ -209,32 +209,16 @@ def system_validate(
     if json_output:
         console.print_json(json.dumps(payload, ensure_ascii=False))
     else:
-        status = "VALID" if payload["ok"] else "INVALID"
-        color = "green" if payload["ok"] else "red"
-        mode = "definitions resolved" if effective_project is not None else "structural"
+        mode = "definitions resolved" if project is not None else "structural"
         console.print(
-            f"[{color}]{status}[/{color}] "
-            f"[bold]{system.name}[/bold] · {mode}"
+            render_validation(
+                name=system.name,
+                valid=bool(payload["ok"]),
+                mode=mode,
+                diagnostics=report.diagnostics,
+                noun="SYSTEM",
+            )
         )
-
-        if report.diagnostics:
-            table = Table(box=None, show_edge=False, pad_edge=False)
-            table.add_column("LEVEL")
-            table.add_column("CODE")
-            table.add_column("PATH")
-            table.add_column("MESSAGE")
-            for item in report.diagnostics:
-                style = "red" if item.level == "error" else "yellow"
-                table.add_row(
-                    item.level.upper(),
-                    item.code,
-                    item.path or "-",
-                    item.message,
-                    style=style,
-                )
-            console.print(table)
-        else:
-            console.print("No diagnostics.")
 
     if not payload["ok"]:
         raise typer.Exit(1)
@@ -273,276 +257,7 @@ def _plan_jsonable(plan) -> dict:
 
 
 def _render_system_plan(plan) -> None:
-    console.print(
-        f"[bold]PLAN {plan.system}[/bold] · {plan.schema_id} · "
-        f"sha256:{plan.system_sha256[:12]}"
-    )
-
-    counts = Table(box=None, show_edge=False, pad_edge=False)
-    for label in (
-        "TARGETS",
-        "RESOURCES",
-        "APPLICATIONS",
-        "GRAPHS",
-        "NODES",
-        "CONNECTIONS",
-        "LINKS",
-        "ARTIFACTS",
-    ):
-        counts.add_column(label, justify="right")
-    counts.add_row(
-        str(plan.summary.get("targets", 0)),
-        str(plan.summary.get("resources", 0)),
-        str(plan.summary.get("applications", 0)),
-        str(plan.summary.get("graphs", 0)),
-        str(plan.summary.get("nodes", 0)),
-        str(plan.summary.get("connections", 0)),
-        str(plan.summary.get("links", 0)),
-        str(plan.summary.get("artifacts", 0)),
-    )
-    console.print(counts)
-
-    backend_names = _plan_backend_names(plan)
-    if backend_names:
-        table = Table(
-            title="BACKENDS",
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-        )
-        table.add_column("BACKEND")
-        table.add_column("TARGETS", justify="right")
-        table.add_column("RESOURCES", justify="right")
-        table.add_column("APPS", justify="right")
-        table.add_column("GRAPHS", justify="right")
-        table.add_column("NODES", justify="right")
-        table.add_column("IN", justify="right")
-        table.add_column("OUT", justify="right")
-        for backend in backend_names:
-            context = BackendContext.from_plan(plan, backend)
-            table.add_row(
-                backend,
-                str(len(context.targets)),
-                str(len(context.resources)),
-                str(len(context.applications)),
-                str(len(context.graph_names)),
-                str(len(context.nodes)),
-                str(len(context.inbound_links)),
-                str(len(context.outbound_links)),
-            )
-        console.print(table)
-
-    if plan.targets:
-        table = Table(
-            title="TARGETS",
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-        )
-        table.add_column("TARGET")
-        table.add_column("KIND")
-        table.add_column("BACKEND")
-        table.add_column("SOURCE")
-        for target in plan.targets:
-            table.add_row(
-                target.name,
-                target.kind,
-                target.backend,
-                "implicit" if target.implicit else "declared",
-            )
-        console.print(table)
-
-    if plan.resources:
-        order = {
-            name: index + 1
-            for index, name in enumerate(plan.resource_order)
-        }
-        table = Table(
-            title="RESOURCES",
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-        )
-        table.add_column("#", justify="right")
-        table.add_column("RESOURCE")
-        table.add_column("USES")
-        table.add_column("TARGET")
-        table.add_column("BACKEND")
-        table.add_column("BINDINGS")
-        for resource in sorted(
-            plan.resources,
-            key=lambda item: order.get(item.name, item.ordinal + 1),
-        ):
-            bindings = ", ".join(
-                f"{slot}={name}"
-                for slot, name in resource.bindings.items()
-            )
-            table.add_row(
-                str(order.get(resource.name, resource.ordinal + 1)),
-                resource.name,
-                resource.uses,
-                resource.target,
-                resource.backend,
-                bindings or "-",
-            )
-        console.print(table)
-
-    if plan.applications:
-        table = Table(
-            title="APPLICATIONS",
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-        )
-        table.add_column("APPLICATION")
-        table.add_column("USES")
-        table.add_column("TARGET")
-        table.add_column("BACKEND")
-        table.add_column("RESOURCES")
-        for application in plan.applications:
-            resources = ", ".join(
-                f"{slot}={name}"
-                for slot, name in application.resources.items()
-            )
-            table.add_row(
-                application.name,
-                application.uses,
-                application.target,
-                application.backend,
-                resources or "-",
-            )
-        console.print(table)
-
-    if plan.graphs:
-        nodes = Table(
-            title="GRAPH EXECUTION ORDER",
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-        )
-        nodes.add_column("GRAPH")
-        nodes.add_column("#", justify="right")
-        nodes.add_column("NODE")
-        nodes.add_column("USES")
-        nodes.add_column("TARGET")
-        nodes.add_column("BACKEND")
-        for graph in plan.graphs:
-            order = {
-                name: index + 1
-                for index, name in enumerate(graph.topological_order)
-            }
-            if not graph.nodes:
-                nodes.add_row(graph.name, "-", "-", "-", "-", "-")
-                continue
-            for node in sorted(
-                graph.nodes,
-                key=lambda item: order.get(item.name, item.ordinal + 1),
-            ):
-                nodes.add_row(
-                    graph.name,
-                    str(order.get(node.name, node.ordinal + 1)),
-                    node.name,
-                    node.uses,
-                    node.target,
-                    node.backend,
-                )
-        console.print(nodes)
-
-        connections = [
-            connection
-            for graph in plan.graphs
-            for connection in graph.connections
-        ]
-        if connections:
-            table = Table(
-                title="CONNECTIONS",
-                box=None,
-                show_edge=False,
-                pad_edge=False,
-            )
-            table.add_column("GRAPH")
-            table.add_column("FROM")
-            table.add_column("TO")
-            table.add_column("TYPE")
-            table.add_column("TARGET")
-            table.add_column("BACKEND")
-            for connection in connections:
-                table.add_row(
-                    connection.graph,
-                    connection.source,
-                    connection.target,
-                    connection.type_id or "-",
-                    connection.placement_target,
-                    connection.backend,
-                )
-            console.print(table)
-
-    if plan.links:
-        table = Table(
-            title="SYSTEM LINKS",
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-        )
-        table.add_column("FROM")
-        table.add_column("TO")
-        # Keep execution semantics visible even in an 80-column terminal.
-        # Target/backend ownership is already displayed in the sections above.
-        table.add_column("BOUNDARY", no_wrap=True)
-        table.add_column("TRANSPORT", no_wrap=True)
-        for link in plan.links:
-            table.add_row(
-                link.source,
-                link.target,
-                link.boundary,
-                link.transport_uses or "-",
-            )
-        console.print(table)
-
-    if plan.artifacts:
-        table = Table(
-            title="ARTIFACTS",
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-        )
-        table.add_column("ARTIFACT")
-        table.add_column("KIND")
-        table.add_column("PRODUCER")
-        table.add_column("TARGET")
-        table.add_column("BACKEND")
-        table.add_column("PATH")
-        for artifact in plan.artifacts:
-            table.add_row(
-                artifact.name,
-                artifact.kind,
-                artifact.producer or "-",
-                artifact.target or "-",
-                artifact.backend or "-",
-                artifact.path or "-",
-            )
-        console.print(table)
-
-    if plan.diagnostics:
-        table = Table(
-            title="DIAGNOSTICS",
-            box=None,
-            show_edge=False,
-            pad_edge=False,
-        )
-        table.add_column("LEVEL")
-        table.add_column("CODE")
-        table.add_column("PATH")
-        table.add_column("MESSAGE")
-        for item in plan.diagnostics:
-            table.add_row(
-                item.level.upper(),
-                item.code,
-                item.path or "-",
-                item.message,
-                style="yellow",
-            )
-        console.print(table)
+    console.print(render_system_plan_view(plan))
 
 
 @system_app.command("plan")

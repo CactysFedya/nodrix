@@ -1,12 +1,14 @@
 schema: nodrix.view/v1
-name: operations
+name: debug
 style:
   borders: none
   spacing: compact
 sections:
   - runtime
   - health
+  - performance
   - applications
   - monitors
   - queues
   - attention
+  - debug
