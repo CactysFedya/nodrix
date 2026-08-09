@@ -47,6 +47,7 @@ def _local_backend_for_scope(
         working_directory=working_directory,
         run_root=run_root,
         stop_timeout_seconds=stop_timeout,
+        scope_name=scope.target,
     )
 
 
