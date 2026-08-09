@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 
+from click import unstyle
 from typer.testing import CliRunner
 
 import nodrix.cli_system_commands as system_cli
 from nodrix.cli import app
 from nodrix.system import (
+    BackendCapabilities,
     BackendDiagnostic,
+    BackendExecutionHandle,
     BackendExecutionState,
     BackendExecutionStatus,
     BackendValidationReport,
+    ExecutionBackend,
     Graph,
     NodeInstance,
+    PreparedExecution,
     SystemModel,
     Target,
     dump_system,
@@ -23,7 +27,7 @@ from nodrix.system import (
 runner = CliRunner()
 
 
-class FakeLocalBackend:
+class FakeLocalBackend(ExecutionBackend):
     instances: list["FakeLocalBackend"] = []
     statuses: list[BackendExecutionStatus] = []
     inspect_error: BaseException | None = None
@@ -31,9 +35,17 @@ class FakeLocalBackend:
     stopped = False
 
     def __init__(self, **kwargs):
+        super().__init__(
+            "local",
+            capabilities=BackendCapabilities(
+                target_kinds=frozenset({"local", "host"}),
+            ),
+        )
         self.kwargs = kwargs
-        self.prepared_plan = None
+        self.prepared_context = None
         self.started = False
+        self.stop_timeout = None
+        self.instance_number = len(type(self).instances) + 1
         type(self).instances.append(self)
 
     @classmethod
@@ -44,30 +56,43 @@ class FakeLocalBackend:
         cls.validation_report = BackendValidationReport(backend="local")
         cls.stopped = False
 
-    def validate_plan(self, plan):
-        self.plan = plan
-        return type(self).validation_report
+    def _validate(self, context):
+        self.validated_context = context
+        return type(self).validation_report.diagnostics
 
-    def prepare_plan(self, plan):
-        self.prepared_plan = plan
-        return SimpleNamespace(
+    def _prepare(self, context):
+        self.prepared_context = context
+        return PreparedExecution(
+            backend="local",
+            context=context,
             metadata={"manifest_path": "/tmp/generated-local.yaml"},
         )
 
-    def start(self, prepared):
+    def _start(self, prepared):
         self.started = True
-        return SimpleNamespace(execution_id="fake-001")
+        return BackendExecutionHandle(
+            backend="local",
+            execution_id=f"fake-{self.instance_number:03d}",
+            prepared=prepared,
+        )
 
-    def inspect(self, handle):
+    def _inspect(self, handle):
         if type(self).inspect_error is not None:
             error = type(self).inspect_error
             type(self).inspect_error = None
             raise error
         if not type(self).statuses:
             raise AssertionError("FakeLocalBackend has no status to return")
-        return type(self).statuses.pop(0)
+        template = type(self).statuses.pop(0)
+        return BackendExecutionStatus(
+            backend="local",
+            execution_id=handle.execution_id,
+            state=template.state,
+            message=template.message,
+            details=template.details,
+        )
 
-    def stop(self, handle, *, timeout_seconds=None):
+    def _stop(self, handle, *, timeout_seconds=None):
         type(self).stopped = True
         self.stop_timeout = timeout_seconds
         return BackendExecutionStatus(
@@ -80,7 +105,7 @@ class FakeLocalBackend:
 def _status(state: BackendExecutionState, *, message: str | None = None):
     return BackendExecutionStatus(
         backend="local",
-        execution_id="fake-001",
+        execution_id="template",
         state=state,
         message=message,
     )
@@ -106,16 +131,17 @@ def _write_local_system(path: Path, *, name: str = "run-test") -> None:
 def test_system_help_lists_run_command() -> None:
     result = runner.invoke(app, ["system", "--help"])
     assert result.exit_code == 0, result.output
-    assert "run" in result.output
+    assert "run" in unstyle(result.output)
 
 
 def test_system_run_help_exposes_execution_options() -> None:
     result = runner.invoke(app, ["system", "run", "--help"])
     assert result.exit_code == 0, result.output
-    assert "--project" in result.output
-    assert "--run-root" in result.output
-    assert "--stop-timeout" in result.output
-    assert "--warnings-as-errors" in result.output
+    output = unstyle(result.output)
+    assert "--project" in output
+    assert "--run-root" in output
+    assert "--stop-timeout" in output
+    assert "--warnings-as-errors" in output
 
 
 def test_system_run_executes_local_backend_to_completion(
@@ -139,13 +165,14 @@ def test_system_run_executes_local_backend_to_completion(
     assert "STARTED" in result.output
     assert "RUNNING" in result.output
     assert "COMPLETED" in result.output
+    assert "local:local" in result.output
     backend = FakeLocalBackend.instances[-1]
-    assert backend.prepared_plan.system == "run-test"
+    assert backend.prepared_context.plan.system == "run-test"
     assert backend.started is True
     assert backend.kwargs["working_directory"] == tmp_path.resolve()
 
 
-def test_system_run_failed_backend_status_returns_nonzero(
+def test_system_run_failed_scope_stops_remaining_execution(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -165,9 +192,10 @@ def test_system_run_failed_backend_status_returns_nonzero(
     assert result.exit_code == 1
     assert "FAILED" in result.output
     assert "RuntimeError: boom" in result.output
+    assert FakeLocalBackend.stopped is True
 
 
-def test_system_run_rejects_non_local_backend_before_prepare(
+def test_system_run_reports_missing_non_local_backend_binding(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -203,8 +231,9 @@ def test_system_run_rejects_non_local_backend_before_prepare(
     result = runner.invoke(app, ["system", "run", str(path)])
 
     assert result.exit_code == 1
-    assert "RUN101" in result.output
-    assert "remote" in result.output
+    assert "ORCH101" in result.output
+    assert "RUN103" in result.output
+    assert "worker:remote" in result.output
     assert FakeLocalBackend.instances == []
 
 
@@ -233,10 +262,10 @@ def test_system_run_surfaces_backend_validation_errors(
     assert result.exit_code == 1
     assert "LOCAL999" in result.output
     assert "RUN103" in result.output
-    assert FakeLocalBackend.instances[-1].prepared_plan is None
+    assert FakeLocalBackend.instances[-1].prepared_context is None
 
 
-def test_system_run_ctrl_c_requests_backend_stop(
+def test_system_run_ctrl_c_requests_orchestrated_stop(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -264,7 +293,7 @@ def test_system_run_ctrl_c_requests_backend_stop(
     assert FakeLocalBackend.instances[-1].stop_timeout == 0.25
 
 
-def test_system_run_execution_exception_attempts_stop(
+def test_system_run_inspect_exception_becomes_failure_and_stops(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -277,7 +306,7 @@ def test_system_run_execution_exception_attempts_stop(
     result = runner.invoke(app, ["system", "run", str(path)])
 
     assert result.exit_code == 1
-    assert "System execution failed" in result.output
+    assert "FAILED" in result.output
     assert "inspect exploded" in result.output
     assert FakeLocalBackend.stopped is True
 
@@ -332,9 +361,73 @@ def test_system_run_with_project_resolves_sdk_and_passes_project(
 
     assert result.exit_code == 0, result.output
     backend = FakeLocalBackend.instances[-1]
-    assert backend.kwargs["project"] == project
+    assert backend.kwargs["project"] == project.resolve()
     assert backend.kwargs["run_root"] == tmp_path / "runs"
     assert "COMPLETED" in result.output
+
+
+def test_system_run_handles_multiple_independent_local_scopes(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "multi-local.yaml"
+    dump_system(
+        SystemModel(
+            name="multi-local",
+            targets=(
+                Target(
+                    name="robot",
+                    kind="host",
+                    properties={"backend": "local"},
+                ),
+                Target(
+                    name="workstation",
+                    kind="host",
+                    properties={"backend": "local"},
+                ),
+            ),
+            graphs=(
+                Graph(
+                    name="robot_graph",
+                    nodes=(
+                        NodeInstance(
+                            name="source",
+                            uses="demo.source",
+                            target="robot",
+                        ),
+                    ),
+                ),
+                Graph(
+                    name="workstation_graph",
+                    nodes=(
+                        NodeInstance(
+                            name="sink",
+                            uses="demo.sink",
+                            target="workstation",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        path,
+    )
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(BackendExecutionState.RUNNING),
+        _status(BackendExecutionState.RUNNING),
+        _status(BackendExecutionState.COMPLETED),
+        _status(BackendExecutionState.COMPLETED),
+    ]
+    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(system_cli.time, "sleep", lambda _: None)
+
+    result = runner.invoke(app, ["system", "run", str(path)])
+
+    assert result.exit_code == 0, result.output
+    assert len(FakeLocalBackend.instances) == 2
+    assert "robot:local" in result.output
+    assert "workstation:local" in result.output
+    assert "scopes=2" in result.output
 
 
 def test_system_run_warnings_as_errors_refuses_cycle(
