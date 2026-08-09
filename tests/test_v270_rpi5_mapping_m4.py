@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from types import SimpleNamespace
 import sys
 
 import yaml
@@ -12,8 +11,12 @@ from nodrix.build_recipes import compile_project_build_workflow
 from nodrix.cli import app
 from nodrix.system import (
     ApplicationInstance,
+    BackendCapabilities,
+    BackendExecutionHandle,
     BackendExecutionState,
     BackendExecutionStatus,
+    ExecutionBackend,
+    PreparedExecution,
     ResourceInstance,
     SystemModel,
     Graph,
@@ -143,32 +146,45 @@ def test_ros_session_expands_project_root_environment(
     )
 
 
-class _FakeBackend:
+class _FakeBackend(ExecutionBackend):
     instances: list["_FakeBackend"] = []
 
     def __init__(self, **kwargs):
+        super().__init__(
+            "local",
+            capabilities=BackendCapabilities(
+                target_kinds=frozenset({"local", "host"}),
+            ),
+        )
         self.kwargs = kwargs
         type(self).instances.append(self)
 
-    def validate_plan(self, plan):
-        from nodrix.system import BackendValidationReport
-        return BackendValidationReport(backend="local")
+    def _validate(self, context):
+        return ()
 
-    def prepare_plan(self, plan):
-        return SimpleNamespace(metadata={"manifest_path": "/tmp/generated.yaml"})
+    def _prepare(self, context):
+        return PreparedExecution(
+            backend=self.backend_id,
+            context=context,
+            metadata={"manifest_path": "/tmp/generated.yaml"},
+        )
 
-    def start(self, prepared):
-        return SimpleNamespace(execution_id="m4")
+    def _start(self, prepared):
+        return BackendExecutionHandle(
+            backend=self.backend_id,
+            execution_id="m4",
+            prepared=prepared,
+        )
 
-    def inspect(self, handle):
+    def _inspect(self, handle):
         return BackendExecutionStatus(
-            backend="local",
+            backend=self.backend_id,
             execution_id=handle.execution_id,
             state=BackendExecutionState.COMPLETED,
         )
 
-    def stop(self, handle, *, timeout_seconds=None):
-        return self.inspect(handle)
+    def _stop(self, handle, *, timeout_seconds=None):
+        return self._inspect(handle)
 
 
 def test_nested_registered_system_executes_from_workspace_root(
