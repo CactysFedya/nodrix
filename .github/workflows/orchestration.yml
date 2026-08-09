@@ -49,6 +49,7 @@ jobs:
             tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
             tests/test_system_run_cli.py \
+            tests/test_system_run_multi_local_integration.py \
             tests/test_system_planning.py
 
       - name: Run orchestration contract tests
@@ -57,4 +58,5 @@ jobs:
             tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
             tests/test_system_run_cli.py \
+            tests/test_system_run_multi_local_integration.py \
             tests/test_system_planning.py
