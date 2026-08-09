@@ -102,18 +102,25 @@ def format_bytes(value: object) -> str:
     return f"{number:.1f} {units[index]}"
 
 
+
 def format_duration(value: object) -> str:
     try:
-        seconds = max(0, int(float(value or 0)))
+        seconds = max(0.0, float(value or 0.0))
     except (TypeError, ValueError):
         return "-"
-    hours, rem = divmod(seconds, 3600)
+    if seconds < 1.0:
+        milliseconds = seconds * 1000.0
+        if milliseconds < 1.0 and seconds > 0:
+            return "<1 ms"
+        return f"{milliseconds:.0f} ms"
+    if seconds < 60.0:
+        return f"{seconds:.1f}s" if not seconds.is_integer() else f"{int(seconds)}s"
+    whole = int(seconds)
+    hours, rem = divmod(whole, 3600)
     minutes, secs = divmod(rem, 60)
     if hours:
         return f"{hours}h {minutes:02d}m {secs:02d}s"
-    if minutes:
-        return f"{minutes}m {secs:02d}s"
-    return f"{secs}s"
+    return f"{minutes}m {secs:02d}s"
 
 
 def _bar(value: float, maximum: float, width: int = 18) -> str:
@@ -231,31 +238,40 @@ def _machine_totals(data: Mapping[str, object]) -> tuple[float, float, int, floa
     return cpu, rss, cpu_count, total_memory
 
 
+
 def _machine_line(data: Mapping[str, object]) -> Text:
     system = _mapping(data.get("system", {}))
     cpu, rss, cpu_count, total_memory = _machine_totals(data)
-    cpu_max = cpu_count * 100.0
+    used_cores = max(cpu, 0.0) / 100.0
 
     text = Text()
     text.append("CPU  ", style="bold")
-    text.append(f"{cpu:5.1f}/{cpu_max:.0f}% ")
-    text.append(_bar(cpu, cpu_max), style="green" if cpu <= cpu_max * 0.8 else "yellow")
+    text.append(f"{used_cores:.2f} / {cpu_count} {'core' if cpu_count == 1 else 'cores'}")
     text.append("   RAM  ", style="bold")
     text.append(format_bytes(rss))
     if total_memory > 0:
         text.append(f" / {format_bytes(total_memory)}")
 
+    secondary: list[tuple[str, str, str | None]] = []
     temperature = system.get("temperature_c")
     if temperature is not None:
         value = float(temperature)
         style = "red" if value >= 85 else "yellow" if value >= 75 else "green"
-        text.append("   TEMP ", style="bold")
-        text.append(f"{value:.1f}°C", style=style)
+        secondary.append(("TEMP", f"{value:.1f}°C", style))
 
     load = list(system.get("load_average") or [])
     if load:
-        text.append("   LOAD ", style="bold")
-        text.append(" ".join(f"{float(item):.2f}" for item in load[:3]))
+        secondary.append(
+            ("LOAD", " · ".join(f"{float(item):.2f}" for item in load[:3]), None)
+        )
+
+    if secondary:
+        text.append("\n")
+        for index, (label, value, style) in enumerate(secondary):
+            if index:
+                text.append("   ")
+            text.append(f"{label} ", style="bold")
+            text.append(value, style=style)
     return text
 
 
@@ -321,6 +337,7 @@ def _node_rate_label(name: str) -> str:
     return "monitor Hz" if name.endswith("_health") else "Hz"
 
 
+
 def _node_line(
     name: str,
     raw: Mapping[str, Any],
@@ -328,12 +345,21 @@ def _node_line(
     performance: bool,
     bottleneck_p95: float,
 ) -> Text:
+    # A relative maximum is not itself a problem. Without an explicit
+    # rate/latency target Nodrix must not label a healthy node a bottleneck.
+    _ = bottleneck_p95
     health = _mapping(raw.get("health", {}))
     resources = _mapping(raw.get("resources", {}))
     info = _mapping(raw.get("runtime_info", {}))
     status = _node_status(raw)
     rate = float(raw.get("rate_hz", 0.0) or 0.0)
-    p95 = float(raw.get("p95_ms", _mapping(raw.get("processing", {})).get("p95_ms", 0.0)) or 0.0)
+    p95 = float(
+        raw.get(
+            "p95_ms",
+            _mapping(raw.get("processing", {})).get("p95_ms", 0.0),
+        )
+        or 0.0
+    )
 
     text = Text()
     text.append(f"{_state_symbol(status)} ", style=_state_style(status))
@@ -343,16 +369,21 @@ def _node_line(
     if performance:
         text.append(f"  p95 {p95:.2f} ms")
         if resources.get("scope") == "executor_shared":
-            text.append("  CPU/RAM shared executor", style="dim")
+            text.append("  shared executor", style="dim")
         else:
             if resources.get("cpu_percent") is not None:
-                text.append(f"  CPU {float(resources.get('cpu_percent', 0.0)):.1f}%")
+                text.append(
+                    f"  CPU {float(resources.get('cpu_percent', 0.0)) / 100.0:.2f} core"
+                )
             memory = resources.get("rss_bytes") or resources.get("shared_buffer_bytes")
             if memory:
                 text.append(f"  RAM {format_bytes(memory)}")
         backend = info.get("backend")
         if backend:
-            text.append(f"  {backend}", style="green" if info.get("hardware") else "cyan")
+            text.append(
+                f"  {backend}",
+                style="green" if info.get("hardware") else "cyan",
+            )
         threads = info.get("threads")
         if threads is not None:
             text.append(f" · {threads} threads", style="dim")
@@ -360,14 +391,11 @@ def _node_line(
         overflow = int(resources.get("overflow_drops", 0) or 0)
         sync = int(resources.get("sync_misses", 0) or 0)
         if stale:
-            text.append(f"  stale={stale}", style="yellow")
+            text.append(f"  stale={stale}", style="dim")
         if overflow:
             text.append(f"  overflow={overflow}", style="red")
         if sync:
             text.append(f"  sync={sync}", style="magenta")
-        participates = bool(health.get("participates_in_throughput", True))
-        if participates and p95 > 0 and bottleneck_p95 > 0 and p95 >= bottleneck_p95 * 0.95:
-            text.append("  BOTTLENECK", style="bold red")
 
     if _state(status) not in GOOD_STATES:
         text.append(f"  {str(status).upper()}", style=_state_style(status))
@@ -527,35 +555,19 @@ def _edge_lines(data: Mapping[str, object], *, all_edges: bool) -> Text:
     return text
 
 
+
 def _attention(data: Mapping[str, object]) -> Text:
+    # Only actionable problems belong here. Relative ranking such as
+    # "highest p95" remains a measurement unless an explicit target is violated.
     text = Text()
-    issues = 0
     nodes = _nodes(data)
     applications = _applications(data)
-
-    throughput = [
-        (name, raw)
-        for name, raw in nodes.items()
-        if bool(_mapping(raw.get("health", {})).get("participates_in_throughput", True))
-    ]
-    p95_items = [
-        (float(raw.get("p95_ms", 0.0) or 0.0), name)
-        for name, raw in throughput
-        if float(raw.get("p95_ms", 0.0) or 0.0) > 0
-    ]
-    if len(p95_items) >= 2:
-        p95, name = max(p95_items)
-        issues += 1
-        text.append("! ", style="yellow")
-        text.append(name, style="bold")
-        text.append(f" has the highest processing p95 ({p95:.2f} ms)")
-        text.append("\n", style="dim")
 
     for name, raw in nodes.items():
         health = _mapping(raw.get("health", {}))
         status = health.get("status", "unknown")
-        if _state(status) in BAD_STATES:
-            issues += 1
+        state = _state(status)
+        if state in BAD_STATES:
             text.append("✗ ", style="red")
             text.append(name, style="bold")
             text.append(f" is {status}")
@@ -563,8 +575,7 @@ def _attention(data: Mapping[str, object]) -> Text:
             if error:
                 text.append(f" · {error}", style="red")
             text.append("\n")
-        elif _state(status) not in GOOD_STATES:
-            issues += 1
+        elif state not in GOOD_STATES:
             text.append("! ", style="yellow")
             text.append(name, style="bold")
             text.append(f" is {status}")
@@ -574,25 +585,23 @@ def _attention(data: Mapping[str, object]) -> Text:
             text.append("\n")
 
     overflow_total = 0
-    stale_total = 0
     for edge in _edges(data):
         overflow = int(edge.get("overflow_drops", 0) or 0)
-        stale = int(edge.get("stale_skips", 0) or 0)
         overflow_total += overflow
-        stale_total += stale
         capacity = int(edge.get("capacity", 0) or 0)
         depth = int(edge.get("depth", 0) or 0)
         if capacity > 0 and depth / capacity >= 0.8:
-            issues += 1
             text.append("! ", style="yellow")
-            text.append(f"{edge.get('source')} → {edge.get('target')}", style="bold")
+            text.append(
+                f"{edge.get('source')} → {edge.get('target')}",
+                style="bold",
+            )
             text.append(f" queue pressure {depth}/{capacity}\n")
     if overflow_total:
-        issues += 1
-        text.append(f"✗ {overflow_total} queue overflow drop(s)\n", style="red")
-    if stale_total:
-        issues += 1
-        text.append(f"! {stale_total} stale message(s) skipped\n", style="yellow")
+        text.append(
+            f"✗ {overflow_total} queue overflow drop(s)\n",
+            style="red",
+        )
 
     restart_total = 0
     for name, raw in applications.items():
@@ -600,32 +609,22 @@ def _attention(data: Mapping[str, object]) -> Text:
         restarts = int(raw.get("restart_count", raw.get("restarts", 0)) or 0)
         restart_total += restarts
         if _state(status) not in GOOD_STATES:
-            issues += 1
             text.append("! ", style="yellow")
             text.append(name, style="bold")
             text.append(f" application is {status}\n")
     if restart_total:
-        issues += 1
-        text.append(f"! {restart_total} managed application restart(s)\n", style="yellow")
-
-    if issues == 0:
-        text.append("✓ no component failures\n", style="green")
-        text.append("✓ no queue overflow\n", style="green")
-        text.append("✓ no application restarts", style="green")
+        text.append(
+            f"! {restart_total} managed application restart(s)\n",
+            style="yellow",
+        )
     return text
+
 
 
 def render_top_view(
     data: dict[str, object],
     view: str | TopViewSpec = "compact",
 ) -> Group:
-    """Render one of the semantic, borderless runtime dashboards.
-
-    A resolved :class:`TopViewSpec` may be supplied by ``workspace_views`` so
-    ``nodrix.view/v1`` files can control sections without coupling YAML parsing
-    to this presentation module.
-    """
-
     if isinstance(view, TopViewSpec):
         spec = view
         selected = spec.name.strip().lower()
@@ -634,7 +633,10 @@ def render_top_view(
         if selected == "compact":
             selected = "overview"
         if selected not in TOP_VIEW_SPECS:
-            choices = "overview, performance, operations, debug (compact is an alias for overview)"
+            choices = (
+                "overview, performance, operations, debug "
+                "(compact is an alias for overview)"
+            )
             raise ValueError(f"Unknown top view {view!r}; choose {choices}")
         spec = TOP_VIEW_SPECS[selected]
 
@@ -655,12 +657,15 @@ def render_top_view(
         sections.extend(
             [
                 Text(""),
-                _section("GRAPH" if not spec.show_node_performance else "PERFORMANCE"),
+                _section(
+                    "GRAPH" if not spec.show_node_performance else "PERFORMANCE"
+                ),
                 _graph(data, performance=spec.show_node_performance),
             ]
         )
 
-    if spec.show_applications:
+    applications = _applications(data)
+    if spec.show_applications and (applications or spec.show_debug_details):
         sections.extend(
             [
                 Text(""),
@@ -673,7 +678,13 @@ def render_top_view(
             ]
         )
 
-    if spec.show_monitors:
+    monitors = {
+        name: raw
+        for name, raw in _nodes(data).items()
+        if name.endswith("_health")
+        or "topic_monitor" in str(raw.get("uses", ""))
+    }
+    if spec.show_monitors and (monitors or spec.show_debug_details):
         sections.extend(
             [
                 Text(""),
@@ -692,13 +703,9 @@ def render_top_view(
         )
 
     if spec.show_attention:
-        sections.extend(
-            [
-                Text(""),
-                _section("ATTENTION"),
-                _attention(data),
-            ]
-        )
+        attention = _attention(data)
+        if attention.plain.strip():
+            sections.extend([Text(""), _section("ATTENTION"), attention])
 
     if spec.show_debug_details:
         system = _mapping(data.get("system", {}))
@@ -707,16 +714,27 @@ def render_top_view(
         if executor:
             debug.append("shared executor", style="bold")
             debug.append(
-                f"  CPU {float(executor.get('executor_cpu_percent', 0.0) or 0.0):.1f}%"
+                f"  CPU "
+                f"{float(executor.get('executor_cpu_percent', 0.0) or 0.0) / 100.0:.2f} core"
                 f"  RAM {format_bytes(executor.get('executor_rss_bytes', 0))}\n"
             )
         if system:
             for key in sorted(system):
-                if key in {"load_average", "temperature_c", "cpu_count", "memory_total_bytes"}:
+                if key in {
+                    "load_average",
+                    "temperature_c",
+                    "cpu_count",
+                    "memory_total_bytes",
+                }:
                     continue
                 debug.append(f"{key}: {system[key]}\n", style="dim")
-        sections.extend([Text(""), _section("DEBUG"), debug or Text("No extra debug fields", style="dim")])
-
+        sections.extend(
+            [
+                Text(""),
+                _section("DEBUG"),
+                debug or Text("No extra debug fields", style="dim"),
+            ]
+        )
     return Group(*sections)
 
 
@@ -794,21 +812,39 @@ def render_status(data: dict[str, object], *, run_id: str | None = None) -> Grou
     return Group(*sections)
 
 
-def render_health(data: dict[str, object]) -> Group:
-    """Render readiness/health details without a table or border."""
 
+def render_health(data: dict[str, object]) -> Group:
     lines = Text()
+    run_state = _state(data.get("status"))
+    terminal = run_state in {"completed", "stopped", "failed"}
+
     for name, raw in _nodes(data).items():
         health = _mapping(raw.get("health", {}))
         status = health.get("status", health.get("state", "unknown"))
+        state = str(health.get("state") or "").strip().lower()
+
         lines.append(f"{_state_symbol(status)} ", style=_state_style(status))
         lines.append(name, style="bold")
-        lines.append(f"  {str(status).upper()}", style=_state_style(status))
-        lines.append("  alive " + ("yes" if health.get("alive") else "no"), style="dim")
-        lines.append("  ready " + ("yes" if health.get("ready") else "no"), style="dim")
+
+        if terminal:
+            lifecycle = state.upper() if state else "STOPPED"
+            lines.append(f"  {lifecycle}", style="dim")
+            lines.append(f" · {str(status).lower()}", style=_state_style(status))
+        else:
+            lines.append(f"  {str(status).upper()}", style=_state_style(status))
+            if health.get("ready"):
+                lines.append(" · ready", style="green")
+            elif health.get("alive"):
+                lines.append(" · alive", style="dim")
+            else:
+                lines.append(" · not ready", style="yellow")
+
         pressure = float(health.get("queue_pressure", 0.0) or 0.0)
         if pressure:
-            lines.append(f"  queue {pressure:.2f}", style="yellow" if pressure >= 0.8 else "dim")
+            lines.append(
+                f"  queue {pressure:.2f}",
+                style="yellow" if pressure >= 0.8 else "dim",
+            )
         restarts = int(health.get("restart_count", 0) or 0)
         if restarts:
             lines.append(f"  restarts {restarts}", style="yellow")
@@ -816,9 +852,17 @@ def render_health(data: dict[str, object]) -> Group:
         if error:
             lines.append(f"\n  {error}", style="red")
         lines.append("\n")
+
     if not lines.plain:
         lines.append("No runtime nodes", style="dim")
-    return Group(
+
+    footer = Text()
+    healthy, degraded, failed, unknown = _health_counts(data)
+    total = healthy + degraded + failed + unknown
+    if terminal and total and failed == 0 and degraded == 0:
+        footer.append(f"✓ {total}/{total} completed cleanly", style="green")
+
+    sections: list[RenderableType] = [
         _header(
             data.get("pipeline", "-"),
             data.get("status", "unknown"),
@@ -829,7 +873,55 @@ def render_health(data: dict[str, object]) -> Group:
         Text(""),
         _section("COMPONENTS"),
         lines,
+    ]
+    if footer.plain:
+        sections.extend([Text(""), footer])
+    return Group(*sections)
+
+
+def render_run_summary(report: Mapping[str, object]) -> Group:
+    nodes = _nodes(report)
+    status = str(report.get("status", "completed"))
+    duration = report.get("duration_seconds", 0.0)
+
+    message_count = max(
+        (int(raw.get("messages", 0) or 0) for raw in nodes.values()),
+        default=0,
     )
+    error_count = sum(
+        int(raw.get("errors", 0) or 0)
+        for raw in nodes.values()
+    )
+    drop_count = sum(
+        int(edge.get("overflow_drops", 0) or 0)
+        for edge in _edges(report)
+    )
+    if drop_count == 0:
+        drop_count = sum(
+            int(
+                _mapping(raw.get("resources", {})).get("overflow_drops", 0)
+                or 0
+            )
+            for raw in nodes.values()
+        )
+
+    summary = Text()
+    summary.append(f"{message_count} messages", style="cyan")
+    summary.append(f" · {error_count} errors")
+    summary.append(f" · {drop_count} drops")
+
+    sections: list[RenderableType] = [
+        _header(report.get("pipeline", "-"), status, duration),
+        Text(""),
+        summary,
+    ]
+    run_dir = report.get("run_dir") or report.get("artifact_dir")
+    if run_dir:
+        artifacts = Text()
+        artifacts.append("Artifacts  ", style="dim")
+        artifacts.append(str(run_dir))
+        sections.extend([Text(""), artifacts])
+    return Group(*sections)
 
 
 def _join_pairs(values: Mapping[str, Any]) -> str:

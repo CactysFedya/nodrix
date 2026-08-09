@@ -6,6 +6,7 @@ style:
 sections:
   - runtime
   - health
+  - graph
   - applications
   - monitors
   - queues

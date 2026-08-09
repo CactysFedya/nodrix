@@ -174,19 +174,42 @@ def render_node_details(manifest: Any, node_name: str) -> Group:
     )
 
 
-def render_startup_summary(manifest: Any, version: str) -> Group:
-    text = Text()
-    text.append(f"Plyctl {version}", style="bold cyan")
-    text.append(f" · {manifest.metadata.name}", style="bold")
-    text.append(
-        f"\n{manifest.runtime.mode} · {manifest.runtime.engine} · "
-        f"{manifest.runtime.profile or 'no profile'}"
+
+def render_startup_summary(
+    manifest: Any,
+    version: str,
+    *,
+    workspace: Any | None = None,
+) -> Group:
+    header = Text()
+    header.append("NODRIX", style="bold cyan")
+    header.append(f"  {manifest.metadata.name}", style="bold")
+    header.append(f"\nPlyctl {version}", style="dim")
+    header.append(
+        f" · {manifest.runtime.mode}"
+        f" · {manifest.runtime.engine}"
+        f" · {manifest.runtime.profile or 'no profile'}",
+        style="dim",
     )
-    text.append(
-        f"\nStarting {len(manifest.nodes)} nodes, {len(manifest.edges)} edges, "
-        f"{len(manifest.streams.exports)} streams…"
+    if workspace is not None:
+        context = getattr(workspace, "context_name", None) or "-"
+        alias = getattr(workspace, "pipeline_name", None)
+        header.append(
+            f"\nworkspace {getattr(workspace, 'root', '-')}"
+            f" · context {context}"
+            + (f" · {alias}" if alias else ""),
+            style="dim",
+        )
+
+    starting = Text()
+    starting.append("STARTING", style="bold cyan")
+    starting.append(
+        f"\n{len(manifest.nodes)} nodes"
+        f" · {len(manifest.edges)} edges"
+        f" · {len(manifest.streams.exports)} streams",
+        style="dim",
     )
-    return Group(Panel(text, title="Starting pipeline"))
+    return Group(header, Text(""), starting)
 
 
 def _runtime_info_text(info: dict[str, Any]) -> str:
@@ -205,44 +228,61 @@ def _runtime_info_text(info: dict[str, Any]) -> str:
     return " · ".join(selected)
 
 
-def render_runtime_event(event: dict[str, Any], indexes: dict[str, int], total: int) -> Text:
+
+def render_runtime_event(
+    event: dict[str, Any],
+    indexes: dict[str, int],
+    total: int,
+) -> Text:
     kind = str(event.get("kind", "event"))
     text = Text()
+
     if kind == "pipeline_starting":
-        text.append("Runtime STARTING", style="bold cyan")
         return text
+
     if kind == "node_ready":
         name = str(event.get("node", "?"))
         index = indexes.get(name, 0)
-        text.append(f"[{index}/{total}] ", style="dim")
+        text.append("✓ ", style="green")
         text.append(f"{name:<14}", style="bold")
-        text.append(f" {event.get('uses', ''):<28}")
-        text.append(" READY", style="bold green")
+        text.append(" ready", style="green")
+        text.append(f"  {index}/{total}", style="dim")
+        uses = str(event.get("uses", "") or "")
+        if uses:
+            text.append(f" · {uses}", style="dim")
         info = _runtime_info_text(dict(event.get("runtime_info") or {}))
         if info:
             text.append(f" · {info}", style="cyan")
         return text
+
     if kind == "stream_server_ready":
-        text.append("Streams READY", style="bold green")
-        text.append(f" · port {event.get('port')}")
+        text.append("✓ streams", style="green")
+        text.append(f" ready · port {event.get('port')}")
         for name in event.get("streams") or []:
             text.append(f"\n  plyctl-viewer {name}", style="cyan")
         return text
+
     if kind == "pipeline_running":
-        text.append("RUNNING", style="bold green")
-        text.append(" · press Ctrl+C to stop")
+        text.append("● RUNNING", style="bold green")
+        text.append(" · Ctrl+C to stop", style="dim")
         return text
+
     if kind == "node_failed":
-        text.append("FAILED ", style="bold red")
-        text.append(f"{event.get('node')}: {event.get('error')}")
+        text.append("✗ ", style="bold red")
+        text.append(str(event.get("node") or "?"), style="bold")
+        text.append(f" failed · {event.get('error')}", style="red")
         return text
+
     if kind == "node_stopped":
-        text.append("STOPPED ", style="dim")
-        text.append(str(event.get("node")))
+        text.append("✓ ", style="dim")
+        text.append(str(event.get("node") or "?"))
+        text.append(" stopped", style="dim")
         return text
+
     if kind == "pipeline_stopped":
-        text.append(f"Pipeline {event.get('status', 'stopped')}", style="yellow")
+        # The final run summary owns the terminal status.
         return text
+
     text.append(kind, style="dim")
     return text
 

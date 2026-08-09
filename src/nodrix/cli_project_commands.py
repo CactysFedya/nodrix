@@ -22,6 +22,7 @@ from .manifest_schema import write_manifest_schema
 from .metrics import MetricsServer
 from .migration import migrate_manifest
 from .project_templates import TEMPLATES, create_project
+from .presentation import render_run_summary
 from .runs import resolve_run
 from .ux import (
     render_node_details,
@@ -361,12 +362,7 @@ def run(
         run_root = workspace.root / ".nodrix" / "runs"
     if profile is None:
         profile = workspace.runtime_profile
-    if not json_output:
-        console.print(
-            f"Workspace {workspace.root} · "
-            f"context {workspace.context_name or '-'} · "
-            f"pipeline {workspace.pipeline_name}"
-        )
+
     effective_run_root = _effective_run_root(run_root)
     if locked and (profile is not None or set_values or block_values):
         console.print("[red]--locked cannot be combined with --profile, --set, or --block.[/red] Create or verify the lock for the exact manifest you intend to run.")
@@ -425,7 +421,7 @@ def run(
                     for item in failures
                 )
                 raise NodrixError(f"Production validation failed: {rendered}")
-        console.print(render_startup_summary(details.manifest, __version__))
+        console.print(render_startup_summary(details.manifest, __version__, workspace=workspace))
         media_encoders = [
             (instance, config)
             for instance, config in details.manifest.nodes.items()
@@ -498,33 +494,7 @@ def run(
     if json_output:
         console.print_json(json.dumps(report))
     else:
-        final_status = str(report.get("status", "completed")).lower()
-        if final_status == "stopped":
-            label = "[yellow]Stopped[/yellow]"
-        elif final_status == "completed":
-            label = "[green]Completed[/green]"
-        else:
-            label = f"[red]{final_status.upper()}[/red]"
-        console.print(
-            f"{label} {report['pipeline']} in {report['duration_seconds']:.3f}s\n"
-            f"Artifacts: {report['run_dir']}"
-        )
-        table = Table("Node", "State", "Health", "CPU", "Memory", "Messages", "Node Hz", "P95 ms", "E2E P95 ms", "Errors")
-        for name, stats in report["nodes"].items():
-            health = dict(stats.get("health", {}))
-            table.add_row(
-                name,
-                str(health.get("state", "-")),
-                str(health.get("status", "-")),
-                f"{float(dict(stats.get('resources', {})).get('cpu_percent', 0.0)):.1f}%",
-                _format_node_memory(stats),
-                str(stats["messages"]),
-                f"{stats.get('rate_hz', 0.0):.1f}",
-                f"{stats.get('p95_ms', stats['max_ms']):.3f}",
-                f"{stats.get('end_to_end', {}).get('p95_ms', 0.0):.3f}",
-                str(stats["errors"]),
-            )
-        console.print(table)
+        console.print(render_run_summary(report))
 
 
 @app.command()

@@ -4,7 +4,14 @@ from io import StringIO
 
 from rich.console import Console
 
-from nodrix.presentation import render_status, render_system_plan, render_top_view
+from nodrix.presentation import (
+    format_duration,
+    render_health,
+    render_run_summary,
+    render_status,
+    render_system_plan,
+    render_top_view,
+)
 from nodrix.workspace import create_workspace, default_view, set_active_context
 from nodrix.system import (
     ApplicationInstance,
@@ -104,8 +111,8 @@ def test_top_views_are_borderless_and_compact_is_compatible_alias() -> None:
 
 def test_performance_view_labels_shared_executor_resources_honestly() -> None:
     output = _plain(render_top_view(_runtime_snapshot(), "performance"))
-    assert "CPU/RAM shared executor" in output
-    assert "BOTTLENECK" in output
+    assert "shared executor" in output
+    assert "BOTTLENECK" not in output
     assert "stale=3" in output
 
 
@@ -216,6 +223,61 @@ sections:
     )
     output = _plain(render_workspace_top(_runtime_snapshot(), "minimal", project=root))
     assert "CPU" in output
-    assert "ATTENTION" in output
+    assert "ATTENTION" not in output
     assert "APPLICATIONS" not in output
     assert "GRAPH" not in output
+
+
+
+def test_subsecond_duration_remains_visible() -> None:
+    assert format_duration(0.048) == "48 ms"
+    assert format_duration(0.0004) == "<1 ms"
+
+
+def test_healthy_snapshot_has_no_false_attention_or_bottleneck() -> None:
+    output = _plain(render_top_view(_runtime_snapshot(), "performance"))
+    assert "BOTTLENECK" not in output
+    assert "ATTENTION" not in output
+
+
+def test_completed_health_hides_shutdown_alive_ready_flags() -> None:
+    data = _runtime_snapshot()
+    data["status"] = "completed"
+    data["duration_seconds"] = 0.048
+    for raw in data["nodes"].values():
+        raw["health"]["state"] = "stopped"
+        raw["health"]["alive"] = False
+        raw["health"]["ready"] = False
+    output = _plain(render_health(data))
+    assert "48 ms" in output
+    assert "STOPPED · healthy" in output
+    assert "alive no" not in output
+    assert "ready no" not in output
+    assert "completed cleanly" in output
+
+
+def test_operations_keeps_graph_and_hides_empty_sections() -> None:
+    data = _runtime_snapshot()
+    data["applications"] = {}
+    output = _plain(render_top_view(data, "operations"))
+    assert "GRAPH" in output
+    assert "APPLICATIONS" not in output
+    assert "MONITORS" not in output
+    assert "ATTENTION" not in output
+
+
+def test_run_summary_is_borderless_and_compact() -> None:
+    report = _runtime_snapshot()
+    report["status"] = "completed"
+    report["duration_seconds"] = 0.048
+    report["run_dir"] = "/tmp/run-1"
+    for raw in report["nodes"].values():
+        raw["messages"] = 5
+        raw["errors"] = 0
+    output = _plain(render_run_summary(report))
+    assert "COMPLETED" in output
+    assert "48 ms" in output
+    assert "5 messages · 0 errors · 0 drops" in output
+    assert "/tmp/run-1" in output
+    assert "Node State Health CPU" not in output
+    assert not any(char in output for char in "┏┓┗┛┃╭╮╰╯")
