@@ -12,6 +12,7 @@ from . import cli_project_commands  # noqa: F401  # command registration
 from . import cli_dev_commands  # noqa: F401  # command registration
 from . import cli_foundation_commands  # noqa: F401  # command registration
 from . import cli_workspace_commands  # noqa: F401  # command registration
+from . import cli_system_commands  # noqa: F401  # command registration
 
 
 def main() -> None:
