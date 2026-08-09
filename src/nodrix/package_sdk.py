@@ -48,7 +48,7 @@ class PackageDefinition:
     name: str
     version: str
     description: str = ""
-    requires_plyctl: str = ">=2.3,<3"
+    requires_plyctl: str = ">=2.3.0b1,<3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,7 +158,7 @@ def load_package_definition(path: str | Path = ".") -> PackageDefinition:
 
     name = str(package.get("name") or project_name).strip()
     description = str(package.get("description") or project.get("description") or "").strip()
-    requires_plyctl = str(package.get("requires_plyctl") or ">=2.3,<3").strip()
+    requires_plyctl = str(package.get("requires_plyctl") or ">=2.3.0b1,<3").strip()
 
     return PackageDefinition(
         root=manifest_path.parent,
@@ -303,46 +303,16 @@ def _assert_unique(kind: str, items: list[Any]) -> None:
         raise ValueError(f"duplicate {kind} id(s): {', '.join(duplicates)}")
 
 
-def compile_package(definition_or_path: PackageDefinition | str | Path = ".") -> CompiledPackage:
-    """Import configured modules and compile decorators into Provider API 2.
+def compile_discovered_modules(
+    definition: PackageDefinition,
+    modules: tuple[ModuleType, ...] | list[ModuleType],
+) -> CompiledPackage:
+    """Compile already imported decorator modules into Provider API 2.
 
-    This is the development/build-time path.  The resulting provider manifest
-    is static data and can be written into the existing package format so
-    production discovery does not have to import arbitrary implementation code.
+    Local-development discovery uses this entry point so it can own module
+    identity and reload semantics while reusing the exact same descriptor
+    compiler as published packages.
     """
-
-    definition = (
-        definition_or_path
-        if isinstance(definition_or_path, PackageDefinition)
-        else load_package_definition(definition_or_path)
-    )
-    token = _PACKAGE_NAMESPACE_OVERRIDE.set(definition.namespace)
-    modules: list[ModuleType] = []
-    try:
-        with _import_path(definition.root):
-            for name in definition.modules:
-                existing = sys.modules.get(name)
-                if existing is not None:
-                    discovered_ids: list[str] = []
-                    for _, value in _iter_local_exports(existing):
-                        spec = getattr(value, "__plyctl_component_spec__", None)
-                        if spec is not None:
-                            discovered_ids.append(str(spec.name))
-                        message_id = getattr(value, "__plyctl_message_type__", None)
-                        if message_id:
-                            discovered_ids.append(str(message_id))
-                    prefix = definition.namespace + "."
-                    if any(not item.startswith(prefix) for item in discovered_ids):
-                        raise RuntimeError(
-                            f"package discovery module {name!r} is already imported outside "
-                            f"namespace {definition.namespace!r}; run compilation in a "
-                            "fresh process"
-                        )
-                    modules.append(existing)
-                else:
-                    modules.append(importlib.import_module(name))
-    finally:
-        _PACKAGE_NAMESPACE_OVERRIDE.reset(token)
 
     nodes: list[NodeDescriptor] = []
     resources: list[ResourceDescriptor] = []
@@ -397,10 +367,55 @@ def compile_package(definition_or_path: PackageDefinition | str | Path = ".") ->
     )
 
 
+def compile_package(definition_or_path: PackageDefinition | str | Path = ".") -> CompiledPackage:
+    """Import configured modules and compile decorators into Provider API 2.
+
+    This is the development/build-time path.  The resulting provider manifest
+    is static data and can be written into the existing package format so
+    production discovery does not have to import arbitrary implementation code.
+    """
+
+    definition = (
+        definition_or_path
+        if isinstance(definition_or_path, PackageDefinition)
+        else load_package_definition(definition_or_path)
+    )
+    token = _PACKAGE_NAMESPACE_OVERRIDE.set(definition.namespace)
+    modules: list[ModuleType] = []
+    try:
+        with _import_path(definition.root):
+            for name in definition.modules:
+                existing = sys.modules.get(name)
+                if existing is not None:
+                    discovered_ids: list[str] = []
+                    for _, value in _iter_local_exports(existing):
+                        spec = getattr(value, "__plyctl_component_spec__", None)
+                        if spec is not None:
+                            discovered_ids.append(str(spec.name))
+                        message_id = getattr(value, "__plyctl_message_type__", None)
+                        if message_id:
+                            discovered_ids.append(str(message_id))
+                    prefix = definition.namespace + "."
+                    if any(not item.startswith(prefix) for item in discovered_ids):
+                        raise RuntimeError(
+                            f"package discovery module {name!r} is already imported outside "
+                            f"namespace {definition.namespace!r}; run compilation in a "
+                            "fresh process"
+                        )
+                    modules.append(existing)
+                else:
+                    modules.append(importlib.import_module(name))
+    finally:
+        _PACKAGE_NAMESPACE_OVERRIDE.reset(token)
+
+    return compile_discovered_modules(definition, modules)
+
+
 __all__ = [
     "CompiledPackage",
     "MessageContract",
     "PackageDefinition",
+    "compile_discovered_modules",
     "compile_package",
     "load_package_definition",
 ]

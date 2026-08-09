@@ -109,6 +109,86 @@ def _runtime_from_entry_point(candidate: ProviderCandidate) -> ProviderRuntime:
 
 
 _LOADED_PROVIDERS: dict[tuple[str, str], LoadedProvider] = {}
+_DEVELOPMENT_PROVIDERS: dict[str, LoadedProvider] = {}
+
+
+def register_development_provider(
+    manifest,
+    runtime: ProviderRuntime,
+) -> LoadedProvider:
+    """Register an in-memory provider for local development only.
+
+    Development providers deliberately bypass installed-distribution discovery,
+    but they still use the canonical ProviderManifest/ProviderRuntime contracts.
+    They are never accepted through a production ProviderPolicy.
+    """
+
+    provider_id = manifest.metadata.id
+    if runtime.provider_id != provider_id:
+        raise ProviderError(
+            f"Development provider runtime id {runtime.provider_id!r} does not "
+            f"match metadata id {provider_id!r}"
+        )
+    declared_nodes = {item.id for item in manifest.nodes}
+    declared_resources = {item.id for item in manifest.resources}
+    undeclared_nodes = sorted(set(runtime.nodes) - declared_nodes)
+    undeclared_resources = sorted(set(runtime.resources) - declared_resources)
+    if undeclared_nodes or undeclared_resources:
+        raise ProviderError(
+            "Development provider runtime registered undeclared ids; "
+            f"nodes={undeclared_nodes}, resources={undeclared_resources}"
+        )
+    document = manifest.to_dict()
+    candidate = ProviderCandidate(
+        id=provider_id,
+        distribution="local-development",
+        distribution_version=manifest.metadata.version,
+        manifest=manifest,
+        document=document,
+        entry_point=None,
+        metadata_path=None,
+        signature_path=None,
+        internal=True,
+    )
+    verification = verify_candidate(
+        candidate,
+        policy=ProviderPolicy(production=False),
+    )
+    if verification.errors:
+        raise ProviderError(
+            f"Development provider {provider_id!r} was rejected: "
+            + "; ".join(verification.errors)
+        )
+    loaded = LoadedProvider(
+        candidate=candidate,
+        runtime=runtime,
+        verification=verification,
+    )
+    with _PROVIDER_CACHE_LOCK:
+        _DEVELOPMENT_PROVIDERS[provider_id] = loaded
+    return loaded
+
+
+def unregister_development_provider(provider_id: str) -> None:
+    with _PROVIDER_CACHE_LOCK:
+        _DEVELOPMENT_PROVIDERS.pop(provider_id, None)
+
+
+def clear_development_providers() -> None:
+    with _PROVIDER_CACHE_LOCK:
+        _DEVELOPMENT_PROVIDERS.clear()
+
+
+def _provider_candidates(*, include_legacy: bool) -> tuple[ProviderCandidate, ...]:
+    with _PROVIDER_CACHE_LOCK:
+        development = tuple(item.candidate for item in _DEVELOPMENT_PROVIDERS.values())
+        development_ids = frozenset(_DEVELOPMENT_PROVIDERS)
+    installed = tuple(
+        candidate
+        for candidate in discover_providers(include_legacy=include_legacy)
+        if candidate.id not in development_ids
+    )
+    return (*development, *installed)
 
 
 def reset_provider_cache() -> None:
@@ -116,6 +196,7 @@ def reset_provider_cache() -> None:
 
     with _PROVIDER_CACHE_LOCK:
         _LOADED_PROVIDERS.clear()
+        _DEVELOPMENT_PROVIDERS.clear()
         _DISCOVERY_CACHE.clear()
 
 
@@ -126,12 +207,21 @@ def load_provider(
     include_legacy: bool = True,
     paths: Iterable[str | os.PathLike[str]] | None = None,
 ) -> LoadedProvider:
+    selected_policy = policy or ProviderPolicy.from_environment()
+    with _PROVIDER_CACHE_LOCK:
+        development = _DEVELOPMENT_PROVIDERS.get(provider_id)
+    if development is not None:
+        if selected_policy.production:
+            raise ProviderError(
+                f"Development provider {provider_id!r} is not available in production"
+            )
+        return development
     candidate = resolve_provider(
         provider_id,
         include_legacy=include_legacy,
         paths=paths,
     )
-    verification = verify_candidate(candidate, policy=policy)
+    verification = verify_candidate(candidate, policy=selected_policy)
     if verification.errors:
         raise ProviderError(
             f"Provider {candidate.id!r} was rejected: "
@@ -165,7 +255,7 @@ def provider_for_node(
     include_legacy: bool = False,
 ) -> tuple[ProviderCandidate, NodeDescriptor] | None:
     matches: list[tuple[ProviderCandidate, NodeDescriptor]] = []
-    for candidate in discover_providers(include_legacy=include_legacy):
+    for candidate in _provider_candidates(include_legacy=include_legacy):
         if candidate.manifest is None:
             continue
         for descriptor in candidate.manifest.nodes:
@@ -255,7 +345,7 @@ def provider_for_resource(
     include_legacy: bool = False,
 ) -> tuple[ProviderCandidate, ResourceDescriptor] | None:
     matches: list[tuple[ProviderCandidate, ResourceDescriptor]] = []
-    for candidate in discover_providers(include_legacy=include_legacy):
+    for candidate in _provider_candidates(include_legacy=include_legacy):
         if candidate.manifest is None:
             continue
         for descriptor in candidate.manifest.resources:
