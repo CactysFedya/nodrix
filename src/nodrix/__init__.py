@@ -38,6 +38,13 @@ from .manifest import (
 from .shared_memory import SharedBufferDescriptor, SharedBufferPool
 from .node import Node, NodeContext, SinkNode, SourceNode
 from .simplified_sdk import Context, Input, Outputs, Param, Resource, message, node, resource
+from .package_sdk import (
+    CompiledPackage,
+    MessageContract,
+    PackageDefinition,
+    compile_package,
+    load_package_definition,
+)
 from .session import Session, SessionContext
 from .integration import (
     ApplicationContext,
@@ -83,6 +90,11 @@ __all__ = [
     "Resource",
     "Outputs",
     "Context",
+    "PackageDefinition",
+    "CompiledPackage",
+    "MessageContract",
+    "load_package_definition",
+    "compile_package",
     "Node",
     "NodeContext",
     "SourceNode",

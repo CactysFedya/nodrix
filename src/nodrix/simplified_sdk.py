@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from contextvars import ContextVar
 from collections.abc import AsyncIterator, Iterator, Mapping
 from dataclasses import dataclass
 from types import UnionType
@@ -14,6 +15,10 @@ from .messages import Message
 from .node import Node, NodeContext, SinkNode, SourceNode
 
 T = TypeVar("T")
+
+_PACKAGE_NAMESPACE_OVERRIDE: ContextVar[str | None] = ContextVar(
+    "plyctl_package_namespace", default=None
+)
 
 
 class Input(Generic[T]):
@@ -109,6 +114,9 @@ def _snake_case(value: str) -> str:
 
 
 def _default_namespace(module_name: str) -> str:
+    override = _PACKAGE_NAMESPACE_OVERRIDE.get()
+    if override:
+        return override
     root = (module_name or "local").split(".", 1)[0]
     if root in {"__main__", "components", "local"}:
         return "local"
