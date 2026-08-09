@@ -37,6 +37,7 @@ from .manifest import (
 )
 from .shared_memory import SharedBufferDescriptor, SharedBufferPool
 from .node import Node, NodeContext, SinkNode, SourceNode
+from .simplified_sdk import Context, Input, Outputs, Param, Resource, message, node, resource
 from .session import Session, SessionContext
 from .integration import (
     ApplicationContext,
@@ -74,6 +75,14 @@ from .branding import MANIFEST_API_V1, MANIFEST_API_V2
 
 __all__ = [
     "Message",
+    "node",
+    "message",
+    "resource",
+    "Input",
+    "Param",
+    "Resource",
+    "Outputs",
+    "Context",
     "Node",
     "NodeContext",
     "SourceNode",
