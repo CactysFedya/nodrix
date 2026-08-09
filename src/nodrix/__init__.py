@@ -80,6 +80,8 @@ from .system import (
     BackendValidationReport,
     ExecutionBackend,
     PreparedExecution,
+    LocalBackend,
+    lower_local_context,
 )
 from .package_sdk import (
     CompiledPackage,
@@ -144,6 +146,8 @@ __all__ = [
     "BackendValidationReport",
     "ExecutionBackend",
     "PreparedExecution",
+    "LocalBackend",
+    "lower_local_context",
     "SystemModel",
     "Graph",
     "NodeInstance",

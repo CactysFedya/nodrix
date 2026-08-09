@@ -54,6 +54,12 @@ from .io import (
     system_json_schema,
     system_to_canonical,
 )
+from .local_backend import (
+    LocalBackend,
+    LocalLoweringResult,
+    LocalPreparedPayload,
+    lower_local_context,
+)
 from .model import SYSTEM_MODEL_API_VERSION, SystemModel
 from .planning import (
     SYSTEM_EXECUTION_PLAN_SCHEMA,
@@ -117,6 +123,10 @@ __all__ = [
     "loads_system",
     "system_json_schema",
     "system_to_canonical",
+    "LocalBackend",
+    "LocalLoweringResult",
+    "LocalPreparedPayload",
+    "lower_local_context",
     "SYSTEM_MODEL_API_VERSION",
     "SystemDiagnostic",
     "SystemLink",
