@@ -719,7 +719,29 @@ def run_workflow(
                 selected_environment=selected_environment,
                 spec=cache_spec,
             )
-            if not force and _cache_hit(
+            raw_dependencies = step.get("depends_on") or []
+            if isinstance(raw_dependencies, str):
+                raw_dependencies = [raw_dependencies]
+            if not isinstance(raw_dependencies, list):
+                raise ValueError(
+                    f"Workflow step {step_id!r} depends_on must be a string or array"
+                )
+            dependencies = [str(item) for item in raw_dependencies]
+            prior_statuses = {item.step_id: item.status for item in step_results}
+            missing_dependencies = [
+                item for item in dependencies if item not in prior_statuses
+            ]
+            if missing_dependencies:
+                rendered = ", ".join(missing_dependencies)
+                raise ValueError(
+                    f"Workflow step {step_id!r} depends on unknown or later step(s): {rendered}"
+                )
+            dirty_dependencies = [
+                item
+                for item in dependencies
+                if prior_statuses[item] not in {"cached", "skipped"}
+            ]
+            if not force and not dirty_dependencies and _cache_hit(
                 state_path=cache_state,
                 fingerprint=cache_fingerprint,
                 root=project_root,

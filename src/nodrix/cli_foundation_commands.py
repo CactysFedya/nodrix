@@ -16,6 +16,7 @@ from .project_foundation import (
     list_project_resources,
 )
 from .workflow_execution import list_workflows, load_workflow, run_workflow
+from .workflow_planning import WorkflowPlanResult, plan_workflow
 
 
 project_app = typer.Typer(
@@ -243,6 +244,67 @@ def workflow_run(
     _execute_workflow(name, environment, dry_run, json_output, rebuild)
 
 
+def _render_build_plan(result: WorkflowPlanResult) -> None:
+    source = "generated recipes" if result.generated else "workflow"
+    environment = result.environment or "default"
+    console.print(
+        f"[bold]BUILD PLAN[/bold] · {source} · environment={environment}"
+    )
+    table = Table(box=None, show_edge=False, pad_edge=False)
+    table.add_column("#", justify="right")
+    table.add_column("STATUS")
+    table.add_column("STEP")
+    table.add_column("RECIPE")
+    table.add_column("DEPENDS")
+    table.add_column("CACHE")
+    table.add_column("REASON")
+    for step in result.steps:
+        style = (
+            "green" if step.status == "cached" else
+            "yellow" if step.status == "planned" else
+            "dim"
+        )
+        table.add_row(
+            str(step.index),
+            step.status.upper(),
+            step.step_id,
+            step.recipe or "-",
+            ", ".join(step.depends_on) or "-",
+            step.cache,
+            "; ".join(step.reasons) or "-",
+            style=style,
+        )
+    console.print(table)
+    cached = sum(item.status == "cached" for item in result.steps)
+    planned = sum(item.status == "planned" for item in result.steps)
+    skipped = sum(item.status == "skipped" for item in result.steps)
+    console.print(
+        f"Cached: {cached} · Planned: {planned} · Skipped: {skipped}"
+    )
+
+
+def _render_build_explain(result: WorkflowPlanResult, step_id: str) -> None:
+    step = result.step(step_id)
+    console.print(f"[bold]BUILD EXPLAIN {step.step_id}[/bold]")
+    console.print(f"Status:      {step.status.upper()}")
+    console.print(f"Recipe:      {step.recipe or '-'}")
+    console.print(f"Depends on:  {', '.join(step.depends_on) or '-'}")
+    console.print(f"Cache:       {step.cache}")
+    console.print(f"Working dir: {step.cwd}")
+    console.print("Reasons:")
+    for reason in step.reasons:
+        console.print(f"  - {reason}")
+    console.print("Tracked inputs:")
+    for item in step.cache_inputs or ("-",):
+        console.print(f"  {item}")
+    console.print("Tracked outputs:")
+    for item in step.cache_outputs or ("-",):
+        console.print(f"  {item}")
+    console.print("Tracked environment:")
+    for item in step.cache_environment or ("-",):
+        console.print(f"  {item}")
+
+
 @app.command("build")
 def build_command(
     environment: Annotated[
@@ -255,8 +317,43 @@ def build_command(
         bool,
         typer.Option("--rebuild", help="Ignore successful build cache entries"),
     ] = False,
+    plan_only: Annotated[
+        bool,
+        typer.Option("--plan", help="Resolve build order and cache decisions without executing"),
+    ] = False,
+    explain: Annotated[
+        str | None,
+        typer.Option("--explain", metavar="STEP", help="Explain why one build step is cached or planned"),
+    ] = None,
 ) -> None:
-    """Run the project's build workflow."""
+    """Run or inspect the project's build workflow."""
+
+    if plan_only or explain is not None:
+        if dry_run:
+            console.print(
+                "[red]Build inspection failed:[/red] use either --dry-run or --plan/--explain"
+            )
+            raise typer.Exit(2)
+        try:
+            result = plan_workflow(
+                "build",
+                environment_name=environment,
+                force=rebuild,
+            )
+            selected = result.step(explain) if explain is not None else None
+        except Exception as exc:
+            console.print(f"[red]Build inspection failed:[/red] {exc}")
+            raise typer.Exit(1)
+
+        if json_output:
+            payload = selected.as_dict() if selected is not None else result.as_dict()
+            console.print_json(json.dumps(payload, ensure_ascii=False))
+            return
+        if selected is not None:
+            _render_build_explain(result, selected.step_id)
+        else:
+            _render_build_plan(result)
+        return
 
     _execute_workflow("build", environment, dry_run, json_output, rebuild)
 
