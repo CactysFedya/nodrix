@@ -2,9 +2,35 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nodrix.system import LocalBackend
+from nodrix.system import Graph, LocalBackend, NodeInstance, SystemModel, Target, plan_system
 
-from .test_system_local_backend import FakeRuntime, _simple_plan
+
+class FakeRuntime:
+    def __init__(self, manifest, manifest_path, run_root):
+        self.manifest = manifest
+        self.manifest_path = manifest_path
+        self.run_root = run_root
+        self.built = False
+
+    def build(self) -> None:
+        self.built = True
+
+
+def _simple_plan():
+    return plan_system(
+        SystemModel(
+            name="local-system",
+            targets=(Target(name="local", kind="local"),),
+            graphs=(
+                Graph(
+                    name="main",
+                    nodes=(
+                        NodeInstance(name="worker", uses="demo.worker"),
+                    ),
+                ),
+            ),
+        )
+    )
 
 
 def test_local_backend_scope_names_isolate_generated_manifests(tmp_path: Path) -> None:
