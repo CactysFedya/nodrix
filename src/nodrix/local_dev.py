@@ -16,6 +16,7 @@ from pathlib import Path
 from types import ModuleType
 from typing import Iterator
 
+from .cv_types import unregister_message_type
 from .package_sdk import (
     CompiledPackage,
     PackageDefinition,
@@ -124,11 +125,30 @@ def _root_on_path(root: Path) -> Iterator[None]:
 
 
 def reset_local_development_modules() -> None:
-    """Forget modules imported by local discovery; intended for tests/reload."""
+    """Forget modules and message contracts created by local discovery.
 
+    Implicit local projects share the reserved ``local`` SDK namespace. Their
+    message classes must therefore be removed from both ``sys.modules`` and the
+    global message registry before another local project is compiled in the
+    same Python process.
+    """
     for name, module in tuple(_LOCAL_MODULES.items()):
+        for value in vars(module).values():
+            if (
+                not isinstance(value, type)
+                or getattr(value, "__module__", None) != module.__name__
+            ):
+                continue
+            message_id = getattr(value, "__plyctl_message_type__", None)
+            if message_id:
+                unregister_message_type(
+                    str(message_id),
+                    payload_type=value,
+                )
+
         if sys.modules.get(name) is module:
             sys.modules.pop(name, None)
+
     _LOCAL_MODULES.clear()
     importlib.invalidate_caches()
 

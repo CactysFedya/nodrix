@@ -733,6 +733,28 @@ class TypeRegistry:
                 raise ValueError(f"Message type is already registered: {name}")
             self._definitions[name] = definition
 
+    def unregister(
+        self,
+        name: str,
+        *,
+        payload_type: type[Any] | tuple[type[Any], ...] | None = None,
+    ) -> bool:
+        # Remove a definition only if it is still owned by payload_type.
+        with self._lock:
+            definition = self._definitions.get(name)
+            if definition is None:
+                return False
+            if payload_type is not None:
+                registered = definition.payload_type
+                if registered is not payload_type:
+                    if not (
+                        isinstance(registered, tuple)
+                        and payload_type in registered
+                    ):
+                        return False
+            del self._definitions[name]
+            return True
+
     def definition(self, name: str) -> TypeDefinition | None:
         with self._lock:
             return self._definitions.get(name)
@@ -796,6 +818,15 @@ def register_message_type(
         compatible_versions=compatible_versions,
         replace=replace,
     )
+
+
+def unregister_message_type(
+    name: str,
+    *,
+    payload_type: type[Any] | tuple[type[Any], ...] | None = None,
+) -> bool:
+    # Unregister one dynamically registered message type.
+    return TYPE_REGISTRY.unregister(name, payload_type=payload_type)
 
 
 def normalize_payload(name: str, payload: Any) -> Any:
