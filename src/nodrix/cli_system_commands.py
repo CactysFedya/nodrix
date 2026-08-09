@@ -11,15 +11,17 @@ from rich.table import Table
 import typer
 
 from .cli_context import app, console
-from .local_dev import compile_local_project
+from .local_dev import compile_local_project, reset_local_development_modules
 from .manifest import load_manifest
 from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefinition
 from .system import (
+    BackendContext,
     DefinitionCatalog,
     dump_system,
     dump_system_schema,
     load_system,
     pipeline_manifest_to_system,
+    plan_system,
     system_to_canonical,
     validate_system,
 )
@@ -41,41 +43,51 @@ def _diagnostic_dict(item) -> dict[str, str]:
 
 
 def _catalog_for_project(path: Path) -> DefinitionCatalog:
-    """Resolve neutral SDK definitions from one local/package project."""
+    """Resolve neutral SDK definitions without leaking local modules.
 
-    project = compile_local_project(path)
+    Typer's CliRunner executes multiple CLI invocations in one Python process
+    during tests and embedding. Implicit local projects all use module names
+    such as ``components.nodes``. Always reset the reserved local-development
+    module set before and after compilation so one project cannot poison the
+    next command.
+    """
 
-    nodes: dict[str, NodeDefinition] = {}
-    resources: dict[str, ResourceDefinition] = {}
-    messages: dict[str, MessageDefinition] = {}
+    reset_local_development_modules()
+    try:
+        project = compile_local_project(path)
 
-    for cls in project.compiled.provider_runtime.nodes.values():
-        definition = getattr(cls, "__plyctl_definition__", None)
-        if isinstance(definition, NodeDefinition):
-            nodes[definition.name] = definition
+        nodes: dict[str, NodeDefinition] = {}
+        resources: dict[str, ResourceDefinition] = {}
+        messages: dict[str, MessageDefinition] = {}
 
-    for cls in project.compiled.provider_runtime.resources.values():
-        definition = getattr(cls, "__plyctl_definition__", None)
-        if isinstance(definition, ResourceDefinition):
-            resources[definition.name] = definition
+        for cls in project.compiled.provider_runtime.nodes.values():
+            definition = getattr(cls, "__plyctl_definition__", None)
+            if isinstance(definition, NodeDefinition):
+                nodes[definition.name] = definition
 
-    # Package/local compilation imports the source modules into this process.
-    # MessageDefinitions are intentionally read from decorator metadata rather
-    # than reverse-engineered from Provider API 2 MessageContract objects.
-    for module_name in project.module_names:
-        module = sys.modules.get(module_name)
-        if module is None:
-            continue
-        for value in vars(module).values():
-            definition = getattr(value, "__plyctl_definition__", None)
-            if isinstance(definition, MessageDefinition):
-                messages[definition.type_id] = definition
+        for cls in project.compiled.provider_runtime.resources.values():
+            definition = getattr(cls, "__plyctl_definition__", None)
+            if isinstance(definition, ResourceDefinition):
+                resources[definition.name] = definition
 
-    return DefinitionCatalog(
-        nodes=nodes,
-        resources=resources,
-        messages=messages,
-    )
+        # Read MessageDefinitions while the compiled modules are still
+        # available; the Definition objects remain valid after cleanup.
+        for module_name in project.module_names:
+            module = sys.modules.get(module_name)
+            if module is None:
+                continue
+            for value in vars(module).values():
+                definition = getattr(value, "__plyctl_definition__", None)
+                if isinstance(definition, MessageDefinition):
+                    messages[definition.type_id] = definition
+
+        return DefinitionCatalog(
+            nodes=nodes,
+            resources=resources,
+            messages=messages,
+        )
+    finally:
+        reset_local_development_modules()
 
 
 @system_app.command("validate")
@@ -171,6 +183,373 @@ def system_validate(
             console.print("No diagnostics.")
 
     if not payload["ok"]:
+        raise typer.Exit(1)
+
+
+def _plan_backend_names(plan) -> tuple[str, ...]:
+    names: list[str] = []
+
+    def add(value: str | None) -> None:
+        if value and value not in names:
+            names.append(value)
+
+    for target in plan.targets:
+        add(target.backend)
+    for resource in plan.resources:
+        add(resource.backend)
+    for application in plan.applications:
+        add(application.backend)
+    for graph in plan.graphs:
+        for backend in graph.backends:
+            add(backend)
+    for link in plan.links:
+        add(link.source_backend)
+        add(link.target_backend)
+    for artifact in plan.artifacts:
+        add(artifact.backend)
+    return tuple(names)
+
+
+def _plan_jsonable(plan) -> dict:
+    return plan.model_dump(
+        by_alias=True,
+        exclude_none=True,
+        mode="json",
+    )
+
+
+def _render_system_plan(plan) -> None:
+    console.print(
+        f"[bold]PLAN {plan.system}[/bold] · {plan.schema_id} · "
+        f"sha256:{plan.system_sha256[:12]}"
+    )
+
+    counts = Table(box=None, show_edge=False, pad_edge=False)
+    for label in (
+        "TARGETS",
+        "RESOURCES",
+        "APPLICATIONS",
+        "GRAPHS",
+        "NODES",
+        "CONNECTIONS",
+        "LINKS",
+        "ARTIFACTS",
+    ):
+        counts.add_column(label, justify="right")
+    counts.add_row(
+        str(plan.summary.get("targets", 0)),
+        str(plan.summary.get("resources", 0)),
+        str(plan.summary.get("applications", 0)),
+        str(plan.summary.get("graphs", 0)),
+        str(plan.summary.get("nodes", 0)),
+        str(plan.summary.get("connections", 0)),
+        str(plan.summary.get("links", 0)),
+        str(plan.summary.get("artifacts", 0)),
+    )
+    console.print(counts)
+
+    backend_names = _plan_backend_names(plan)
+    if backend_names:
+        table = Table(
+            title="BACKENDS",
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        table.add_column("BACKEND")
+        table.add_column("TARGETS", justify="right")
+        table.add_column("RESOURCES", justify="right")
+        table.add_column("APPS", justify="right")
+        table.add_column("GRAPHS", justify="right")
+        table.add_column("NODES", justify="right")
+        table.add_column("IN", justify="right")
+        table.add_column("OUT", justify="right")
+        for backend in backend_names:
+            context = BackendContext.from_plan(plan, backend)
+            table.add_row(
+                backend,
+                str(len(context.targets)),
+                str(len(context.resources)),
+                str(len(context.applications)),
+                str(len(context.graph_names)),
+                str(len(context.nodes)),
+                str(len(context.inbound_links)),
+                str(len(context.outbound_links)),
+            )
+        console.print(table)
+
+    if plan.targets:
+        table = Table(
+            title="TARGETS",
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        table.add_column("TARGET")
+        table.add_column("KIND")
+        table.add_column("BACKEND")
+        table.add_column("SOURCE")
+        for target in plan.targets:
+            table.add_row(
+                target.name,
+                target.kind,
+                target.backend,
+                "implicit" if target.implicit else "declared",
+            )
+        console.print(table)
+
+    if plan.resources:
+        order = {
+            name: index + 1
+            for index, name in enumerate(plan.resource_order)
+        }
+        table = Table(
+            title="RESOURCES",
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        table.add_column("#", justify="right")
+        table.add_column("RESOURCE")
+        table.add_column("USES")
+        table.add_column("TARGET")
+        table.add_column("BACKEND")
+        table.add_column("BINDINGS")
+        for resource in sorted(
+            plan.resources,
+            key=lambda item: order.get(item.name, item.ordinal + 1),
+        ):
+            bindings = ", ".join(
+                f"{slot}={name}"
+                for slot, name in resource.bindings.items()
+            )
+            table.add_row(
+                str(order.get(resource.name, resource.ordinal + 1)),
+                resource.name,
+                resource.uses,
+                resource.target,
+                resource.backend,
+                bindings or "-",
+            )
+        console.print(table)
+
+    if plan.applications:
+        table = Table(
+            title="APPLICATIONS",
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        table.add_column("APPLICATION")
+        table.add_column("USES")
+        table.add_column("TARGET")
+        table.add_column("BACKEND")
+        table.add_column("RESOURCES")
+        for application in plan.applications:
+            resources = ", ".join(
+                f"{slot}={name}"
+                for slot, name in application.resources.items()
+            )
+            table.add_row(
+                application.name,
+                application.uses,
+                application.target,
+                application.backend,
+                resources or "-",
+            )
+        console.print(table)
+
+    if plan.graphs:
+        nodes = Table(
+            title="GRAPH EXECUTION ORDER",
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        nodes.add_column("GRAPH")
+        nodes.add_column("#", justify="right")
+        nodes.add_column("NODE")
+        nodes.add_column("USES")
+        nodes.add_column("TARGET")
+        nodes.add_column("BACKEND")
+        for graph in plan.graphs:
+            order = {
+                name: index + 1
+                for index, name in enumerate(graph.topological_order)
+            }
+            if not graph.nodes:
+                nodes.add_row(graph.name, "-", "-", "-", "-", "-")
+                continue
+            for node in sorted(
+                graph.nodes,
+                key=lambda item: order.get(item.name, item.ordinal + 1),
+            ):
+                nodes.add_row(
+                    graph.name,
+                    str(order.get(node.name, node.ordinal + 1)),
+                    node.name,
+                    node.uses,
+                    node.target,
+                    node.backend,
+                )
+        console.print(nodes)
+
+        connections = [
+            connection
+            for graph in plan.graphs
+            for connection in graph.connections
+        ]
+        if connections:
+            table = Table(
+                title="CONNECTIONS",
+                box=None,
+                show_edge=False,
+                pad_edge=False,
+            )
+            table.add_column("GRAPH")
+            table.add_column("FROM")
+            table.add_column("TO")
+            table.add_column("TYPE")
+            table.add_column("TARGET")
+            table.add_column("BACKEND")
+            for connection in connections:
+                table.add_row(
+                    connection.graph,
+                    connection.source,
+                    connection.target,
+                    connection.type_id or "-",
+                    connection.placement_target,
+                    connection.backend,
+                )
+            console.print(table)
+
+    if plan.links:
+        table = Table(
+            title="SYSTEM LINKS",
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        table.add_column("FROM")
+        table.add_column("TO")
+        # Keep execution semantics visible even in an 80-column terminal.
+        # Target/backend ownership is already displayed in the sections above.
+        table.add_column("BOUNDARY", no_wrap=True)
+        table.add_column("TRANSPORT", no_wrap=True)
+        for link in plan.links:
+            table.add_row(
+                link.source,
+                link.target,
+                link.boundary,
+                link.transport_uses or "-",
+            )
+        console.print(table)
+
+    if plan.artifacts:
+        table = Table(
+            title="ARTIFACTS",
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        table.add_column("ARTIFACT")
+        table.add_column("KIND")
+        table.add_column("PRODUCER")
+        table.add_column("TARGET")
+        table.add_column("BACKEND")
+        table.add_column("PATH")
+        for artifact in plan.artifacts:
+            table.add_row(
+                artifact.name,
+                artifact.kind,
+                artifact.producer or "-",
+                artifact.target or "-",
+                artifact.backend or "-",
+                artifact.path or "-",
+            )
+        console.print(table)
+
+    if plan.diagnostics:
+        table = Table(
+            title="DIAGNOSTICS",
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        table.add_column("LEVEL")
+        table.add_column("CODE")
+        table.add_column("PATH")
+        table.add_column("MESSAGE")
+        for item in plan.diagnostics:
+            table.add_row(
+                item.level.upper(),
+                item.code,
+                item.path or "-",
+                item.message,
+                style="yellow",
+            )
+        console.print(table)
+
+
+@system_app.command("plan")
+def system_plan(
+    path: Annotated[
+        Path,
+        typer.Argument(help="System YAML/JSON document"),
+    ],
+    project: Annotated[
+        Path | None,
+        typer.Option(
+            "--project",
+            "-p",
+            help="Optional local/package SDK project used to resolve typed definitions",
+        ),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print machine-readable execution plan JSON"),
+    ] = False,
+    warnings_as_errors: Annotated[
+        bool,
+        typer.Option(
+            "--warnings-as-errors",
+            help="Return a non-zero exit code when planner warnings are present",
+        ),
+    ] = False,
+) -> None:
+    """Resolve a System document into nodrix.system-execution-plan/v1."""
+
+    try:
+        system = load_system(path)
+        catalog = _catalog_for_project(project) if project is not None else None
+        plan = plan_system(system, catalog=catalog)
+    except Exception as exc:
+        if json_output:
+            console.print_json(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "path": str(path),
+                        "error": str(exc),
+                    },
+                    ensure_ascii=False,
+                )
+            )
+        else:
+            console.print(f"[red]System planning failed:[/red] {exc}")
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print_json(
+            json.dumps(
+                _plan_jsonable(plan),
+                ensure_ascii=False,
+            )
+        )
+    else:
+        _render_system_plan(plan)
+
+    if warnings_as_errors and plan.diagnostics:
         raise typer.Exit(1)
 
 
