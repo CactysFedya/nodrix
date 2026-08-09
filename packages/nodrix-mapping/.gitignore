@@ -1,0 +1,5 @@
+build/
+src/*.egg-info/
+src/nodrix_mapping/_mapping_native*.so
+src/nodrix_mapping/_mapping_native*.pyd
+src/nodrix_mapping/_mapping_native*.dylib

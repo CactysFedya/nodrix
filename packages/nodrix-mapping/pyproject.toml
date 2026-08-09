@@ -4,10 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plyctl-mapping"
-version = "0.1.1"
-description = "Mapping contracts and compatibility aliases for Plyctl"
+version = "0.3.0"
+description = "Transport-neutral metric mapping with a native C++20 data plane"
 requires-python = ">=3.11"
-dependencies = ["plyctl>=2.2.0a5,<3", "plyctl-spatial>=0.1,<0.2"]
+dependencies = [
+  "plyctl>=2.2.0a5,<3",
+  "plyctl-spatial>=0.1,<0.2",
+  "numpy>=1.26,<3",
+]
 readme = "README.md"
 license = {text = "Apache-2.0"}
 
@@ -24,4 +28,8 @@ test = ["pytest>=8"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-nodrix_mapping = ["nodrix-provider.json", "py.typed"]
+nodrix_mapping = [
+  "nodrix-provider.json",
+  "py.typed",
+  "native/*.cpp",
+]

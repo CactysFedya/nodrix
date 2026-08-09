@@ -1,22 +1,107 @@
 {
   "metadata": {
-    "description": "Mapping domain contracts with alpha spatial compatibility aliases",
+    "description": "Transport-neutral bounded incremental metric mapping with a native C++20 data plane",
     "features": [
       "domain.mapping.contracts",
       "compat.mapping.point_cloud.v1",
-      "compat.geometry.odometry.v1"
+      "compat.geometry.odometry.v1",
+      "mapping.incremental_voxel_map",
+      "mapping.native_voxel_backend",
+      "mapping.atomic_ply_store",
+      "mapping.native_ply_store"
     ],
     "id": "nodrix.mapping",
-    "name": "Plyctl Mapping Contracts",
+    "name": "Nodrix Mapping",
     "provider_api": "1",
     "requires_features": [
       "python-node-api.2",
       "domain.spatial.contracts"
     ],
     "requires_nodrix": ">=2.2.0a5,<3",
-    "version": "0.1.1"
+    "version": "0.3.0"
   },
-  "nodes": [],
+  "nodes": [
+    {
+      "id": "mapping.voxel_map",
+      "factory": "nodrix_mapping.nodes.voxel_map:VoxelMapNode",
+      "inputs": {
+        "cloud": "spatial.point_cloud/v1"
+      },
+      "outputs": {
+        "delta": "mapping.voxel_delta/v1",
+        "snapshot": "mapping.voxel_snapshot/v1"
+      },
+      "features": [
+        "mapping.incremental_voxel_map",
+        "mapping.native_voxel_backend"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "voxel_size_m": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 0.1
+          },
+          "point_stride": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 1
+          },
+          "max_voxels": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 500000
+          },
+          "eviction_window": {
+            "type": "integer",
+            "minimum": 1,
+            "default": 64
+          },
+          "snapshot_interval_s": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "default": 5.0
+          }
+        },
+        "additionalProperties": false
+      },
+      "bindings": {},
+      "external_inputs": {},
+      "external_outputs": {},
+      "optional_inputs": []
+    },
+    {
+      "id": "mapping.ply_store",
+      "factory": "nodrix_mapping.nodes.ply_store:PlyStoreNode",
+      "inputs": {
+        "map": "mapping.voxel_snapshot/v1"
+      },
+      "outputs": {},
+      "features": [
+        "mapping.atomic_ply_store",
+        "mapping.native_ply_store"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "default": "artifacts/maps/metric/latest.ply"
+          },
+          "durable": {
+            "type": "boolean",
+            "default": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "bindings": {},
+      "external_inputs": {},
+      "external_outputs": {},
+      "optional_inputs": []
+    }
+  ],
   "probes": [
     {
       "callable": "nodrix_mapping.provider:safe_probe",
