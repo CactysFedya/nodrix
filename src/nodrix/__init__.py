@@ -66,6 +66,9 @@ from .system import (
     CompatibilityReport,
     compatibility_report_from_system,
     restore_pipeline_manifest,
+    SystemExecutionPlan,
+    SystemPlanningError,
+    plan_system,
 )
 from .package_sdk import (
     CompiledPackage,
@@ -146,6 +149,9 @@ __all__ = [
     "CompatibilityReport",
     "compatibility_report_from_system",
     "restore_pipeline_manifest",
+    "SystemExecutionPlan",
+    "SystemPlanningError",
+    "plan_system",
     "PackageDefinition",
     "CompiledPackage",
     "MessageContract",
