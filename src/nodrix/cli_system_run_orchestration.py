@@ -260,6 +260,15 @@ def system_run_orchestrated(
 
             if status.terminal:
                 if status.state is BackendExecutionState.FAILED:
+                    stopped = orchestrator.stop(
+                        handle,
+                        timeout_seconds=stop_timeout,
+                    )
+                    _render_changed_scope_statuses(
+                        system.name,
+                        stopped,
+                        previous_states,
+                    )
                     raise typer.Exit(1)
                 return
 
