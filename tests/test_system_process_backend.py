@@ -360,6 +360,10 @@ def test_process_backend_marks_completed_scope_failed_when_descendant_leaks(
     assert "descendant processes were still alive" in (status.message or "")
     _wait_pid_gone(child_pid)
 
+    repeated = backend.inspect(handle)
+    assert repeated.state is BackendExecutionState.FAILED
+    assert repeated.message == status.message
+
 
 def test_process_backend_rejects_cross_scope_links(tmp_path: Path) -> None:
     plan = plan_system(
