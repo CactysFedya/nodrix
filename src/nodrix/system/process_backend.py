@@ -185,14 +185,21 @@ class _ProcessExecution:
     process_group: bool = False
     pgid: int | None = None
     state: BackendExecutionState = BackendExecutionState.RUNNING
+    reported_terminal_state: BackendExecutionState | None = None
     message: str | None = None
     report: dict[str, Any] = field(default_factory=dict)
     forced: bool = False
+    connection_closed: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 class ProcessBackend(ExecutionBackend):
-    """Execute one System scope inside a dedicated worker process."""
+    """Execute one System scope inside a dedicated worker process.
+
+    A worker-reported terminal event is intentionally not terminal from the
+    backend's point of view.  The scope becomes terminal only after the owned
+    worker has exited and any residual POSIX process group has been cleaned up.
+    """
 
     def __init__(
         self,
@@ -341,10 +348,12 @@ class ProcessBackend(ExecutionBackend):
                     raise RuntimeError(event.get("error", "process worker startup failed"))
         except BaseException:
             self._force_terminate(execution)
+            self._close_connection(execution)
             raise
 
         if not ready:
             self._force_terminate(execution)
+            self._close_connection(execution)
             raise RuntimeError(
                 "ProcessBackend worker did not become ready before startup timeout"
             )
@@ -362,7 +371,18 @@ class ProcessBackend(ExecutionBackend):
             raise TypeError("ProcessBackend handle contains an invalid payload")
         return execution
 
+    def _close_connection(self, execution: _ProcessExecution) -> None:
+        if execution.connection_closed:
+            return
+        try:
+            execution.connection.close()
+        except OSError:
+            pass
+        execution.connection_closed = True
+
     def _drain_events(self, execution: _ProcessExecution) -> None:
+        if execution.connection_closed:
+            return
         while True:
             try:
                 if not execution.connection.poll(0):
@@ -375,13 +395,17 @@ class ProcessBackend(ExecutionBackend):
             with execution.lock:
                 if kind == "terminal":
                     try:
-                        execution.state = BackendExecutionState(event["state"])
+                        execution.reported_terminal_state = BackendExecutionState(
+                            event["state"]
+                        )
                     except (KeyError, ValueError):
-                        execution.state = BackendExecutionState.FAILED
+                        execution.reported_terminal_state = (
+                            BackendExecutionState.FAILED
+                        )
                         execution.message = "worker returned an invalid terminal state"
                     execution.report = dict(event.get("report") or {})
                 elif kind == "fatal":
-                    execution.state = BackendExecutionState.FAILED
+                    execution.reported_terminal_state = BackendExecutionState.FAILED
                     execution.message = str(
                         event.get("error", "process worker failed")
                     )
@@ -462,48 +486,62 @@ class ProcessBackend(ExecutionBackend):
             max(self.force_grace_seconds, 0.1),
         )
 
+    def _finalize_worker_exit(self, execution: _ProcessExecution) -> None:
+        execution.process.join(timeout=0)
+        self._drain_events(execution)
+
+        with execution.lock:
+            reported = execution.reported_terminal_state
+            if reported is not None:
+                execution.state = reported
+            elif execution.state is BackendExecutionState.STOPPING:
+                execution.state = BackendExecutionState.STOPPED
+            else:
+                execution.state = BackendExecutionState.FAILED
+                execution.message = (
+                    "process worker exited unexpectedly with code "
+                    f"{execution.process.exitcode}"
+                )
+            state_before_cleanup = execution.state
+
+        if self._group_alive(execution):
+            self._force_terminate(execution)
+            with execution.lock:
+                if state_before_cleanup is BackendExecutionState.COMPLETED:
+                    execution.state = BackendExecutionState.FAILED
+                    execution.message = (
+                        "process scope completed while descendant processes "
+                        "were still alive; residual process group was terminated"
+                    )
+                elif execution.message is None:
+                    execution.message = (
+                        "residual scope processes were force-terminated after "
+                        "the worker exited"
+                    )
+
+        self._close_connection(execution)
+
     def _inspect(self, handle: BackendExecutionHandle) -> BackendExecutionStatus:
         execution = self._execution(handle)
         self._drain_events(execution)
 
-        if not execution.process.is_alive():
-            execution.process.join(timeout=0)
-            self._drain_events(execution)
+        if execution.process.is_alive():
+            # A terminal event means the runtime has finished, not that the
+            # process-isolation boundary has finished.  Keep the external state
+            # non-terminal until the worker has actually exited and its tree is
+            # known to be clean.
             with execution.lock:
-                if execution.state in {
-                    BackendExecutionState.RUNNING,
-                    BackendExecutionState.STOPPING,
-                }:
-                    if execution.state is BackendExecutionState.STOPPING:
-                        execution.state = BackendExecutionState.STOPPED
-                    else:
-                        execution.state = BackendExecutionState.FAILED
-                        execution.message = (
-                            "process worker exited unexpectedly with code "
-                            f"{execution.process.exitcode}"
-                        )
-                state_before_cleanup = execution.state
-
-            if self._group_alive(execution):
-                self._force_terminate(execution)
-                with execution.lock:
-                    if state_before_cleanup is BackendExecutionState.COMPLETED:
-                        execution.state = BackendExecutionState.FAILED
-                        execution.message = (
-                            "process scope completed while descendant processes "
-                            "were still alive; residual process group was terminated"
-                        )
-                    elif execution.message is None:
-                        execution.message = (
-                            "residual scope processes were force-terminated after "
-                            "the worker exited"
-                        )
+                state = execution.state
+        else:
+            self._finalize_worker_exit(execution)
+            with execution.lock:
+                state = execution.state
 
         with execution.lock:
-            state = execution.state
             message = execution.message
             report = dict(execution.report)
             forced = execution.forced
+            pending = execution.reported_terminal_state
 
         return BackendExecutionStatus(
             backend=self.backend_id,
@@ -521,6 +559,10 @@ class ProcessBackend(ExecutionBackend):
                 "tree_alive": self._tree_alive(execution),
                 "exitcode": execution.process.exitcode,
                 "forced": forced,
+                "worker_terminal_pending": (
+                    pending.value if pending is not None and execution.process.is_alive()
+                    else None
+                ),
                 "report": report,
             },
         )
@@ -555,11 +597,14 @@ class ProcessBackend(ExecutionBackend):
         if self._tree_alive(execution):
             self._force_terminate(execution)
             with execution.lock:
-                execution.state = BackendExecutionState.STOPPED
-                execution.message = "worker process tree force-terminated after stop timeout"
-        elif execution.state is BackendExecutionState.STOPPING:
-            with execution.lock:
-                execution.state = BackendExecutionState.STOPPED
+                if execution.reported_terminal_state is BackendExecutionState.FAILED:
+                    execution.state = BackendExecutionState.FAILED
+                else:
+                    execution.state = BackendExecutionState.STOPPED
+                    execution.reported_terminal_state = BackendExecutionState.STOPPED
+                    execution.message = (
+                        "worker process tree force-terminated after stop timeout"
+                    )
 
         return self._inspect(handle)
 
