@@ -100,6 +100,7 @@ from .transport import (
     require_transport_runtime,
     transport_runtime,
 )
+from .transport_local_backend import TransportLocalBackend
 from .transport_lowering import lower_transport_boundaries
 from .transport_process_backend import TransportProcessBackend
 from .validation import (
@@ -155,6 +156,7 @@ __all__ = [
     "lower_local_context",
     "ProcessBackend",
     "ProcessPreparedPayload",
+    "TransportLocalBackend",
     "TransportProcessBackend",
     "TransportRuntimeAdapter",
     "register_transport_runtime",
