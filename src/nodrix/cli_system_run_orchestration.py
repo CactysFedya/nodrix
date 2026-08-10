@@ -55,9 +55,9 @@ def _process_backend_for_scope(
 ):
     """Create one process-isolated backend for one orchestration scope."""
 
-    from .system import ProcessBackend
+    from .system import TransportProcessBackend
 
-    return ProcessBackend(
+    return TransportProcessBackend(
         project=project,
         working_directory=working_directory,
         run_root=run_root,
