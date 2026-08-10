@@ -28,74 +28,76 @@ def _free_tcp_port() -> int:
     return port
 
 
-def test_system_run_moves_messages_between_process_scopes_over_tcp(
-    tmp_path: Path,
-) -> None:
-    port = _free_tcp_port()
-    output = tmp_path / "cli-received.jsonl"
-    system_path = tmp_path / "transport.system.yaml"
-    dump_system(
-        SystemModel(
-            name="transport-cli",
-            targets=(
-                Target(
-                    name="receiver",
-                    kind="host",
-                    properties={"backend": "process"},
-                ),
-                Target(
-                    name="sender",
-                    kind="host",
-                    properties={"backend": "process"},
-                ),
+def _transport_system(
+    *,
+    output: Path,
+    port: int,
+    sender_backend: str,
+    receiver_backend: str,
+    payload_kind: str,
+    count: int,
+) -> SystemModel:
+    return SystemModel(
+        name="transport-cli",
+        targets=(
+            Target(
+                name="receiver",
+                kind="host",
+                properties={"backend": receiver_backend},
             ),
-            graphs=(
-                Graph(
-                    name="producer",
-                    nodes=(
-                        NodeInstance(
-                            name="source",
-                            uses="core.synthetic_source",
-                            target="sender",
-                            parameters={
-                                "count": 2,
-                                "payload": {"kind": "cli-tcp"},
-                            },
-                        ),
-                    ),
-                ),
-                Graph(
-                    name="consumer",
-                    nodes=(
-                        NodeInstance(
-                            name="sink",
-                            uses="sink.jsonl",
-                            target="receiver",
-                            parameters={"path": str(output)},
-                        ),
-                    ),
-                ),
+            Target(
+                name="sender",
+                kind="host",
+                properties={"backend": sender_backend},
             ),
-            links=(
-                SystemLink(
-                    **{
-                        "from": "producer/source.output",
-                        "to": "consumer/sink.input",
-                        "uses": "tcp",
-                        "parameters": {
-                            "host": "127.0.0.1",
-                            "bind_host": "127.0.0.1",
-                            "port": port,
-                            "connect_timeout_seconds": 5.0,
+        ),
+        graphs=(
+            Graph(
+                name="producer",
+                nodes=(
+                    NodeInstance(
+                        name="source",
+                        uses="core.synthetic_source",
+                        target="sender",
+                        parameters={
+                            "count": count,
+                            "payload": {"kind": payload_kind},
                         },
-                    }
+                    ),
+                ),
+            ),
+            Graph(
+                name="consumer",
+                nodes=(
+                    NodeInstance(
+                        name="sink",
+                        uses="sink.jsonl",
+                        target="receiver",
+                        parameters={"path": str(output)},
+                    ),
                 ),
             ),
         ),
-        system_path,
+        links=(
+            SystemLink(
+                **{
+                    "from": "producer/source.output",
+                    "to": "consumer/sink.input",
+                    "uses": "tcp",
+                    "parameters": {
+                        "host": "127.0.0.1",
+                        "bind_host": "127.0.0.1",
+                        "port": port,
+                        "connect_timeout_seconds": 5.0,
+                    },
+                }
+            ),
+        ),
     )
 
-    result = runner.invoke(
+
+def _run_system(system_path: Path):
+    return runner.invoke(
         app,
         [
             "system",
@@ -106,20 +108,76 @@ def test_system_run_moves_messages_between_process_scopes_over_tcp(
         ],
     )
 
+
+def _records(path: Path) -> list[dict]:
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def test_system_run_moves_messages_between_process_scopes_over_tcp(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "cli-received.jsonl"
+    system_path = tmp_path / "transport.system.yaml"
+    dump_system(
+        _transport_system(
+            output=output,
+            port=_free_tcp_port(),
+            sender_backend="process",
+            receiver_backend="process",
+            payload_kind="cli-tcp",
+            count=2,
+        ),
+        system_path,
+    )
+
+    result = _run_system(system_path)
+
     assert result.exit_code == 0, result.output
     assert "receiver:process" in result.output
     assert "sender:process" in result.output
     assert "scopes=2" in result.output
     assert result.output.count("COMPLETED") >= 2
     assert output.exists()
-
-    records = [
-        json.loads(line)
-        for line in output.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    records = _records(output)
     assert len(records) == 2
     assert [item["payload"]["kind"] for item in records] == [
         "cli-tcp",
         "cli-tcp",
+    ]
+
+
+def test_system_run_moves_messages_from_local_to_process_over_tcp(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "cli-mixed-received.jsonl"
+    system_path = tmp_path / "transport-mixed.system.yaml"
+    dump_system(
+        _transport_system(
+            output=output,
+            port=_free_tcp_port(),
+            sender_backend="local",
+            receiver_backend="process",
+            payload_kind="cli-mixed",
+            count=3,
+        ),
+        system_path,
+    )
+
+    result = _run_system(system_path)
+
+    assert result.exit_code == 0, result.output
+    assert "receiver:process" in result.output
+    assert "sender:local" in result.output
+    assert "scopes=2" in result.output
+    assert result.output.count("COMPLETED") >= 2
+    records = _records(output)
+    assert len(records) == 3
+    assert [item["payload"]["kind"] for item in records] == [
+        "cli-mixed",
+        "cli-mixed",
+        "cli-mixed",
     ]
