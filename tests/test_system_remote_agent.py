@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import socket
 import time
 
 import pytest
@@ -11,6 +12,7 @@ from nodrix.system import (
     ExecutionScope,
     Graph,
     NodeInstance,
+    OrchestrationError,
     RemoteAgentClient,
     RemoteAgentEndpoint,
     RemoteAgentError,
@@ -25,6 +27,14 @@ from nodrix.system import (
 
 
 TOKEN_ENV = "NODRIX_TEST_REMOTE_AGENT_TOKEN"
+
+
+def _unused_tcp_port() -> int:
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0))
+    port = int(sock.getsockname()[1])
+    sock.close()
+    return port
 
 
 def _remote_plan(
@@ -169,7 +179,7 @@ def test_remote_process_backend_reports_unreachable_agent(
     monkeypatch.setenv(TOKEN_ENV, "unused-token")
     plan = _remote_plan(
         host="127.0.0.1",
-        port=65534,
+        port=_unused_tcp_port(),
         output=tmp_path / "never.jsonl",
     )
     scope = plan_execution_scopes(plan)[0]
@@ -178,5 +188,8 @@ def test_remote_process_backend_reports_unreachable_agent(
 
     report = orchestrator.validate_plan(plan)
     assert report.valid, report.diagnostics
-    with pytest.raises(RemoteAgentError, match="AGENT503"):
+    with pytest.raises(
+        OrchestrationError,
+        match=r"ORCH201.*AGENT503",
+    ):
         orchestrator.prepare_plan(plan)
