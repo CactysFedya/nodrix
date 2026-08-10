@@ -21,6 +21,8 @@ from .system import (
     ExecutionScope,
     SystemExecutionStatus,
     SystemOrchestrator,
+    TransportLocalBackend,
+    TransportProcessBackend,
     plan_execution_scopes,
 )
 from .workspace import find_workspace
@@ -36,7 +38,7 @@ def _local_backend_for_scope(
 ):
     """Create one in-process backend instance for one orchestration scope."""
 
-    return system_cli.LocalBackend(
+    return TransportLocalBackend(
         project=project,
         working_directory=working_directory,
         run_root=run_root,
@@ -54,8 +56,6 @@ def _process_backend_for_scope(
     stop_timeout: float,
 ):
     """Create one process-isolated backend for one orchestration scope."""
-
-    from .system import TransportProcessBackend
 
     return TransportProcessBackend(
         project=project,
