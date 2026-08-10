@@ -41,6 +41,7 @@ def _load_core_builtins() -> None:
         if _CORE_LOADED:
             return
         importlib.import_module("nodrix.builtin_nodes")
+        importlib.import_module("nodrix.transport_nodes")
         _CORE_LOADED = True
 
 
