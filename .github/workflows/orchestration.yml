@@ -6,6 +6,8 @@ on:
       - ".github/workflows/orchestration.yml"
       - "src/nodrix/cli.py"
       - "src/nodrix/cli_system*.py"
+      - "src/nodrix/registry.py"
+      - "src/nodrix/transport_nodes.py"
       - "src/nodrix/system/**"
       - "tests/test_system_*.py"
       - "tests/test_v270_rpi5_mapping_m4.py"
@@ -44,16 +46,21 @@ jobs:
             src/nodrix/cli.py \
             src/nodrix/cli_system_commands.py \
             src/nodrix/cli_system_run_orchestration.py \
+            src/nodrix/registry.py \
+            src/nodrix/transport_nodes.py \
             src/nodrix/system/__init__.py \
             src/nodrix/system/local_backend.py \
             src/nodrix/system/orchestration.py \
             src/nodrix/system/process_backend.py \
+            src/nodrix/system/transport.py \
+            src/nodrix/system/transport_lowering.py \
             tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
             tests/test_system_process_backend.py \
             tests/test_system_run_cli.py \
             tests/test_system_run_multi_local_integration.py \
             tests/test_system_run_process_cli.py \
+            tests/test_system_transport.py \
             tests/test_system_planning.py \
             tests/test_v270_rpi5_mapping_m4.py
 
@@ -66,5 +73,6 @@ jobs:
             tests/test_system_run_cli.py \
             tests/test_system_run_multi_local_integration.py \
             tests/test_system_run_process_cli.py \
+            tests/test_system_transport.py \
             tests/test_system_planning.py \
             tests/test_v270_rpi5_mapping_m4.py::test_nested_registered_system_executes_from_workspace_root
