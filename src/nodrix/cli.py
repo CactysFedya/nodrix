@@ -6,6 +6,7 @@ supported compatibility entry point throughout the 2.x series.
 
 from .cli_context import app
 from . import cli_admin_commands  # noqa: F401  # command registration
+from . import cli_agent_commands  # noqa: F401  # 2.8 remote agent registration
 from . import cli_catalog_commands  # noqa: F401  # command registration
 from . import cli_operation_commands  # noqa: F401  # command registration
 from . import cli_project_commands  # noqa: F401  # command registration
