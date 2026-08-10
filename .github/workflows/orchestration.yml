@@ -47,10 +47,13 @@ jobs:
             src/nodrix/system/__init__.py \
             src/nodrix/system/local_backend.py \
             src/nodrix/system/orchestration.py \
+            src/nodrix/system/process_backend.py \
             tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
+            tests/test_system_process_backend.py \
             tests/test_system_run_cli.py \
             tests/test_system_run_multi_local_integration.py \
+            tests/test_system_run_process_cli.py \
             tests/test_system_planning.py \
             tests/test_v270_rpi5_mapping_m4.py
 
@@ -59,7 +62,9 @@ jobs:
           pytest -q \
             tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
+            tests/test_system_process_backend.py \
             tests/test_system_run_cli.py \
             tests/test_system_run_multi_local_integration.py \
+            tests/test_system_run_process_cli.py \
             tests/test_system_planning.py \
             tests/test_v270_rpi5_mapping_m4.py::test_nested_registered_system_executes_from_workspace_root
