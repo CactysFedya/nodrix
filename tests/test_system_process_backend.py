@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -68,6 +69,26 @@ def _wait_terminal(backend: ProcessBackend, handle, timeout: float = 10.0):
         time.sleep(0.02)
         status = backend.inspect(handle)
     return status
+
+
+class _CooperativeRuntime:
+    def __init__(self) -> None:
+        self._stop = threading.Event()
+
+    def build(self) -> None:
+        return None
+
+    def request_stop(self) -> None:
+        self._stop.set()
+
+    def run_sync(self):
+        self._stop.wait(timeout=30)
+        return {"status": "stopped"}
+
+
+def _cooperative_runtime_factory(manifest, manifest_path, run_root):
+    del manifest, manifest_path, run_root
+    return _CooperativeRuntime()
 
 
 class _FailingRuntime:
@@ -191,6 +212,7 @@ def test_process_backend_runs_scope_in_separate_process(tmp_path: Path) -> None:
     assert status.state is BackendExecutionState.COMPLETED
     assert status.details["pid"] != os.getpid()
     assert status.details["exitcode"] == 0
+    assert status.details["alive"] is False
     assert status.details["tree_alive"] is False
     assert prepared.payload.manifest_path.name.endswith("-worker-process.yaml")
     if os.name == "posix":
@@ -205,10 +227,9 @@ def test_process_backend_graceful_stop(tmp_path: Path) -> None:
         scope_name="worker",
         startup_timeout_seconds=10,
         stop_timeout_seconds=2,
+        runtime_factory=_cooperative_runtime_factory,
     )
-    prepared = backend.prepare_plan(
-        _process_plan(count=100_000, interval_ms=10)
-    )
+    prepared = backend.prepare_plan(_process_plan())
     handle = backend.start(prepared)
 
     status = backend.stop(handle, timeout_seconds=2)
@@ -383,6 +404,7 @@ def test_process_backend_rejects_cross_scope_links(tmp_path: Path) -> None:
                     **{
                         "from": "producer/source.output",
                         "to": "consumer/sink.input",
+                        "uses": "tcp",
                     }
                 ),
             ),
