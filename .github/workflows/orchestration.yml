@@ -54,6 +54,7 @@ jobs:
             src/nodrix/system/process_backend.py \
             src/nodrix/system/transport.py \
             src/nodrix/system/transport_lowering.py \
+            src/nodrix/system/transport_process_backend.py \
             tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
             tests/test_system_process_backend.py \
@@ -61,6 +62,7 @@ jobs:
             tests/test_system_run_multi_local_integration.py \
             tests/test_system_run_process_cli.py \
             tests/test_system_transport.py \
+            tests/test_system_transport_process_e2e.py \
             tests/test_system_planning.py \
             tests/test_v270_rpi5_mapping_m4.py
 
@@ -74,5 +76,6 @@ jobs:
             tests/test_system_run_multi_local_integration.py \
             tests/test_system_run_process_cli.py \
             tests/test_system_transport.py \
+            tests/test_system_transport_process_e2e.py \
             tests/test_system_planning.py \
             tests/test_v270_rpi5_mapping_m4.py::test_nested_registered_system_executes_from_workspace_root
