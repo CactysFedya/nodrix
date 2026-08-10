@@ -6,6 +6,7 @@ on:
       - ".github/workflows/orchestration.yml"
       - "src/nodrix/__init__.py"
       - "src/nodrix/cli.py"
+      - "src/nodrix/cli_agent_commands.py"
       - "src/nodrix/cli_system*.py"
       - "src/nodrix/registry.py"
       - "src/nodrix/transport_nodes.py"
@@ -46,6 +47,7 @@ jobs:
           ruff check \
             src/nodrix/__init__.py \
             src/nodrix/cli.py \
+            src/nodrix/cli_agent_commands.py \
             src/nodrix/cli_system_commands.py \
             src/nodrix/cli_system_run_orchestration.py \
             src/nodrix/registry.py \
@@ -54,6 +56,8 @@ jobs:
             src/nodrix/system/local_backend.py \
             src/nodrix/system/orchestration.py \
             src/nodrix/system/process_backend.py \
+            src/nodrix/system/remote_agent.py \
+            src/nodrix/system/remote_backend.py \
             src/nodrix/system/transport.py \
             src/nodrix/system/transport_local_backend.py \
             src/nodrix/system/transport_lowering.py \
@@ -61,9 +65,11 @@ jobs:
             tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
             tests/test_system_process_backend.py \
+            tests/test_system_remote_agent.py \
             tests/test_system_run_cli.py \
             tests/test_system_run_multi_local_integration.py \
             tests/test_system_run_process_cli.py \
+            tests/test_system_run_remote_cli.py \
             tests/test_system_run_transport_cli.py \
             tests/test_system_transport.py \
             tests/test_system_transport_api.py \
@@ -78,9 +84,11 @@ jobs:
             tests/test_system_local_backend_scopes.py \
             tests/test_system_orchestration.py \
             tests/test_system_process_backend.py \
+            tests/test_system_remote_agent.py \
             tests/test_system_run_cli.py \
             tests/test_system_run_multi_local_integration.py \
             tests/test_system_run_process_cli.py \
+            tests/test_system_run_remote_cli.py \
             tests/test_system_run_transport_cli.py \
             tests/test_system_transport.py \
             tests/test_system_transport_api.py \
