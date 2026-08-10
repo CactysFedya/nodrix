@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from typer.main import get_command
 from typer.testing import CliRunner
 
 from nodrix.cli import app
@@ -23,10 +24,21 @@ TOKEN_ENV = "NODRIX_TEST_REMOTE_CLI_TOKEN"
 def test_agent_serve_help_exposes_safe_m5a_options() -> None:
     result = runner.invoke(app, ["agent", "serve", "--help"])
     assert result.exit_code == 0, result.output
-    assert "--host" in result.output
-    assert "--port" in result.output
-    assert "--token-env" in result.output
-    assert "--working-directory" in result.output
+
+    root = get_command(app)
+    agent = root.commands["agent"]
+    serve = agent.commands["serve"]
+    options = {
+        option
+        for parameter in serve.params
+        for option in getattr(parameter, "opts", ())
+    }
+    assert {
+        "--host",
+        "--port",
+        "--token-env",
+        "--working-directory",
+    } <= options
 
 
 def test_system_run_executes_remote_process_target(
