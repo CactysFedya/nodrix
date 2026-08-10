@@ -1,0 +1,45 @@
+name: 2.8 Qualification Harness
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/qualification.yml"
+      - "scripts/render_rpi5_workstation_qualification.py"
+      - "tests/test_v280_rpi5_workstation_qualification.py"
+      - "src/nodrix/system/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qualification-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-harness:
+    name: Pi workstation qualification harness
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install Nodrix and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,security]"
+
+      - name: Lint qualification harness
+        run: |
+          ruff check \
+            scripts/render_rpi5_workstation_qualification.py \
+            tests/test_v280_rpi5_workstation_qualification.py
+
+      - name: Validate qualification System
+        run: |
+          pytest -q tests/test_v280_rpi5_workstation_qualification.py
