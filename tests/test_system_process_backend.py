@@ -97,9 +97,9 @@ class _StubbornRuntime:
         # Deliberately ignore cooperative shutdown. The backend must escalate.
         return None
 
-    def run_sync(self):
+    def _spawn_child(self) -> int:
         if self.run_root is None:
-            raise RuntimeError("stubborn runtime requires run_root")
+            raise RuntimeError("test runtime requires run_root")
         self.run_root.mkdir(parents=True, exist_ok=True)
         child = subprocess.Popen(
             [
@@ -119,6 +119,10 @@ class _StubbornRuntime:
             str(child.pid),
             encoding="utf-8",
         )
+        return child.pid
+
+    def run_sync(self):
+        self._spawn_child()
         while True:
             time.sleep(1)
 
@@ -126,6 +130,17 @@ class _StubbornRuntime:
 def _stubborn_runtime_factory(manifest, manifest_path, run_root):
     del manifest, manifest_path
     return _StubbornRuntime(run_root)
+
+
+class _LeakyRuntime(_StubbornRuntime):
+    def run_sync(self):
+        self._spawn_child()
+        return {"status": "completed"}
+
+
+def _leaky_runtime_factory(manifest, manifest_path, run_root):
+    del manifest, manifest_path
+    return _LeakyRuntime(run_root)
 
 
 def _pid_running(pid: int) -> bool:
@@ -145,6 +160,21 @@ def _pid_running(pid: int) -> bool:
         if len(fields) > 2 and fields[2] == "Z":
             return False
     return True
+
+
+def _wait_pid_gone(pid: int, timeout: float = 3.0) -> None:
+    deadline = time.monotonic() + timeout
+    while _pid_running(pid) and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert not _pid_running(pid), f"descendant process {pid} survived shutdown"
+
+
+def _wait_child_pid(path: Path, timeout: float = 5.0) -> int:
+    deadline = time.monotonic() + timeout
+    while not path.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert path.exists(), "child process did not start"
+    return int(path.read_text(encoding="utf-8"))
 
 
 def test_process_backend_runs_scope_in_separate_process(tmp_path: Path) -> None:
@@ -271,12 +301,7 @@ def test_process_backend_forced_stop_kills_descendant_process_group(
     prepared = backend.prepare_plan(_process_plan())
     handle = backend.start(prepared)
 
-    pid_path = run_root / "child.pid"
-    deadline = time.monotonic() + 5.0
-    while not pid_path.exists() and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert pid_path.exists(), "stubborn child process did not start"
-    child_pid = int(pid_path.read_text(encoding="utf-8"))
+    child_pid = _wait_child_pid(run_root / "child.pid")
     assert _pid_running(child_pid)
 
     status = backend.stop(handle, timeout_seconds=0.05)
@@ -284,11 +309,35 @@ def test_process_backend_forced_stop_kills_descendant_process_group(
     assert status.state is BackendExecutionState.STOPPED
     assert status.details["forced"] is True
     assert status.details["alive"] is False
+    _wait_pid_gone(child_pid)
 
-    deadline = time.monotonic() + 3.0
-    while _pid_running(child_pid) and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert not _pid_running(child_pid), "descendant survived process-group shutdown"
+
+@pytest.mark.skipif(
+    not sys.platform.startswith("linux"),
+    reason="Linux process-group regression coverage",
+)
+def test_process_backend_marks_completed_scope_failed_when_descendant_leaks(
+    tmp_path: Path,
+) -> None:
+    run_root = tmp_path / "run"
+    backend = ProcessBackend(
+        working_directory=tmp_path,
+        run_root=run_root,
+        scope_name="worker",
+        startup_timeout_seconds=10,
+        force_grace_seconds=0.1,
+        runtime_factory=_leaky_runtime_factory,
+    )
+    prepared = backend.prepare_plan(_process_plan())
+    handle = backend.start(prepared)
+    child_pid = _wait_child_pid(run_root / "child.pid")
+
+    status = _wait_terminal(backend, handle)
+
+    assert status.state is BackendExecutionState.FAILED
+    assert status.details["forced"] is True
+    assert "descendant processes were still alive" in (status.message or "")
+    _wait_pid_gone(child_pid)
 
 
 def test_process_backend_rejects_cross_scope_links(tmp_path: Path) -> None:
