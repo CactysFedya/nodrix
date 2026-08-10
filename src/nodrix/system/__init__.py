@@ -101,13 +101,17 @@ from .transport import (
     transport_runtime,
 )
 from .transport_lowering import lower_transport_boundaries
-from .transport_process_backend import TransportProcessBackend, TransportProcessBackend as ProcessBackend
+from .transport_process_backend import TransportProcessBackend
 from .validation import (
     SystemDiagnostic,
     SystemValidationError,
     SystemValidationReport,
     validate_system,
 )
+
+# ``process`` remains the user-visible backend id. In M4 the public ProcessBackend
+# is the transport-aware composition layered over the frozen M3 lifecycle class.
+ProcessBackend = TransportProcessBackend
 
 __all__ = [
     "ApplicationInstance",
