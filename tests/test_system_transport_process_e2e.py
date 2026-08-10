@@ -10,11 +10,11 @@ from nodrix.system import (
     ExecutionScope,
     Graph,
     NodeInstance,
-    ProcessBackend,
     SystemLink,
     SystemModel,
     SystemOrchestrator,
     Target,
+    TransportProcessBackend,
     plan_execution_scopes,
     plan_system,
 )
@@ -97,7 +97,7 @@ def test_two_process_scopes_exchange_messages_over_tcp(tmp_path: Path) -> None:
         ExecutionScope(target="sender", backend="process"),
     )
     backends = {
-        scope: ProcessBackend(
+        scope: TransportProcessBackend(
             working_directory=tmp_path,
             run_root=tmp_path / f"run-{scope.target}",
             scope_name=scope.target,
@@ -135,7 +135,10 @@ def test_two_process_scopes_exchange_messages_over_tcp(tmp_path: Path) -> None:
         orchestrator.stop(handle, timeout_seconds=2.0)
 
     assert status.state is BackendExecutionState.COMPLETED, status
-    assert all(item.status.state is BackendExecutionState.COMPLETED for item in status.scopes)
+    assert all(
+        item.status.state is BackendExecutionState.COMPLETED
+        for item in status.scopes
+    )
     assert output.exists()
 
     records = [
