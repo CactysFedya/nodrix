@@ -92,6 +92,7 @@ from .planning import (
     SystemPlanningError,
     plan_system,
 )
+from .process_backend import ProcessBackend, ProcessPreparedPayload
 from .validation import (
     SystemDiagnostic,
     SystemValidationError,
@@ -143,6 +144,8 @@ __all__ = [
     "LocalLoweringResult",
     "LocalPreparedPayload",
     "lower_local_context",
+    "ProcessBackend",
+    "ProcessPreparedPayload",
     "SYSTEM_MODEL_API_VERSION",
     "ExecutionScope",
     "OrchestrationDiagnostic",
