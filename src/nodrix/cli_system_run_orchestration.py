@@ -2,7 +2,7 @@
 
 The canonical System CLI module still owns validate/plan/show/convert/schema.
 This focused module registers the 2.8 ``run`` callback after the legacy
-registration so Typer resolves the newer command.  Keeping the migration in a
+registration so Typer resolves the newer command. Keeping the migration in a
 small module makes the lifecycle change reviewable while the 2.7 command
 surface stays stable.
 """
@@ -20,6 +20,7 @@ from .system import (
     BackendExecutionState,
     ExecutionScope,
     ProcessBackend,
+    RemoteProcessBackend,
     SystemExecutionStatus,
     SystemOrchestrator,
     TransportLocalBackend,
@@ -41,7 +42,11 @@ def _local_backend_for_scope(
 ):
     """Create one in-process backend instance for one orchestration scope."""
 
-    backend_class = TransportLocalBackend if transport_required else system_cli.LocalBackend
+    backend_class = (
+        TransportLocalBackend
+        if transport_required
+        else system_cli.LocalBackend
+    )
     return backend_class(
         project=project,
         working_directory=working_directory,
@@ -59,10 +64,16 @@ def _process_backend_for_scope(
     run_root: Path | None,
     stop_timeout: float,
     transport_required: bool,
+    remote: bool,
 ):
-    """Create one process-isolated backend for one orchestration scope."""
+    """Create one process backend bound to the scope Target location."""
 
-    backend_class = TransportProcessBackend if transport_required else ProcessBackend
+    if remote:
+        return RemoteProcessBackend(working_directory=working_directory)
+
+    backend_class = (
+        TransportProcessBackend if transport_required else ProcessBackend
+    )
     return backend_class(
         project=project,
         working_directory=working_directory,
@@ -70,6 +81,13 @@ def _process_backend_for_scope(
         stop_timeout_seconds=stop_timeout,
         scope_name=scope.target,
     )
+
+
+def _target_for_scope(plan, scope: ExecutionScope):
+    for target in plan.targets:
+        if target.name == scope.target:
+            return target
+    raise KeyError(scope.target)
 
 
 def _build_orchestrator(
@@ -84,6 +102,15 @@ def _build_orchestrator(
     for scope in plan_execution_scopes(plan):
         context = backend_context_for_scope(plan, scope)
         transport_required = bool(context.inbound_links or context.outbound_links)
+        target = _target_for_scope(plan, scope)
+        remote = isinstance(target.properties.get("agent"), dict)
+
+        if remote and scope.backend != "process":
+            # The M5 agent intentionally supports process isolation only. Leaving
+            # the scope unbound produces the existing ORCH101 diagnostic rather
+            # than accidentally executing a remote-designated Target locally.
+            continue
+
         if scope.backend == "local":
             backend = _local_backend_for_scope(
                 scope,
@@ -101,10 +128,9 @@ def _build_orchestrator(
                 run_root=run_root,
                 stop_timeout=stop_timeout,
                 transport_required=transport_required,
+                remote=remote,
             )
         else:
-            # Later 2.8 milestones register remote backends here. An
-            # intentionally missing binding becomes ORCH101 during validation.
             continue
         bindings[scope] = backend
     return SystemOrchestrator(bindings)
@@ -165,6 +191,11 @@ def _prepared_summary(system_name: str, prepared) -> None:
     for item in prepared.scopes:
         manifest_path = item.prepared.metadata.get("manifest_path")
         suffix = f" · {manifest_path}" if manifest_path else ""
+        if item.prepared.metadata.get("remote"):
+            suffix += (
+                f" · agent={item.prepared.metadata.get('agent_host')}:"
+                f"{item.prepared.metadata.get('agent_port')}"
+            )
         console.print(
             f"[green]PREPARED[/green] [bold]{system_name}[/bold] · "
             f"scope={item.scope.id}{suffix}"
@@ -192,7 +223,7 @@ def system_run_orchestrated(
         Path | None,
         typer.Option(
             "--run-root",
-            help="Optional runtime output root passed to execution scopes",
+            help="Optional runtime output root passed to local execution scopes",
         ),
     ] = None,
     stop_timeout: Annotated[
