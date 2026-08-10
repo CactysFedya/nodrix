@@ -34,15 +34,30 @@ def _local_backend_for_scope(
     run_root: Path | None,
     stop_timeout: float,
 ):
-    """Create one backend instance for one orchestration scope.
-
-    The lookup intentionally goes through ``cli_system_commands.LocalBackend``
-    instead of binding the class at import time.  Besides keeping one public
-    construction point, this preserves existing CLI embedding/tests that
-    replace the local backend factory.
-    """
+    """Create one in-process backend instance for one orchestration scope."""
 
     return system_cli.LocalBackend(
+        project=project,
+        working_directory=working_directory,
+        run_root=run_root,
+        stop_timeout_seconds=stop_timeout,
+        scope_name=scope.target,
+    )
+
+
+def _process_backend_for_scope(
+    scope: ExecutionScope,
+    *,
+    project: Path | None,
+    working_directory: Path,
+    run_root: Path | None,
+    stop_timeout: float,
+):
+    """Create one process-isolated backend for one orchestration scope."""
+
+    from .system import ProcessBackend
+
+    return ProcessBackend(
         project=project,
         working_directory=working_directory,
         run_root=run_root,
@@ -61,18 +76,27 @@ def _build_orchestrator(
 ) -> SystemOrchestrator:
     bindings = {}
     for scope in plan_execution_scopes(plan):
-        if scope.backend != "local":
-            # Later 2.8 milestones register process/remote backends here.  An
-            # intentionally missing binding becomes ORCH101 during validation
-            # instead of being rejected by a hard-coded single-backend gate.
+        if scope.backend == "local":
+            backend = _local_backend_for_scope(
+                scope,
+                project=project,
+                working_directory=working_directory,
+                run_root=run_root,
+                stop_timeout=stop_timeout,
+            )
+        elif scope.backend == "process":
+            backend = _process_backend_for_scope(
+                scope,
+                project=project,
+                working_directory=working_directory,
+                run_root=run_root,
+                stop_timeout=stop_timeout,
+            )
+        else:
+            # Later 2.8 milestones register remote backends here. An
+            # intentionally missing binding becomes ORCH101 during validation.
             continue
-        bindings[scope] = _local_backend_for_scope(
-            scope,
-            project=project,
-            working_directory=working_directory,
-            run_root=run_root,
-            stop_timeout=stop_timeout,
-        )
+        bindings[scope] = backend
     return SystemOrchestrator(bindings)
 
 
@@ -158,7 +182,7 @@ def system_run_orchestrated(
         Path | None,
         typer.Option(
             "--run-root",
-            help="Optional runtime output root passed to local execution scopes",
+            help="Optional runtime output root passed to execution scopes",
         ),
     ] = None,
     stop_timeout: Annotated[
@@ -273,8 +297,6 @@ def system_run_orchestrated(
                     raise typer.Exit(1)
                 return
 
-            # Keep the sleep lookup on the canonical CLI module so existing
-            # embedders/tests can replace the polling clock in one place.
             system_cli.time.sleep(0.1)
 
     except KeyboardInterrupt:
