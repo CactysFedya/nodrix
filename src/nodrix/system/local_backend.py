@@ -67,6 +67,8 @@ def _default_runtime_factory(
     manifest: PipelineManifest,
     manifest_path: Path,
     run_root: Path | None,
+    *,
+    base_dir: Path | None = None,
 ) -> Any:
     """Create the existing runtime lazily.
 
@@ -79,6 +81,7 @@ def _default_runtime_factory(
         manifest,
         manifest_path,
         run_root=run_root,
+        base_dir=base_dir,
     )
 
 
@@ -429,6 +432,7 @@ class LocalBackend(ExecutionBackend):
         if stop_timeout_seconds < 0:
             raise ValueError("stop_timeout_seconds cannot be negative")
         self.stop_timeout_seconds = float(stop_timeout_seconds)
+        self._uses_default_runtime_factory = runtime_factory is None
         self.runtime_factory = runtime_factory or _default_runtime_factory
 
     def _validate(self, context: BackendContext):
@@ -488,11 +492,20 @@ class LocalBackend(ExecutionBackend):
         )
         dump_manifest(lowering.manifest, manifest_path)
 
-        runtime = self.runtime_factory(
-            lowering.manifest,
-            manifest_path,
-            self.run_root,
-        )
+        if self._uses_default_runtime_factory:
+            runtime = self.runtime_factory(
+                lowering.manifest,
+                manifest_path,
+                self.run_root,
+                base_dir=project_root,
+            )
+        else:
+            # Keep third-party runtime factories source-compatible.
+            runtime = self.runtime_factory(
+                lowering.manifest,
+                manifest_path,
+                self.run_root,
+            )
 
         activation = (
             _activate_local_project(project)
