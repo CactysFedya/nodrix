@@ -190,6 +190,7 @@ class _ProcessExecution:
     report: dict[str, Any] = field(default_factory=dict)
     forced: bool = False
     connection_closed: bool = False
+    finalized: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -197,7 +198,7 @@ class ProcessBackend(ExecutionBackend):
     """Execute one System scope inside a dedicated worker process.
 
     A worker-reported terminal event is intentionally not terminal from the
-    backend's point of view.  The scope becomes terminal only after the owned
+    backend's point of view. The scope becomes terminal only after the owned
     worker has exited and any residual POSIX process group has been cleaned up.
     """
 
@@ -399,9 +400,7 @@ class ProcessBackend(ExecutionBackend):
                             event["state"]
                         )
                     except (KeyError, ValueError):
-                        execution.reported_terminal_state = (
-                            BackendExecutionState.FAILED
-                        )
+                        execution.reported_terminal_state = BackendExecutionState.FAILED
                         execution.message = "worker returned an invalid terminal state"
                     execution.report = dict(event.get("report") or {})
                 elif kind == "fatal":
@@ -487,6 +486,9 @@ class ProcessBackend(ExecutionBackend):
         )
 
     def _finalize_worker_exit(self, execution: _ProcessExecution) -> None:
+        if execution.finalized:
+            return
+
         execution.process.join(timeout=0)
         self._drain_events(execution)
 
@@ -520,6 +522,7 @@ class ProcessBackend(ExecutionBackend):
                     )
 
         self._close_connection(execution)
+        execution.finalized = True
 
     def _inspect(self, handle: BackendExecutionHandle) -> BackendExecutionStatus:
         execution = self._execution(handle)
@@ -527,7 +530,7 @@ class ProcessBackend(ExecutionBackend):
 
         if execution.process.is_alive():
             # A terminal event means the runtime has finished, not that the
-            # process-isolation boundary has finished.  Keep the external state
+            # process-isolation boundary has finished. Keep the external state
             # non-terminal until the worker has actually exited and its tree is
             # known to be clean.
             with execution.lock:
@@ -560,7 +563,8 @@ class ProcessBackend(ExecutionBackend):
                 "exitcode": execution.process.exitcode,
                 "forced": forced,
                 "worker_terminal_pending": (
-                    pending.value if pending is not None and execution.process.is_alive()
+                    pending.value
+                    if pending is not None and execution.process.is_alive()
                     else None
                 ),
                 "report": report,
