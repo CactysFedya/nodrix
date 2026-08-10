@@ -92,7 +92,7 @@ from .planning import (
     SystemPlanningError,
     plan_system,
 )
-from .process_backend import ProcessBackend, ProcessPreparedPayload
+from .process_backend import ProcessPreparedPayload
 from .transport import (
     TransportRuntimeAdapter,
     register_transport_runtime,
@@ -101,6 +101,7 @@ from .transport import (
     transport_runtime,
 )
 from .transport_lowering import lower_transport_boundaries
+from .transport_process_backend import TransportProcessBackend, TransportProcessBackend as ProcessBackend
 from .validation import (
     SystemDiagnostic,
     SystemValidationError,
@@ -154,6 +155,7 @@ __all__ = [
     "lower_local_context",
     "ProcessBackend",
     "ProcessPreparedPayload",
+    "TransportProcessBackend",
     "TransportRuntimeAdapter",
     "register_transport_runtime",
     "registered_transport_runtimes",
