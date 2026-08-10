@@ -59,11 +59,19 @@ class HybridPipelineRuntime(
         manifest_path: Path,
         run_root: Path | None = None,
         event_callback: Callable[[dict[str, Any]], None] | None = None,
+        *,
+        base_dir: Path | None = None,
     ) -> None:
         self.manifest = manifest
         self.manifest_path = manifest_path.resolve()
-        self.base_dir = self.manifest_path.parent
-        self.run_root = (run_root or self.base_dir / ".nodrix" / "runs").resolve()
+        self.base_dir = (
+            self.manifest_path.parent
+            if base_dir is None
+            else Path(base_dir).expanduser().resolve()
+        )
+        self.run_root = (
+            run_root or self.base_dir / ".nodrix" / "runs"
+        ).expanduser().resolve()
         self.nodes: dict[str, LoadedNode] = {}
         self.sessions: dict[str, LoadedSession] = {}
         self.resources: dict[str, LoadedResource] = {}
