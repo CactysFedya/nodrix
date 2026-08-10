@@ -206,6 +206,7 @@ class ProcessBackend(ExecutionBackend):
         scope_name: str | None = None,
         runtime_factory: RuntimeFactory | None = None,
     ) -> None:
+        tree_shutdown = "process_group" if os.name == "posix" else "worker"
         super().__init__(
             "process",
             capabilities=BackendCapabilities(
@@ -218,6 +219,7 @@ class ProcessBackend(ExecutionBackend):
                         "applications",
                     }
                 ),
+                metadata={"process_tree_shutdown": tree_shutdown},
             ),
         )
         self.project_path = (
@@ -384,6 +386,82 @@ class ProcessBackend(ExecutionBackend):
                         event.get("error", "process worker failed")
                     )
 
+    def _group_alive(self, execution: _ProcessExecution) -> bool:
+        if (
+            os.name != "posix"
+            or not execution.process_group
+            or execution.pgid is None
+        ):
+            return False
+        try:
+            os.killpg(execution.pgid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    def _tree_alive(self, execution: _ProcessExecution) -> bool:
+        return execution.process.is_alive() or self._group_alive(execution)
+
+    def _signal_group(
+        self,
+        execution: _ProcessExecution,
+        sig: signal.Signals,
+    ) -> bool:
+        if not self._group_alive(execution):
+            return False
+        try:
+            os.killpg(execution.pgid, sig)
+            return True
+        except (ProcessLookupError, OSError):
+            return False
+
+    def _wait_tree_exit(
+        self,
+        execution: _ProcessExecution,
+        timeout_seconds: float,
+    ) -> None:
+        deadline = time.monotonic() + max(timeout_seconds, 0.0)
+        while self._tree_alive(execution) and time.monotonic() < deadline:
+            remaining = deadline - time.monotonic()
+            if execution.process.is_alive():
+                execution.process.join(timeout=min(0.05, remaining))
+            else:
+                time.sleep(min(0.02, remaining))
+        if not execution.process.is_alive():
+            execution.process.join(timeout=0)
+
+    def _force_terminate(self, execution: _ProcessExecution) -> None:
+        if not self._tree_alive(execution):
+            if not execution.process.is_alive():
+                execution.process.join(timeout=0)
+            return
+
+        execution.forced = True
+        if self._group_alive(execution):
+            self._signal_group(execution, signal.SIGTERM)
+        elif execution.process.is_alive():
+            execution.process.terminate()
+
+        self._wait_tree_exit(execution, self.force_grace_seconds)
+
+        if self._group_alive(execution):
+            self._signal_group(execution, signal.SIGKILL)
+        elif execution.process.is_alive():
+            kill = getattr(execution.process, "kill", None)
+            if callable(kill):
+                kill()
+            else:
+                execution.process.terminate()
+
+        self._wait_tree_exit(
+            execution,
+            max(self.force_grace_seconds, 0.1),
+        )
+
     def _inspect(self, handle: BackendExecutionHandle) -> BackendExecutionStatus:
         execution = self._execution(handle)
         self._drain_events(execution)
@@ -404,6 +482,22 @@ class ProcessBackend(ExecutionBackend):
                             "process worker exited unexpectedly with code "
                             f"{execution.process.exitcode}"
                         )
+                state_before_cleanup = execution.state
+
+            if self._group_alive(execution):
+                self._force_terminate(execution)
+                with execution.lock:
+                    if state_before_cleanup is BackendExecutionState.COMPLETED:
+                        execution.state = BackendExecutionState.FAILED
+                        execution.message = (
+                            "process scope completed while descendant processes "
+                            "were still alive; residual process group was terminated"
+                        )
+                    elif execution.message is None:
+                        execution.message = (
+                            "residual scope processes were force-terminated after "
+                            "the worker exited"
+                        )
 
         with execution.lock:
             state = execution.state
@@ -420,51 +514,16 @@ class ProcessBackend(ExecutionBackend):
                 "pid": execution.process.pid,
                 "pgid": execution.pgid,
                 "process_group": execution.process_group,
+                "process_tree_shutdown": self.capabilities.metadata.get(
+                    "process_tree_shutdown"
+                ),
                 "alive": execution.process.is_alive(),
+                "tree_alive": self._tree_alive(execution),
                 "exitcode": execution.process.exitcode,
                 "forced": forced,
                 "report": report,
             },
         )
-
-    def _signal_group(self, execution: _ProcessExecution, sig: signal.Signals) -> bool:
-        if (
-            os.name != "posix"
-            or not execution.process_group
-            or execution.pgid is None
-        ):
-            return False
-        try:
-            os.killpg(execution.pgid, sig)
-            return True
-        except ProcessLookupError:
-            return True
-        except OSError:
-            return False
-
-    def _force_terminate(self, execution: _ProcessExecution) -> None:
-        if not execution.process.is_alive():
-            execution.process.join(timeout=0)
-            return
-
-        execution.forced = True
-        signalled = self._signal_group(execution, signal.SIGTERM)
-        if not signalled:
-            execution.process.terminate()
-        execution.process.join(timeout=self.force_grace_seconds)
-
-        if execution.process.is_alive():
-            if os.name == "posix":
-                signalled = self._signal_group(execution, signal.SIGKILL)
-            else:
-                signalled = False
-            if not signalled:
-                kill = getattr(execution.process, "kill", None)
-                if callable(kill):
-                    kill()
-                else:
-                    execution.process.terminate()
-            execution.process.join(timeout=max(self.force_grace_seconds, 0.1))
 
     def _stop(
         self,
@@ -493,11 +552,11 @@ class ProcessBackend(ExecutionBackend):
         execution.process.join(timeout=timeout)
         self._drain_events(execution)
 
-        if execution.process.is_alive():
+        if self._tree_alive(execution):
             self._force_terminate(execution)
             with execution.lock:
                 execution.state = BackendExecutionState.STOPPED
-                execution.message = "worker force-terminated after stop timeout"
+                execution.message = "worker process tree force-terminated after stop timeout"
         elif execution.state is BackendExecutionState.STOPPING:
             with execution.lock:
                 execution.state = BackendExecutionState.STOPPED
