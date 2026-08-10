@@ -92,7 +92,7 @@ from .planning import (
     SystemPlanningError,
     plan_system,
 )
-from .process_backend import ProcessPreparedPayload
+from .process_backend import ProcessBackend, ProcessPreparedPayload
 from .transport import (
     TransportRuntimeAdapter,
     register_transport_runtime,
@@ -108,10 +108,6 @@ from .validation import (
     SystemValidationReport,
     validate_system,
 )
-
-# ``process`` remains the user-visible backend id. In M4 the public ProcessBackend
-# is the transport-aware composition layered over the frozen M3 lifecycle class.
-ProcessBackend = TransportProcessBackend
 
 __all__ = [
     "ApplicationInstance",
