@@ -93,6 +93,20 @@ from .planning import (
     plan_system,
 )
 from .process_backend import ProcessBackend, ProcessPreparedPayload
+from .remote_agent import (
+    DEFAULT_AGENT_MAX_REQUEST_BYTES,
+    REMOTE_AGENT_PROTOCOL,
+    RemoteAgentClient,
+    RemoteAgentEndpoint,
+    RemoteAgentError,
+    RemoteAgentServer,
+    RemoteAgentService,
+)
+from .remote_backend import (
+    RemoteExecutionPayload,
+    RemotePreparedPayload,
+    RemoteProcessBackend,
+)
 from .transport import (
     TransportRuntimeAdapter,
     register_transport_runtime,
@@ -156,6 +170,16 @@ __all__ = [
     "lower_local_context",
     "ProcessBackend",
     "ProcessPreparedPayload",
+    "DEFAULT_AGENT_MAX_REQUEST_BYTES",
+    "REMOTE_AGENT_PROTOCOL",
+    "RemoteAgentClient",
+    "RemoteAgentEndpoint",
+    "RemoteAgentError",
+    "RemoteAgentServer",
+    "RemoteAgentService",
+    "RemoteExecutionPayload",
+    "RemotePreparedPayload",
+    "RemoteProcessBackend",
     "TransportLocalBackend",
     "TransportProcessBackend",
     "TransportRuntimeAdapter",
