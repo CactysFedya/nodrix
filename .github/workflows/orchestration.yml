@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/orchestration.yml"
+      - "src/nodrix/__init__.py"
       - "src/nodrix/cli.py"
       - "src/nodrix/cli_system*.py"
       - "src/nodrix/registry.py"
@@ -43,6 +44,7 @@ jobs:
       - name: Lint orchestration surface
         run: |
           ruff check \
+            src/nodrix/__init__.py \
             src/nodrix/cli.py \
             src/nodrix/cli_system_commands.py \
             src/nodrix/cli_system_run_orchestration.py \
@@ -64,6 +66,7 @@ jobs:
             tests/test_system_run_process_cli.py \
             tests/test_system_run_transport_cli.py \
             tests/test_system_transport.py \
+            tests/test_system_transport_api.py \
             tests/test_system_transport_mixed_e2e.py \
             tests/test_system_transport_process_e2e.py \
             tests/test_system_planning.py \
@@ -80,6 +83,7 @@ jobs:
             tests/test_system_run_process_cli.py \
             tests/test_system_run_transport_cli.py \
             tests/test_system_transport.py \
+            tests/test_system_transport_api.py \
             tests/test_system_transport_mixed_e2e.py \
             tests/test_system_transport_process_e2e.py \
             tests/test_system_planning.py \
