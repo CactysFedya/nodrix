@@ -19,10 +19,12 @@ from .cli_context import console
 from .system import (
     BackendExecutionState,
     ExecutionScope,
+    ProcessBackend,
     SystemExecutionStatus,
     SystemOrchestrator,
     TransportLocalBackend,
     TransportProcessBackend,
+    backend_context_for_scope,
     plan_execution_scopes,
 )
 from .workspace import find_workspace
@@ -35,10 +37,12 @@ def _local_backend_for_scope(
     working_directory: Path,
     run_root: Path | None,
     stop_timeout: float,
+    transport_required: bool,
 ):
     """Create one in-process backend instance for one orchestration scope."""
 
-    return TransportLocalBackend(
+    backend_class = TransportLocalBackend if transport_required else system_cli.LocalBackend
+    return backend_class(
         project=project,
         working_directory=working_directory,
         run_root=run_root,
@@ -54,10 +58,12 @@ def _process_backend_for_scope(
     working_directory: Path,
     run_root: Path | None,
     stop_timeout: float,
+    transport_required: bool,
 ):
     """Create one process-isolated backend for one orchestration scope."""
 
-    return TransportProcessBackend(
+    backend_class = TransportProcessBackend if transport_required else ProcessBackend
+    return backend_class(
         project=project,
         working_directory=working_directory,
         run_root=run_root,
@@ -76,6 +82,8 @@ def _build_orchestrator(
 ) -> SystemOrchestrator:
     bindings = {}
     for scope in plan_execution_scopes(plan):
+        context = backend_context_for_scope(plan, scope)
+        transport_required = bool(context.inbound_links or context.outbound_links)
         if scope.backend == "local":
             backend = _local_backend_for_scope(
                 scope,
@@ -83,6 +91,7 @@ def _build_orchestrator(
                 working_directory=working_directory,
                 run_root=run_root,
                 stop_timeout=stop_timeout,
+                transport_required=transport_required,
             )
         elif scope.backend == "process":
             backend = _process_backend_for_scope(
@@ -91,6 +100,7 @@ def _build_orchestrator(
                 working_directory=working_directory,
                 run_root=run_root,
                 stop_timeout=stop_timeout,
+                transport_required=transport_required,
             )
         else:
             # Later 2.8 milestones register remote backends here. An
