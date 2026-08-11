@@ -77,16 +77,27 @@ class FakeLocalBackend:
         )
 
 
-def _status(state: BackendExecutionState, *, message: str | None = None):
+def _status(
+    state: BackendExecutionState,
+    *,
+    message: str | None = None,
+    details: dict | None = None,
+):
     return BackendExecutionStatus(
         backend="local",
         execution_id="fake-001",
         state=state,
         message=message,
+        details=details or {},
     )
 
 
-def _write_local_system(path: Path, *, name: str = "run-test") -> None:
+def _write_local_system(
+    path: Path,
+    *,
+    name: str = "run-test",
+    uses: str = "demo.worker",
+) -> None:
     dump_system(
         SystemModel(
             name=name,
@@ -94,7 +105,7 @@ def _write_local_system(path: Path, *, name: str = "run-test") -> None:
                 Graph(
                     name="main",
                     nodes=(
-                        NodeInstance(name="worker", uses="demo.worker"),
+                        NodeInstance(name="worker", uses=uses),
                     ),
                 ),
             ),
@@ -127,7 +138,26 @@ def test_system_run_executes_local_backend_to_completion(
     FakeLocalBackend.reset()
     FakeLocalBackend.statuses = [
         _status(BackendExecutionState.RUNNING),
-        _status(BackendExecutionState.COMPLETED),
+        _status(
+            BackendExecutionState.COMPLETED,
+            details={
+                "report": {
+                    "pipeline": "run-test",
+                    "status": "completed",
+                    "duration_seconds": 0.25,
+                    "nodes": {
+                        "worker": {
+                            "messages": 12,
+                            "errors": 0,
+                            "rate_hz": 10.0,
+                            "health": {"status": "healthy"},
+                        }
+                    },
+                    "edges": [],
+                    "run_dir": "/tmp/project/.nodrix/runs/run-1",
+                }
+            },
+        ),
     ]
     monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
     monkeypatch.setattr(system_cli.time, "sleep", lambda _: None)
@@ -135,10 +165,20 @@ def test_system_run_executes_local_backend_to_completion(
     result = runner.invoke(app, ["system", "run", str(path)])
 
     assert result.exit_code == 0, result.output
+    assert "NODRIX RUN run-test" in result.output
+    assert "FLOW" in result.output
     assert "PREPARED" in result.output
     assert "STARTED" in result.output
     assert "RUNNING" in result.output
     assert "COMPLETED" in result.output
+    assert "Reason" in result.output
+    assert "runtime returned normally" in result.output
+    assert "Traffic" in result.output
+    assert "12 messages" in result.output
+    assert "COMPONENTS" in result.output
+    assert "worker" in result.output
+    assert "Artifacts" in result.output
+    assert ".nodrix/runs/run-1" in result.output
     backend = FakeLocalBackend.instances[-1]
     assert backend.prepared_plan.system == "run-test"
     assert backend.started is True
@@ -164,7 +204,40 @@ def test_system_run_failed_backend_status_returns_nonzero(
 
     assert result.exit_code == 1
     assert "FAILED" in result.output
+    assert "Reason" in result.output
     assert "RuntimeError: boom" in result.output
+
+
+def test_system_run_warns_on_fast_unrequested_continuous_completion(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "continuous.yaml"
+    _write_local_system(
+        path,
+        name="continuous-run",
+        uses="media.ffmpeg_source",
+    )
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.COMPLETED,
+            details={
+                "report": {
+                    "pipeline": "continuous-run",
+                    "status": "completed",
+                    "duration_seconds": 0.1,
+                }
+            },
+        ),
+    ]
+    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+
+    result = runner.invoke(app, ["system", "run", str(path)])
+
+    assert result.exit_code == 0, result.output
+    assert "completed without a stop request" in result.output
+    assert "source EOF" in result.output
 
 
 def test_system_run_rejects_non_local_backend_before_prepare(
@@ -231,6 +304,7 @@ def test_system_run_surfaces_backend_validation_errors(
     result = runner.invoke(app, ["system", "run", str(path)])
 
     assert result.exit_code == 1
+    assert "BACKEND" in result.output
     assert "LOCAL999" in result.output
     assert "RUN103" in result.output
     assert FakeLocalBackend.instances[-1].prepared_plan is None
@@ -258,8 +332,9 @@ def test_system_run_ctrl_c_requests_backend_stop(
     )
 
     assert result.exit_code == 130
-    assert "Stopping" in result.output
+    assert "STOPPING" in result.output
     assert "STOPPED" in result.output
+    assert "stop requested by user" in result.output
     assert FakeLocalBackend.stopped is True
     assert FakeLocalBackend.instances[-1].stop_timeout == 0.25
 
@@ -277,7 +352,7 @@ def test_system_run_execution_exception_attempts_stop(
     result = runner.invoke(app, ["system", "run", str(path)])
 
     assert result.exit_code == 1
-    assert "System execution failed" in result.output
+    assert "EXECUTION FAILED" in result.output
     assert "inspect exploded" in result.output
     assert FakeLocalBackend.stopped is True
 
@@ -335,6 +410,7 @@ def test_system_run_with_project_resolves_sdk_and_passes_project(
     assert backend.kwargs["project"] == project
     assert backend.kwargs["run_root"] == tmp_path / "runs"
     assert "COMPLETED" in result.output
+    assert "Reason" in result.output
 
 
 def test_system_run_warnings_as_errors_refuses_cycle(

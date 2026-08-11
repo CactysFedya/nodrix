@@ -8,14 +8,12 @@ import sys
 import time
 from typing import Annotated
 
-from rich.table import Table
 import typer
 import yaml
 
 from .cli_context import app, console
 from .local_dev import compile_local_project, reset_local_development_modules
 from .manifest import load_manifest
-from .presentation import render_system_plan as render_system_plan_view, render_validation
 from .project_foundation import resolve_project_resource
 from .workspace import find_workspace
 from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefinition
@@ -30,6 +28,21 @@ from .system import (
     plan_system,
     system_to_canonical,
     validate_system,
+)
+from .system_presentation import (
+    render_backend_validation,
+    render_schema_written,
+    render_system_conversion,
+    render_system_error,
+    render_system_overview,
+    render_system_plan_result,
+    render_system_prepared,
+    render_system_run_intro,
+    render_system_running,
+    render_system_started,
+    render_system_stopping,
+    render_system_terminal,
+    render_system_validation_result,
 )
 
 
@@ -194,7 +207,7 @@ def system_validate(
                 )
             )
         else:
-            console.print(f"[red]System validation failed:[/red] {exc}")
+            console.print(render_system_error("validation", exc))
         raise typer.Exit(1)
 
     payload = {
@@ -209,14 +222,14 @@ def system_validate(
     if json_output:
         console.print_json(json.dumps(payload, ensure_ascii=False))
     else:
-        mode = "definitions resolved" if project is not None else "structural"
+        mode = "definitions resolved" if effective_project is not None else "structural"
         console.print(
-            render_validation(
+            render_system_validation_result(
                 name=system.name,
                 valid=bool(payload["ok"]),
                 mode=mode,
+                path=resolved_path,
                 diagnostics=report.diagnostics,
-                noun="SYSTEM",
             )
         )
 
@@ -254,10 +267,6 @@ def _plan_jsonable(plan) -> dict:
         exclude_none=True,
         mode="json",
     )
-
-
-def _render_system_plan(plan) -> None:
-    console.print(render_system_plan_view(plan))
 
 
 @system_app.command("plan")
@@ -310,7 +319,7 @@ def system_plan(
                 )
             )
         else:
-            console.print(f"[red]System planning failed:[/red] {exc}")
+            console.print(render_system_error("planning", exc))
         raise typer.Exit(1)
 
     if json_output:
@@ -321,55 +330,10 @@ def system_plan(
             )
         )
     else:
-        _render_system_plan(plan)
+        console.print(render_system_plan_result(plan))
 
     if warnings_as_errors and plan.diagnostics:
         raise typer.Exit(1)
-
-
-def _render_backend_validation(report) -> None:
-    if not report.diagnostics:
-        return
-
-    table = Table(
-        title=f"BACKEND {report.backend.upper()} DIAGNOSTICS",
-        box=None,
-        show_edge=False,
-        pad_edge=False,
-    )
-    table.add_column("LEVEL")
-    table.add_column("CODE")
-    table.add_column("PATH")
-    table.add_column("MESSAGE")
-    for item in report.diagnostics:
-        table.add_row(
-            item.level.upper(),
-            item.code,
-            item.path or "-",
-            item.message,
-            style="red" if item.level == "error" else "yellow",
-        )
-    console.print(table)
-
-
-def _render_run_status(system_name: str, status) -> None:
-    state = status.state.value.upper()
-    color = (
-        "green"
-        if status.state in {
-            BackendExecutionState.COMPLETED,
-            BackendExecutionState.STOPPED,
-        }
-        else "red"
-        if status.state is BackendExecutionState.FAILED
-        else "yellow"
-    )
-    suffix = f" · {status.message}" if status.message else ""
-    console.print(
-        f"[{color}]{state}[/{color}] "
-        f"[bold]{system_name}[/bold] · "
-        f"{status.backend}:{status.execution_id}{suffix}"
-    )
 
 
 @system_app.command("run")
@@ -429,37 +393,34 @@ def system_run(
         )
         plan = plan_system(system, catalog=catalog)
     except Exception as exc:
-        console.print(f"[red]System run failed:[/red] {exc}")
+        console.print(render_system_error("run", exc))
         raise typer.Exit(1)
 
     backend_names = _plan_backend_names(plan)
     if backend_names != ("local",):
         found = ", ".join(backend_names) if backend_names else "<none>"
         console.print(
-            "[red]System run failed:[/red] "
-            "RUN101: Nodrix 2.6 system run supports exactly one 'local' "
-            f"backend; plan resolves to: {found}"
+            render_system_error(
+                "run",
+                f"execution plan resolves to backend(s): {found}",
+                code="RUN101",
+                hint="Nodrix 2.6 system run supports exactly one local backend scope.",
+            )
         )
         raise typer.Exit(1)
 
     if warnings_as_errors and plan.diagnostics:
         console.print(
-            "[red]System run refused:[/red] "
-            "RUN102: planner warnings are present and "
-            "--warnings-as-errors was set"
+            render_system_error(
+                "run",
+                "planner warnings are present and --warnings-as-errors was set",
+                code="RUN102",
+            )
         )
-        _render_system_plan(plan)
+        console.print(render_system_plan_result(plan))
         raise typer.Exit(1)
 
-    if plan.diagnostics:
-        console.print(
-            f"[yellow]Planner warnings:[/yellow] {len(plan.diagnostics)}"
-        )
-        for item in plan.diagnostics:
-            console.print(
-                f"[yellow]{item.code}[/yellow] "
-                f"{item.path or '-'} · {item.message}"
-            )
+    console.print(render_system_run_intro(system, plan, resolved_path))
 
     execution_root = find_workspace(resolved_path.parent) or resolved_path.parent
     backend = LocalBackend(
@@ -471,43 +432,81 @@ def system_run(
 
     report = backend.validate_plan(plan)
     if report.diagnostics:
-        _render_backend_validation(report)
+        console.print()
+        console.print(render_backend_validation(report))
 
     if not report.valid:
+        console.print()
         console.print(
-            "[red]System run failed:[/red] "
-            "RUN103: LocalBackend rejected the execution plan"
+            render_system_error(
+                "run",
+                "LocalBackend rejected the execution plan",
+                code="RUN103",
+            )
         )
         raise typer.Exit(1)
 
     try:
         prepared = backend.prepare_plan(plan)
     except Exception as exc:
-        console.print(f"[red]System prepare failed:[/red] {exc}")
+        console.print()
+        console.print(render_system_error("prepare", exc))
         raise typer.Exit(1)
 
     manifest_path = prepared.metadata.get("manifest_path")
+    console.print()
     console.print(
-        f"[green]PREPARED[/green] [bold]{system.name}[/bold] · backend=local"
-        + (f" · {manifest_path}" if manifest_path else "")
+        render_system_prepared(
+            system.name,
+            manifest_path=manifest_path,
+        )
     )
 
     handle = None
+    started_at = time.monotonic()
     try:
         handle = backend.start(prepared)
+        started_at = time.monotonic()
         console.print(
-            f"[green]STARTED[/green] [bold]{system.name}[/bold] · "
-            f"local:{handle.execution_id}"
+            render_system_started(
+                system.name,
+                backend="local",
+                execution_id=handle.execution_id,
+            )
         )
 
         previous_state = None
         while True:
             status = backend.inspect(handle)
             if status.state is not previous_state:
-                _render_run_status(system.name, status)
+                if status.state is BackendExecutionState.RUNNING:
+                    console.print(
+                        render_system_running(
+                            system.name,
+                            status,
+                            plan,
+                        )
+                    )
+                elif status.state is BackendExecutionState.STOPPING:
+                    console.print(
+                        render_system_stopping(
+                            system.name,
+                            backend=status.backend,
+                            execution_id=status.execution_id,
+                        )
+                    )
                 previous_state = status.state
 
             if status.terminal:
+                console.print()
+                console.print(
+                    render_system_terminal(
+                        system.name,
+                        status,
+                        plan,
+                        elapsed_seconds=time.monotonic() - started_at,
+                    )
+                )
                 if status.state is BackendExecutionState.FAILED:
                     raise typer.Exit(1)
                 return
@@ -516,12 +515,16 @@ def system_run(
 
     except KeyboardInterrupt:
         if handle is None:
-            console.print("[yellow]Interrupted before execution started.[/yellow]")
+            console.print(render_system_error("run", "interrupted before execution started"))
             raise typer.Exit(130)
 
+        console.print()
         console.print(
-            f"[yellow]Stopping[/yellow] [bold]{system.name}[/bold] · "
-            f"local:{handle.execution_id}"
+            render_system_stopping(
+                system.name,
+                backend="local",
+                execution_id=handle.execution_id,
+            )
         )
         try:
             status = backend.stop(
@@ -529,14 +532,27 @@ def system_run(
                 timeout_seconds=stop_timeout,
             )
         except Exception as exc:
-            console.print(f"[red]System stop failed:[/red] {exc}")
+            console.print(render_system_error("stop", exc))
             raise typer.Exit(130)
 
-        _render_run_status(system.name, status)
+        console.print()
+        console.print(
+            render_system_terminal(
+                system.name,
+                status,
+                plan,
+                elapsed_seconds=time.monotonic() - started_at,
+                stop_requested=True,
+            )
+        )
         if status.state is BackendExecutionState.STOPPING:
             console.print(
-                "[yellow]Runtime is still stopping after the requested "
-                "timeout.[/yellow]"
+                render_system_error(
+                    "stop",
+                    status.message or "runtime is still stopping",
+                    code="STOP_TIMEOUT",
+                    hint=f"The requested stop timeout was {stop_timeout:g}s.",
+                )
             )
         raise typer.Exit(130)
 
@@ -544,7 +560,8 @@ def system_run(
         raise
 
     except Exception as exc:
-        console.print(f"[red]System execution failed:[/red] {exc}")
+        console.print()
+        console.print(render_system_error("execution", exc))
         if handle is not None:
             try:
                 backend.stop(handle, timeout_seconds=stop_timeout)
@@ -571,14 +588,20 @@ def system_show(
     """Show the canonical System document or a concise architecture summary."""
 
     if json_output and document:
-        console.print("[red]Use either --json or --document, not both.[/red]")
+        console.print(
+            render_system_error(
+                "show",
+                "use either --json or --document, not both",
+                code="SHOW101",
+            )
+        )
         raise typer.Exit(2)
 
     try:
         resolved_path, _ = _resolve_system_cli_inputs(path)
         system = load_system(resolved_path)
     except Exception as exc:
-        console.print(f"[red]Cannot load System:[/red] {exc}")
+        console.print(render_system_error("show", exc))
         raise typer.Exit(1)
 
     if json_output:
@@ -596,62 +619,7 @@ def system_show(
         console.print(dumps_system(system, format="yaml").rstrip())
         return
 
-    console.print(
-        f"[bold]{system.name}[/bold] · {system.api_version} · {system.kind}"
-    )
-    if system.description:
-        console.print(system.description)
-
-    counts = Table(box=None, show_edge=False, pad_edge=False)
-    counts.add_column("RESOURCES", justify="right")
-    counts.add_column("APPLICATIONS", justify="right")
-    counts.add_column("GRAPHS", justify="right")
-    counts.add_column("LINKS", justify="right")
-    counts.add_column("TARGETS", justify="right")
-    counts.add_column("ARTIFACTS", justify="right")
-    counts.add_row(
-        str(len(system.resources)),
-        str(len(system.applications)),
-        str(len(system.graphs)),
-        str(len(system.links)),
-        str(len(system.targets)),
-        str(len(system.artifacts)),
-    )
-    console.print(counts)
-
-    if system.graphs:
-        graphs = Table(box=None, show_edge=False, pad_edge=False)
-        graphs.add_column("GRAPH")
-        graphs.add_column("NODES", justify="right")
-        graphs.add_column("CONNECTIONS", justify="right")
-        for graph in system.graphs:
-            graphs.add_row(
-                graph.name,
-                str(len(graph.nodes)),
-                str(len(graph.connections)),
-            )
-        console.print(graphs)
-
-    if system.targets:
-        targets = Table(box=None, show_edge=False, pad_edge=False)
-        targets.add_column("TARGET")
-        targets.add_column("KIND")
-        for target in system.targets:
-            targets.add_row(target.name, target.kind)
-        console.print(targets)
-
-    if system.artifacts:
-        artifacts = Table(box=None, show_edge=False, pad_edge=False)
-        artifacts.add_column("ARTIFACT")
-        artifacts.add_column("KIND")
-        artifacts.add_column("PRODUCER")
-        for artifact in system.artifacts:
-            artifacts.add_row(
-                artifact.name,
-                artifact.kind,
-                artifact.producer or "-",
-            )
-        console.print(artifacts)
+    console.print(render_system_overview(system, resolved_path))
 
 
 def _default_system_output(pipeline: Path) -> Path:
@@ -707,7 +675,7 @@ def system_convert(
                 json.dumps({"ok": False, "error": message}, ensure_ascii=False)
             )
         else:
-            console.print(f"[red]Conversion failed:[/red] {message}")
+            console.print(render_system_error("conversion", message, code="CONVERT101"))
         raise typer.Exit(1)
 
     try:
@@ -731,7 +699,7 @@ def system_convert(
                 )
             )
         else:
-            console.print(f"[red]Conversion failed:[/red] {exc}")
+            console.print(render_system_error("conversion", exc))
         raise typer.Exit(1)
 
     payload = {
@@ -752,21 +720,13 @@ def system_convert(
         console.print_json(json.dumps(payload, ensure_ascii=False))
         return
 
-    color = "green" if converted.lossless else "yellow"
     console.print(
-        f"[{color}]Converted[/{color}] {pipeline_path.name} "
-        f"→ [bold]{destination}[/bold]"
+        render_system_conversion(
+            pipeline=pipeline_path,
+            destination=destination,
+            converted=converted,
+        )
     )
-    console.print(
-        "Compatibility: "
-        f"lossless={converted.lossless} "
-        f"reversible={converted.reversible} · "
-        f"transformed={converted.report.counts['transformed']} "
-        f"deferred={converted.report.counts['deferred']} "
-        f"unsupported={converted.report.counts['unsupported']}"
-    )
-    for warning in converted.warnings:
-        console.print(f"[yellow]{warning.code}[/yellow] {warning.message}")
 
 
 @system_app.command("schema")
@@ -782,7 +742,7 @@ def system_schema(
         if output is not None:
             destination = output.expanduser().resolve()
             dump_system_schema(destination)
-            console.print(f"[green]Written[/green] {destination}")
+            console.print(render_schema_written(destination))
             return
 
         from .system import system_json_schema
@@ -794,5 +754,5 @@ def system_schema(
             )
         )
     except Exception as exc:
-        console.print(f"[red]Cannot produce System schema:[/red] {exc}")
+        console.print(render_system_error("schema", exc))
         raise typer.Exit(1)

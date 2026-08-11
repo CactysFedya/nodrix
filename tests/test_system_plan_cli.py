@@ -109,7 +109,7 @@ def test_system_plan_human_output_shows_execution_topology(
     result = runner.invoke(app, ["system", "plan", str(path)])
 
     assert result.exit_code == 0, result.output
-    assert "PLAN robot" in result.output
+    assert "NODRIX PLAN robot" in result.output
     assert "BACKENDS" in result.output
     assert "local" in result.output
     assert "remote" in result.output
@@ -178,7 +178,7 @@ def test_system_plan_reports_planning_error(tmp_path: Path) -> None:
     result = runner.invoke(app, ["system", "plan", str(path)])
 
     assert result.exit_code == 1
-    assert "System planning failed" in result.output
+    assert "PLANNING FAILED" in result.output
     assert "PLAN201" in result.output
 
 

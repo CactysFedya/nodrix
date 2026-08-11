@@ -55,8 +55,9 @@ def test_system_validate_accepts_valid_document(tmp_path: Path) -> None:
     result = runner.invoke(app, ["system", "validate", str(path)])
 
     assert result.exit_code == 0, result.output
+    assert "NODRIX SYSTEM valid-system" in result.output
     assert "VALID" in result.output
-    assert "valid-system" in result.output
+    assert "contracts and references are valid" in result.output
 
 
 def test_system_validate_rejects_bad_reference(tmp_path: Path) -> None:
@@ -124,7 +125,8 @@ def test_system_show_summary_reports_architecture_counts(tmp_path: Path) -> None
     result = runner.invoke(app, ["system", "show", str(path)])
 
     assert result.exit_code == 0, result.output
-    assert "summary" in result.output
+    assert "NODRIX SYSTEM summary" in result.output
+    assert "Shape" in result.output
     assert "mapping" in result.output
 
 
@@ -165,8 +167,10 @@ def test_system_convert_writes_loadable_system_and_report(tmp_path: Path) -> Non
     system = load_system(output)
     assert system.name == "legacy"
     assert system.graph("main").node("source").uses == "demo.source"
-    assert "lossless=True" in result.output
-    assert "unsupported=0" in result.output
+    assert "NODRIX CONVERT legacy" in result.output
+    assert "Lossless" in result.output
+    assert "True" in result.output
+    assert "0 unsupported" in result.output
 
 
 def test_system_convert_refuses_overwrite_without_force(tmp_path: Path) -> None:
@@ -195,6 +199,7 @@ def test_system_convert_refuses_overwrite_without_force(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 1
+    assert "CONVERSION FAILED" in result.output
     assert "already exists" in result.output
     assert output.read_text(encoding="utf-8") == "do-not-overwrite\n"
 
@@ -217,6 +222,7 @@ def test_system_schema_can_write_file(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 0, result.output
+    assert "SCHEMA WRITTEN" in result.output
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["title"] == "Nodrix System Model v1"
 
