@@ -23,6 +23,7 @@ def test_native_manifest_builds() -> None:
     assert len(description["edges"]) == 3
 
 
+@pytest.mark.timeout(180)
 def test_native_runtime_executes_end_to_end(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
