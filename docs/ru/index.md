@@ -1,8 +1,8 @@
-# Документация Plyctl 2.3
+# Документация Plyctl 2.8
 
 <div class="plyctl-hero">
 <strong>Plyctl — runtime и операционный слой для модульных конвейеров реального времени.</strong><br>
-Версия 2.3 добавляет workspace, контексты, воспроизводимые окружения, фоновые операции, operator views, управление ROS 2-процессами и квалифицируемые reference integrations.
+Версия 2.8 добавляет multi-scope System orchestration, изоляцию процессов, transport runtime, удалённое выполнение targets и инструменты квалификации Raspberry Pi 5 ↔ workstation.
 </div>
 
 Plyctl позволяет описать граф один раз, проверить его до запуска, выполнять Python- и native-узлы, управлять внешними приложениями и наблюдать систему через единый CLI.
@@ -14,9 +14,9 @@ plyctl prepare
 plyctl run
 ```
 
-```{admonition} Статус beta 2.3.0b1
+```{admonition} Статус релиза 2.8.0
 :class: note
-`2.3.0b1` стабилизирует загрузку локальных Python nodes, release metadata и двуязычную документацию. FAST-LIVO2 semantic mapping имеет hardware-smoke evidence на Raspberry Pi 5, но остаётся экспериментальным до закрытия release blockers.
+`2.8.0` стабилизирует multi-scope orchestration, изоляцию процессов, transport runtime и аутентифицированное удалённое выполнение targets. Qualification harness Raspberry Pi 5 ↔ workstation включён; финальная физическая hardware qualification остаётся отдельным acceptance step.
 ```
 
 ```{admonition} Имена в серии 2.x
@@ -115,4 +115,4 @@ releases/index
 contributing/index
 ```
 
-- [English documentation](../index.md)
+<a href="../../en/latest/">English documentation</a>
