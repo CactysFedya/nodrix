@@ -13,7 +13,7 @@ from ..sdk.definitions import (
     ResourceDefinition,
 )
 from .catalog import DefinitionCatalog
-from .graph import Graph, split_local_endpoint, split_system_endpoint
+from .graph import split_local_endpoint, split_system_endpoint
 from .instances import NodeInstance, ResourceInstance
 from .model import SystemModel
 

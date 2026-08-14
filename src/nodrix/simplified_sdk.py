@@ -31,7 +31,7 @@ from .sdk import (
     node,
     resource,
 )
-from .sdk.namespace import PACKAGE_NAMESPACE_OVERRIDE as _PACKAGE_NAMESPACE_OVERRIDE
+from .sdk.namespace import PACKAGE_NAMESPACE_OVERRIDE as _PACKAGE_NAMESPACE_OVERRIDE  # noqa: F401
 
 __all__ = [
     "CallableDefinition",

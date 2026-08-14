@@ -4,7 +4,6 @@ import threading
 import time
 from pathlib import Path
 
-import pytest
 
 from nodrix.system import (
     ApplicationInstance,

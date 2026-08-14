@@ -28,6 +28,7 @@ __all__ = [
     "NodeDefinition",
     "Outputs",
     "Param",
+    "PACKAGE_NAMESPACE_OVERRIDE",
     "ParameterDefinition",
     "ParameterSpec",
     "PortDefinition",

@@ -102,6 +102,12 @@ from .remote_agent import (
     RemoteAgentServer,
     RemoteAgentService,
 )
+from .remote_tls import (
+    RemoteAgentTLSClientConfig,
+    RemoteAgentTLSServerConfig,
+    TLSRemoteAgentClient,
+    TLSRemoteAgentServer,
+)
 from .remote_backend import (
     RemoteExecutionPayload,
     RemotePreparedPayload,
@@ -177,6 +183,10 @@ __all__ = [
     "RemoteAgentError",
     "RemoteAgentServer",
     "RemoteAgentService",
+    "RemoteAgentTLSClientConfig",
+    "RemoteAgentTLSServerConfig",
+    "TLSRemoteAgentClient",
+    "TLSRemoteAgentServer",
     "RemoteExecutionPayload",
     "RemotePreparedPayload",
     "RemoteProcessBackend",

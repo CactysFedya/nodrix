@@ -348,7 +348,6 @@ def _node_line(
     # A relative maximum is not itself a problem. Without an explicit
     # rate/latency target Nodrix must not label a healthy node a bottleneck.
     _ = bottleneck_p95
-    health = _mapping(raw.get("health", {}))
     resources = _mapping(raw.get("resources", {}))
     info = _mapping(raw.get("runtime_info", {}))
     status = _node_status(raw)

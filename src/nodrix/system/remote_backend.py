@@ -29,18 +29,22 @@ from .remote_agent import (
     RemoteAgentEndpoint,
     RemoteAgentError,
 )
+from .remote_tls import (
+    RemoteAgentTLSClientConfig,
+    TLSRemoteAgentClient,
+)
 
 
 @dataclass(frozen=True, slots=True)
 class RemotePreparedPayload:
-    client: RemoteAgentClient
+    client: RemoteAgentClient | TLSRemoteAgentClient
     preparation_id: str
     target: str
 
 
 @dataclass(frozen=True, slots=True)
 class RemoteExecutionPayload:
-    client: RemoteAgentClient
+    client: RemoteAgentClient | TLSRemoteAgentClient
     remote_execution_id: str
     backend_execution_id: str
     target: str
@@ -51,6 +55,41 @@ def _agent_mapping(context: BackendContext) -> Mapping[str, Any] | None:
         return None
     raw = context.targets[0].properties.get("agent")
     return raw if isinstance(raw, Mapping) else None
+
+
+def _tls_from_context(
+    context: BackendContext,
+) -> RemoteAgentTLSClientConfig | None:
+    raw = _agent_mapping(context)
+    if raw is None:
+        return None
+
+    raw_tls = raw.get("tls")
+    if raw_tls is None:
+        return None
+    if not isinstance(raw_tls, Mapping):
+        raise ValueError("remote agent property 'tls' must be a mapping")
+
+    def required_path(name: str) -> Path:
+        value = raw_tls.get(name)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(
+                f"remote agent TLS property {name!r} must be a non-empty string"
+            )
+        return Path(value.strip())
+
+    server_name = raw_tls.get("server_name")
+    if server_name is not None and not isinstance(server_name, str):
+        raise ValueError(
+            "remote agent TLS property 'server_name' must be a string"
+        )
+
+    return RemoteAgentTLSClientConfig(
+        ca_file=required_path("ca_file"),
+        cert_file=required_path("cert_file"),
+        key_file=required_path("key_file"),
+        server_name=server_name,
+    )
 
 
 def _endpoint_from_context(context: BackendContext) -> RemoteAgentEndpoint:
@@ -128,7 +167,7 @@ class RemoteProcessBackend(ExecutionBackend):
                 ),
                 metadata={
                     "remote_protocol": REMOTE_AGENT_PROTOCOL,
-                    "control_plane": "loopback-token-m5a",
+                    "control_plane": "mtls-or-loopback-token-m5b",
                 },
             ),
         )
@@ -177,15 +216,28 @@ class RemoteProcessBackend(ExecutionBackend):
             )
             return diagnostics
 
-        if not _loopback_host(endpoint.host):
+        try:
+            tls = _tls_from_context(context)
+        except ValueError as exc:
+            diagnostics.append(
+                BackendDiagnostic(
+                    level="error",
+                    code="REMOTE105",
+                    path=f"targets.{target.name}.properties.agent.tls",
+                    message=str(exc),
+                )
+            )
+            return diagnostics
+
+        if not _loopback_host(endpoint.host) and tls is None:
             diagnostics.append(
                 BackendDiagnostic(
                     level="error",
                     code="REMOTE104",
                     path=f"targets.{target.name}.properties.agent.host",
                     message=(
-                        "M5a remote control is loopback-only; non-loopback "
-                        "execution requires the TLS control-plane milestone"
+                        "non-loopback remote execution requires mutually "
+                        "authenticated TLS configuration"
                     ),
                 )
             )
@@ -193,7 +245,12 @@ class RemoteProcessBackend(ExecutionBackend):
 
     def _prepare(self, context: BackendContext) -> PreparedExecution:
         endpoint = _endpoint_from_context(context)
-        client = RemoteAgentClient(endpoint)
+        tls = _tls_from_context(context)
+        client = (
+            TLSRemoteAgentClient(endpoint, tls)
+            if tls is not None
+            else RemoteAgentClient(endpoint)
+        )
         ping = client.ping()
         if ping.get("protocol") != REMOTE_AGENT_PROTOCOL:
             raise RemoteAgentError(
@@ -237,6 +294,7 @@ class RemoteProcessBackend(ExecutionBackend):
                 "target": scope_target,
                 "agent_host": endpoint.host,
                 "agent_port": endpoint.port,
+                "agent_tls": tls is not None,
                 "preparation_id": preparation_id,
                 "remote_metadata": dict(response.get("metadata") or {}),
             },

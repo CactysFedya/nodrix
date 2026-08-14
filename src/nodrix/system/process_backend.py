@@ -139,6 +139,7 @@ def _process_worker(
 
             connection.send({"event": "ready", "pid": os.getpid()})
             report = runtime.run_sync()
+            control_stop_requested = stop_requested.is_set()
             stop_requested.set()
 
         payload = dict(report or {})
@@ -147,7 +148,7 @@ def _process_worker(
             BackendExecutionState.FAILED.value
             if report_status == "failed"
             else BackendExecutionState.STOPPED.value
-            if report_status == "stopped"
+            if report_status == "stopped" or control_stop_requested
             else BackendExecutionState.COMPLETED.value
         )
         connection.send(

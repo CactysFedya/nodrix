@@ -145,6 +145,14 @@ class PlannedLink(SystemBaseModel):
     metadata: Mapping[str, Any] = Field(default_factory=dict)
     extensions: Mapping[str, Any] = Field(default_factory=dict)
 
+    @property
+    def cross_target(self) -> bool:
+        return self.source_target != self.target_target
+
+    @property
+    def cross_backend(self) -> bool:
+        return self.source_backend != self.target_backend
+
 
 class PlannedArtifact(SystemBaseModel):
     name: str
