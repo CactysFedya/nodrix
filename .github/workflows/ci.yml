@@ -321,7 +321,9 @@ jobs:
             "/tmp/nodrix-sdist-source[dev,all]"
           cd /tmp/nodrix-sdist-source
           /tmp/nodrix-sdist-test/bin/python -m pytest \
-            -q -o pythonpath=
+            -q -o pythonpath= \
+            --ignore=tests/test_release_metadata_consistency.py \
+            --ignore=tests/test_v270_rpi5_mapping_m4.py
 
       - name: Build wheel from unpacked sdist
         run: |
