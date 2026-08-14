@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plyctl"
-version = "2.3.0b1"
+version = "2.8.0"
 description = "The Pipeline OS for real-time local and distributed systems"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -1,8 +1,8 @@
 {
   "schema": "plyctl-release/v1",
-  "name": "Plyctl 2.3 Beta Stabilization",
-  "release": "2.3.0b1",
-  "display_release": "2.3.0-beta.1",
+  "name": "Plyctl 2.8.0 Release",
+  "release": "2.8.0",
+  "display_release": "2.8.0",
   "core_contracts": {
     "provider_api": [
       "1",

@@ -58,6 +58,40 @@ def check_versions() -> list[str]:
             "RELEASE_MANIFEST.json: "
             f"{release_manifest.get('release')} != {expected}"
         )
+    if release_manifest.get("display_release") != expected:
+        errors.append(
+            "RELEASE_MANIFEST.json display_release: "
+            f"{release_manifest.get('display_release')} != {expected}"
+        )
+    release_name = str(release_manifest.get("name", ""))
+    if expected not in release_name:
+        errors.append(
+            "RELEASE_MANIFEST.json name does not contain "
+            f"release version {expected}: {release_name!r}"
+        )
+
+    docs_conf = (ROOT / "docs/conf.py").read_text(encoding="utf-8")
+    docs_release = extract(
+        r'^release\s*=\s*["\']([^"\']+)["\']',
+        ROOT / "docs/conf.py",
+    )
+    if docs_release != expected:
+        errors.append(f"docs/conf.py release: {docs_release} != {expected}")
+
+    short_version = ".".join(expected.split(".")[:2])
+    docs_version = extract(
+        r'^version\s*=\s*["\']([^"\']+)["\']',
+        ROOT / "docs/conf.py",
+    )
+    if docs_version != short_version:
+        errors.append(
+            f"docs/conf.py version: {docs_version} != {short_version}"
+        )
+
+    if f'"github_version": "v{expected}"' not in docs_conf:
+        errors.append(
+            f"docs/conf.py does not point github_version to v{expected}"
+        )
     compat = (ROOT / "packages/nodrix-compat/pyproject.toml").read_text(
         encoding="utf-8"
     )

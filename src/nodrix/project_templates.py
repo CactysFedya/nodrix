@@ -50,7 +50,7 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "plyctl==2.3.0b1\n",
+    "requirements.txt": "plyctl==2.8.0\n",
     ".gitignore": ".nodrix/\n/outputs/*\n!/outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
@@ -518,7 +518,7 @@ def _vision_files(project_name: str) -> dict[str, str]:
 
     return {
         "pipeline.yaml": pipeline,
-        "requirements.txt": "plyctl[vision,media,viewer]==2.3.0b1\n",
+        "requirements.txt": "plyctl[vision,media,viewer]==2.8.0\n",
         "blocks/sources/ffmpeg.yaml": source,
         "blocks/preprocess/letterbox-320.yaml": preprocess,
         "blocks/detectors/yolo26n-ncnn.yaml": detector,
@@ -599,7 +599,7 @@ def _media_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
-        "requirements.txt": "plyctl[media,viewer]==2.3.0b1\n",
+        "requirements.txt": "plyctl[media,viewer]==2.8.0\n",
         "README.md": dedent(
             f"""
             # {project_name}

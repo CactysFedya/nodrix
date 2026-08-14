@@ -325,4 +325,4 @@ __all__ = [
     "negotiate_features",
 ]
 
-__version__ = "2.3.0b1"
+__version__ = "2.8.0"

@@ -10,8 +10,8 @@ sys.path.insert(0, str(ROOT / "src"))
 project = "Plyctl"
 author = "Plyctl contributors"
 copyright = "2026, Plyctl contributors"
-release = "2.3.0b1"
-version = "2.3"
+release = "2.8.0"
+version = "2.8"
 
 extensions = [
     "myst_parser",
@@ -62,7 +62,7 @@ html_context = {
     "display_github": True,
     "github_user": "CactysFedya",
     "github_repo": "nodrix",
-    "github_version": "release/2.3.0b1-stabilization",
+    "github_version": "v2.8.0",
     "conf_py_path": "/docs/",
     "doc_language": "en",
     "doc_version": "latest",

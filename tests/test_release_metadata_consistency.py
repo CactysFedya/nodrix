@@ -7,7 +7,7 @@ import tomllib
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED = "2.3.0b1"
+EXPECTED = "2.8.0"
 
 
 def test_release_metadata_uses_one_public_version() -> None:
@@ -23,7 +23,7 @@ def test_release_metadata_uses_one_public_version() -> None:
         (ROOT / "RELEASE_MANIFEST.json").read_text(encoding="utf-8")
     )
     assert manifest["release"] == EXPECTED
-    assert manifest["display_release"] == "2.3.0-beta.1"
+    assert manifest["display_release"] == EXPECTED
 
     cmake = (ROOT / "src/nodrix/native/CMakeLists.txt").read_text(
         encoding="utf-8"

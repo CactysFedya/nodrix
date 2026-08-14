@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
-project(nodrix_native VERSION 2.3.0 LANGUAGES CXX)
-set(NODRIX_RELEASE_VERSION "2.3.0b1" CACHE STRING "Nodrix Python release version")
+project(nodrix_native VERSION 2.8.0 LANGUAGES CXX)
+set(NODRIX_RELEASE_VERSION "2.8.0" CACHE STRING "Nodrix Python release version")
 
 option(NODRIX_NATIVE_LTO "Enable link-time optimization" ON)
 option(NODRIX_NATIVE_MARCH_NATIVE "Tune for the build machine" OFF)
