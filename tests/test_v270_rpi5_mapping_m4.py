@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -86,6 +88,10 @@ def test_reference_system_is_structurally_valid_and_maps_registered_cloud() -> N
     assert system.artifacts[0].path == "artifacts/maps/metric/latest.ply"
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="RPi5 ROS 2 build recipes require a POSIX shell",
+)
 def test_build_recipe_compiler_exposes_real_dependency_chain() -> None:
     compiled = compile_project_build_workflow(ROOT, project=_project())
     assert compiled is not None

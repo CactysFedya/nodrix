@@ -44,11 +44,30 @@ def _expand_environment_value(
     base_dir: Path | None = None,
 ) -> str:
     text = os.path.expanduser(str(value))
+    project_root_path = False
+    root = ""
+
     if base_dir is not None:
         root = str(base_dir.expanduser().resolve())
-        text = text.replace("${PROJECT_ROOT}", root)
-        text = text.replace("${NODRIX_PROJECT_ROOT}", root)
-    return os.path.expandvars(text)
+        for marker in ("${PROJECT_ROOT}", "${NODRIX_PROJECT_ROOT}"):
+            if (
+                text == marker
+                or text.startswith(f"{marker}/")
+                or text.startswith(f"{marker}\\")
+            ):
+                project_root_path = True
+            text = text.replace(marker, root)
+
+    text = os.path.expandvars(text)
+
+    if (
+        project_root_path
+        and root
+        and os.pathsep not in text[len(root):]
+    ):
+        text = os.path.normpath(text)
+
+    return text
 
 
 _SAFE_ENVIRONMENT_NAMES = {
