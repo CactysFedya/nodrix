@@ -16,6 +16,12 @@ from .operations import (
     Operation,
     OperationKind,
 )
+from .plans import (
+    SYSTEM_EXECUTION,
+    WORKFLOW,
+    PlanKind,
+    PlanRecord,
+)
 
 __all__ = [
     "BENCHMARK",
@@ -29,8 +35,12 @@ __all__ = [
     "OperationKind",
     "PACKAGE",
     "PROFILE",
+    "PlanKind",
+    "PlanRecord",
     "RUN",
     "RevisionRef",
+    "SYSTEM_EXECUTION",
     "TEST",
     "VALIDATE",
+    "WORKFLOW",
 ]
