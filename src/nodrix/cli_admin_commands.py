@@ -37,8 +37,10 @@ from .profiles import profile_names
 from .workspace import default_view, resolve_project_root
 from .workspace_views import render_top_view
 from .presentation import render_health, render_status
+from .run_document_validation import validate_run_document
 from .runs import (
     compare_runs,
+    is_canonical_run_report,
     latest_run_id,
     list_runs,
     load_run,
@@ -511,12 +513,192 @@ def runs_list_command(
     console.print(table)
 
 
+def _short_canonical_ref(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return "-"
+
+    prefix = "nodrix://"
+
+    if value.startswith(prefix):
+        return value[len(prefix):]
+
+    return value
+
+
+def _short_revision(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return "-"
+
+    if "@" not in value:
+        return _short_canonical_ref(value)
+
+    _, revision = value.rsplit("@", 1)
+
+    if ":" not in revision:
+        return revision
+
+    algorithm, digest = revision.split(":", 1)
+
+    if len(digest) <= 16:
+        return revision
+
+    return f"{algorithm}:{digest[:16]}…"
+
+
+def _render_canonical_run_show(
+    data: dict[str, object],
+) -> None:
+    """Render one canonical Run without boxes or table borders."""
+
+    subject = data.get("subject")
+    subject = subject if isinstance(subject, dict) else {}
+
+    operation = data.get("operation")
+    operation = operation if isinstance(operation, dict) else {}
+
+    plan = data.get("plan")
+    plan = plan if isinstance(plan, dict) else {}
+
+    execution = data.get("execution")
+    execution = execution if isinstance(execution, dict) else {}
+
+    run_id = str(data.get("id") or "-")
+    status = str(data.get("status") or "-")
+
+    duration = data.get("duration_seconds")
+    duration_text = (
+        "-"
+        if duration is None
+        else f"{duration} s"
+    )
+
+    console.print(
+        f"[bold]RUN[/bold] {run_id}"
+    )
+    console.print(
+        f"{status.upper()} · {duration_text}"
+    )
+    console.print()
+
+    console.print(
+        f"[dim]Subject[/dim]    "
+        f"{_short_canonical_ref(subject.get('entity'))}"
+    )
+    console.print(
+        f"[dim]Revision[/dim]   "
+        f"{_short_revision(subject.get('revision'))}"
+    )
+    console.print(
+        f"[dim]Operation[/dim]  "
+        f"{operation.get('kind') or '-'}"
+    )
+
+    console.print()
+
+    console.print(
+        f"[dim]Plan[/dim]       "
+        f"{plan.get('id') or '-'}"
+    )
+    console.print(
+        f"[dim]Execution[/dim]  "
+        f"{execution.get('id') or '-'}"
+    )
+    console.print(
+        f"[dim]Executor[/dim]   "
+        f"{execution.get('executor') or '-'}"
+    )
+
+    relations = data.get("relations")
+    relations = (
+        relations
+        if isinstance(relations, list)
+        else []
+    )
+
+    provenance = []
+
+    for raw in relations:
+        if not isinstance(raw, dict):
+            continue
+
+        kind = raw.get("kind")
+
+        # Lifecycle is already shown above as Plan -> Execution -> Run.
+        if kind in {
+            "executed_as",
+            "recorded_as",
+        }:
+            continue
+
+        provenance.append(raw)
+
+    if not provenance:
+        return
+
+    console.print()
+    console.print("[bold]PROVENANCE[/bold]")
+
+    for relation in provenance:
+        kind = str(
+            relation.get("kind")
+            or "-"
+        )
+
+        target = _short_canonical_ref(
+            relation.get("target")
+        )
+
+        console.print(
+            f"  {kind:<14} {target}"
+        )
+
+
 @runs_app.command("show")
-def runs_show_command(run_id: str, project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd()) -> None:
+def runs_show_command(
+    run_id: str,
+    project: Annotated[
+        Path,
+        typer.Option("--project", "-p"),
+    ] = Path.cwd(),
+    json_output: Annotated[
+        bool,
+        typer.Option("--json"),
+    ] = False,
+) -> None:
+    """Show one legacy or canonical Run."""
+
     try:
-        console.print_json(json.dumps(load_run(run_id, project)))
+        data = load_run(
+            run_id,
+            project,
+        )
+
+        if json_output:
+            console.print_json(
+                json.dumps(
+                    data,
+                    ensure_ascii=False,
+                )
+            )
+            return
+
+        if is_canonical_run_report(data):
+            validate_run_document(data)
+            _render_canonical_run_show(data)
+            return
+
+        # Preserve historical behaviour for legacy pipeline Runs.
+        console.print_json(
+            json.dumps(
+                data,
+                ensure_ascii=False,
+            )
+        )
+
     except Exception as exc:
-        console.print(f"[red]Cannot load run:[/red] {exc}")
+        console.print(
+            f"[red]Cannot load run:[/red] {exc}"
+        )
         raise typer.Exit(1)
 
 

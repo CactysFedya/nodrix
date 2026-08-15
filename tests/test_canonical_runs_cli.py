@@ -245,3 +245,187 @@ def test_runs_list_is_borderless(
         char in result.stdout
         for char in border_chars
     )
+
+
+def test_runs_show_canonical_is_compact_and_borderless(
+    tmp_path,
+) -> None:
+    document = canonical_run()
+
+    document["relations"] = [
+        {
+            "source": "nodrix://record/plan/plan-001",
+            "kind": "executed_as",
+            "target": (
+                "nodrix://record/execution/"
+                "execution-001"
+            ),
+            "metadata": {},
+        },
+        {
+            "source": (
+                "nodrix://record/execution/"
+                "execution-001"
+            ),
+            "kind": "recorded_as",
+            "target": "nodrix://record/run/run-001",
+            "metadata": {},
+        },
+        {
+            "source": "nodrix://record/run/run-001",
+            "kind": "consumes",
+            "target": (
+                "nodrix://dataset/project/livox-session"
+                "@sha256:"
+                + "b" * 64
+            ),
+            "metadata": {},
+        },
+        {
+            "source": "nodrix://record/run/run-001",
+            "kind": "produces",
+            "target": (
+                "nodrix://artifact/project/global-map"
+                "@sha256:"
+                + "c" * 64
+            ),
+            "metadata": {},
+        },
+    ]
+
+    write_json(
+        (
+            tmp_path
+            / ".nodrix"
+            / "runs"
+            / "run-001"
+            / "run.json"
+        ),
+        document,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "runs",
+            "show",
+            "run-001",
+            "--project",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    output = result.stdout
+
+    assert "RUN" in output
+    assert "run-001" in output
+    assert "COMPLETED" in output
+
+    assert "system/project/mapping" in output
+    assert "Operation" in output
+    assert "run" in output
+
+    assert "plan-001" in output
+    assert "execution-001" in output
+    assert "nodrix.system.orchestrator" in output
+
+    assert "PROVENANCE" in output
+    assert "consumes" in output
+    assert "dataset/project/livox-session" in output
+    assert "produces" in output
+    assert "artifact/project/global-map" in output
+
+    assert "nodrix://" not in output
+
+    border_chars = (
+        "┏┓┗┛┃"
+        "╭╮╰╯"
+        "┌┐└┘│"
+        "━─"
+        "┡┩"
+    )
+
+    assert not any(
+        char in output
+        for char in border_chars
+    )
+
+
+def test_runs_show_canonical_json_preserves_document(
+    tmp_path,
+) -> None:
+    document = canonical_run()
+
+    write_json(
+        (
+            tmp_path
+            / ".nodrix"
+            / "runs"
+            / "run-001"
+            / "run.json"
+        ),
+        document,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "runs",
+            "show",
+            "run-001",
+            "--project",
+            str(tmp_path),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    loaded = json.loads(
+        result.stdout
+    )
+
+    assert loaded == document
+    assert loaded["schema"] == "nodrix.run/v1"
+
+
+def test_runs_show_legacy_keeps_json_output(
+    tmp_path,
+) -> None:
+    document = {
+        "pipeline": "old-yolo",
+        "status": "completed",
+        "duration_seconds": 10.0,
+    }
+
+    write_json(
+        (
+            tmp_path
+            / ".nodrix"
+            / "runs"
+            / "legacy-001"
+            / "summary.json"
+        ),
+        document,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "runs",
+            "show",
+            "legacy-001",
+            "--project",
+            str(tmp_path),
+        ],
+    )
+
+    assert result.exit_code == 0
+
+    loaded = json.loads(
+        result.stdout
+    )
+
+    assert loaded == document
