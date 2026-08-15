@@ -1,0 +1,99 @@
+name: Publish modular package
+
+on:
+  push:
+    tags:
+      - "plyctl-spatial-v*"
+      - "plyctl-mapping-v*"
+      - "plyctl-ros2-v*"
+      - "plyctl-spatial-ros2-v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - id: package
+        name: Resolve and verify package tag
+        shell: bash
+        run: |
+          case "$GITHUB_REF_NAME" in
+            plyctl-spatial-ros2-v*)
+              name="plyctl-spatial-ros2"
+              directory="packages/nodrix-spatial-ros2"
+              version="${GITHUB_REF_NAME#plyctl-spatial-ros2-v}"
+              ;;
+            plyctl-spatial-v*)
+              name="plyctl-spatial"
+              directory="packages/nodrix-spatial"
+              version="${GITHUB_REF_NAME#plyctl-spatial-v}"
+              ;;
+            plyctl-mapping-v*)
+              name="plyctl-mapping"
+              directory="packages/nodrix-mapping"
+              version="${GITHUB_REF_NAME#plyctl-mapping-v}"
+              ;;
+            plyctl-ros2-v*)
+              name="plyctl-ros2"
+              directory="packages/nodrix-ros2"
+              version="${GITHUB_REF_NAME#plyctl-ros2-v}"
+              ;;
+            *)
+              echo "Unsupported package tag: $GITHUB_REF_NAME" >&2
+              exit 1
+              ;;
+          esac
+
+          actual_name=$(python -c \
+            'import pathlib,sys,tomllib; print(tomllib.loads((pathlib.Path(sys.argv[1]) / "pyproject.toml").read_text())["project"]["name"])' \
+            "$directory")
+          actual_version=$(python -c \
+            'import pathlib,sys,tomllib; print(tomllib.loads((pathlib.Path(sys.argv[1]) / "pyproject.toml").read_text())["project"]["version"])' \
+            "$directory")
+          test "$actual_name" = "$name"
+          test "$actual_version" = "$version"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "directory=$directory" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Install and test modular packages
+        run: |
+          python -m pip install --upgrade pip
+          ./scripts/install_plyctl_ros2_dev.sh
+          ./scripts/test_plyctl_ros2.sh
+
+      - name: Build and verify distribution
+        run: |
+          python -m pip install --upgrade build "twine>=6.1,<7"
+          python -m build --sdist --wheel \
+            --outdir dist "${{ steps.package.outputs.directory }}"
+          python -m twine check dist/*
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "${{ steps.package.outputs.name }} ${{ steps.package.outputs.version }}" \
+            --generate-notes

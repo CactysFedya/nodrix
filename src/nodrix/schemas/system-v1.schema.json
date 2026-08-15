@@ -1,0 +1,528 @@
+{
+  "$defs": {
+    "ApplicationInstance": {
+      "additionalProperties": false,
+      "description": "One supervised external application outside a Graph data plane.",
+      "properties": {
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "resources": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Resources",
+          "type": "object"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "uses"
+      ],
+      "title": "ApplicationInstance",
+      "type": "object"
+    },
+    "Artifact": {
+      "additionalProperties": false,
+      "description": "A first-class output expected from a System.",
+      "properties": {
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "kind": {
+          "minLength": 1,
+          "title": "Kind",
+          "type": "string"
+        },
+        "media_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Media Type"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "producer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Producer"
+        }
+      },
+      "required": [
+        "name",
+        "kind"
+      ],
+      "title": "Artifact",
+      "type": "object"
+    },
+    "Connection": {
+      "additionalProperties": false,
+      "description": "One backend-neutral logical connection inside a Graph.",
+      "properties": {
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "type_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Id"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "Connection",
+      "type": "object"
+    },
+    "Graph": {
+      "additionalProperties": false,
+      "description": "A data-flow composition of NodeInstances.",
+      "properties": {
+        "connections": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Connection"
+          },
+          "title": "Connections",
+          "type": "array"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "nodes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/NodeInstance"
+          },
+          "title": "Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Graph",
+      "type": "object"
+    },
+    "NodeInstance": {
+      "additionalProperties": false,
+      "description": "One concrete use of a NodeDefinition inside a Graph.",
+      "properties": {
+        "backend": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backend"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "resources": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Resources",
+          "type": "object"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "uses"
+      ],
+      "title": "NodeInstance",
+      "type": "object"
+    },
+    "ResourceInstance": {
+      "additionalProperties": false,
+      "description": "One concrete shared resource owned by the System.",
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "target": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Target"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "uses"
+      ],
+      "title": "ResourceInstance",
+      "type": "object"
+    },
+    "SystemLink": {
+      "additionalProperties": false,
+      "description": "Explicit boundary outside one local Graph.\n\nA link can connect an Application to a Graph node, or two Graphs. It is a\nmodel-level contract only; transport/backend realization is intentionally a\nlater planner concern.",
+      "properties": {
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "type_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type Id"
+        },
+        "uses": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Uses"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "SystemLink",
+      "type": "object"
+    },
+    "Target": {
+      "additionalProperties": false,
+      "description": "Declarative execution/deployment target.\n\nVersion 2.5 models targets only. Target resolution and deployment belong to\nthe 2.6 planner/backend layer.",
+      "properties": {
+        "kind": {
+          "default": "local",
+          "title": "Kind",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "properties": {
+          "additionalProperties": true,
+          "title": "Properties",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "Target",
+      "type": "object"
+    }
+  },
+  "$id": "urn:nodrix:schema:system:v1",
+  "additionalProperties": false,
+  "description": "Declarative architecture of one executable system.\n\nSystemModel deliberately contains no runtime queues, scheduler decisions,\nprocess handles, or backend-specific execution plan. Those are compiled in\nlater layers.",
+  "properties": {
+    "apiVersion": {
+      "const": "nodrix.system/v1",
+      "default": "nodrix.system/v1",
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "applications": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ApplicationInstance"
+      },
+      "title": "Applications",
+      "type": "array"
+    },
+    "artifacts": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Artifact"
+      },
+      "title": "Artifacts",
+      "type": "array"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "extensions": {
+      "additionalProperties": true,
+      "title": "Extensions",
+      "type": "object"
+    },
+    "graphs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Graph"
+      },
+      "title": "Graphs",
+      "type": "array"
+    },
+    "kind": {
+      "const": "System",
+      "default": "System",
+      "title": "Kind",
+      "type": "string"
+    },
+    "links": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SystemLink"
+      },
+      "title": "Links",
+      "type": "array"
+    },
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "name": {
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "policies": {
+      "additionalProperties": true,
+      "title": "Policies",
+      "type": "object"
+    },
+    "resources": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/ResourceInstance"
+      },
+      "title": "Resources",
+      "type": "array"
+    },
+    "targets": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Target"
+      },
+      "title": "Targets",
+      "type": "array"
+    }
+  },
+  "required": [
+    "name"
+  ],
+  "title": "Nodrix System Model v1",
+  "type": "object"
+}

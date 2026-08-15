@@ -9,7 +9,7 @@ import time
 import threading
 from typing import Any, Iterator
 
-from .cv_types import EncodedFrame, Frame, ManagedBuffer, Tensor
+from .cv_types import EncodedFrame, Frame, ManagedBuffer, MemoryType, Tensor
 from .messages import Message
 from .node import Node, NodeContext, SourceNode
 from .registry import load_node_class
@@ -89,6 +89,8 @@ def _descriptor_in_slots(
 ) -> int | None:
     for index, slot in enumerate(slots or ()):
         if descriptor.name != slot.name:
+            continue
+        if descriptor.generation != slot.generation:
             continue
         if descriptor.offset < slot.offset:
             continue
@@ -174,50 +176,94 @@ def _encode_ipc_message(
     return packet_info, leases, copies
 
 
-def _attach_lease(message: Message, lease: Any) -> None:
-    message.lease = lease
+def _attach_lease(message: Message, lease: Any) -> Message:
     managed = _payload_managed_buffer(message)
     if managed is not None:
         managed.lease = lease
-        managed.memory_type = managed.memory_type.SHARED
+        managed.memory_type = MemoryType.SHARED
         managed.device = "shm"
+        return message
+    return message.with_updates(lease=lease)
 
 
 def _decode_ipc_message(
     value: dict[str, Any],
     *,
     output_slot_buffers: list[ManagedBuffer] | None = None,
+    max_payload_bytes: int = 256 * 1024 * 1024,
 ) -> tuple[Message, list[Any], bool, int | None]:
+    if not isinstance(value, dict) or not isinstance(value.get("payload"), dict):
+        raise ValueError("Invalid Plyctl IPC message envelope")
+    try:
+        header_size = memoryview(value["header"]).nbytes
+        type_size = memoryview(value["type"]).nbytes
+        metadata_size = memoryview(value["metadata"]).nbytes
+    except (KeyError, TypeError) as exc:
+        raise ValueError("Invalid Plyctl IPC message parts") from exc
+    if header_size > 1024 or type_size > 4096 or metadata_size > 1024 * 1024:
+        raise ValueError("Plyctl IPC header, type, or metadata exceeds its limit")
     payload_spec = value["payload"]
     leases: list[Any] = []
     needs_ack = False
     used_slot: int | None = None
     if "shared" in payload_spec:
-        descriptor = SharedBufferDescriptor(**payload_spec["shared"])
+        raw_descriptor = payload_spec["shared"]
+        if not isinstance(raw_descriptor, dict):
+            raise ValueError("Invalid Plyctl shared-memory descriptor")
+        descriptor = SharedBufferDescriptor(**raw_descriptor)
+        if not descriptor.name or len(descriptor.name) > 255:
+            raise ValueError("Invalid Plyctl shared-memory name")
+        if descriptor.size <= 0 or descriptor.size > int(max_payload_bytes):
+            raise ValueError(
+                f"Plyctl IPC payload size must be within 1..{int(max_payload_bytes)} bytes"
+            )
+        if descriptor.offset < 0 or descriptor.generation < 0:
+            raise ValueError("Invalid Plyctl shared-memory range or generation")
         slot_index = payload_spec.get("slot")
-        if slot_index is not None and output_slot_buffers is not None:
+        if slot_index is not None:
+            if output_slot_buffers is None or isinstance(slot_index, bool):
+                raise ValueError("Unexpected Plyctl output slot reference")
             slot_index = int(slot_index)
+            if slot_index < 0 or slot_index >= len(output_slot_buffers):
+                raise ValueError(f"Invalid Plyctl output slot index: {slot_index}")
             slot = output_slot_buffers[slot_index]
             slot_descriptor = descriptor_for_buffer(slot)
             if slot_descriptor is None:
-                raise RuntimeError("Nodrix output slot lost its shared-memory descriptor")
+                raise RuntimeError("Plyctl output slot lost its shared-memory descriptor")
+            if descriptor.name != slot_descriptor.name:
+                raise ValueError("Plyctl output descriptor does not match the reserved slot")
+            if descriptor.generation != slot_descriptor.generation:
+                raise ValueError("Stale Plyctl output slot generation")
+            if not descriptor.readonly:
+                raise ValueError("Plyctl process outputs must be read-only")
             relative = descriptor.offset - slot_descriptor.offset
+            if relative < 0 or relative + descriptor.size > slot_descriptor.size:
+                raise ValueError("Plyctl output descriptor exceeds its reserved slot")
             payload = slot.memoryview()[relative : relative + descriptor.size]
             used_slot = slot_index
         else:
+            if output_slot_buffers is not None and not bool(payload_spec.get("unlink")):
+                raise ValueError("Unreserved Plyctl process output must use one-shot shared memory")
             managed = open_shared_buffer(descriptor, unlink=bool(payload_spec.get("unlink")))
             leases.append(managed.lease)
             payload = managed.memoryview()
             needs_ack = bool(payload_spec.get("unlink"))
     else:
         payload = memoryview(payload_spec.get("bytes", b""))
+        if payload.nbytes > int(max_payload_bytes):
+            raise ValueError(
+                f"Plyctl IPC payload exceeds {int(max_payload_bytes)} bytes"
+            )
     message = decode_packet_parts(value["header"], value["type"], value["metadata"], payload)
+    managed_payload = _payload_managed_buffer(message)
+    if managed_payload is not None and "shared" in payload_spec:
+        managed_payload._descriptor_hint = descriptor
     if used_slot is not None and output_slot_buffers is not None:
         # Keep the complete parent-owned slot alive until the final downstream
         # consumer releases the decoded message.
-        _attach_lease(message, output_slot_buffers[used_slot])
+        message = _attach_lease(message, output_slot_buffers[used_slot])
     elif leases:
-        _attach_lease(message, leases if len(leases) > 1 else leases[0])
+        message = _attach_lease(message, leases if len(leases) > 1 else leases[0])
     return message, leases, needs_ack, used_slot
 
 
@@ -249,6 +295,7 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
             runtime_mode=config["runtime_mode"],
             engine="unified-process",
             device=config.get("device", "auto"),
+            external_links=tuple(config.get("external_links") or ()),
         )
         node.configure(context)
         affinity = config.get("cpu_affinity") or []
@@ -301,7 +348,10 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
                 if operation == "process":
                     inputs: dict[str, Message] = {}
                     for port, encoded in command["inputs"].items():
-                        message, leases, _, _ = _decode_ipc_message(encoded)
+                        message, leases, _, _ = _decode_ipc_message(
+                            encoded,
+                            max_payload_bytes=int(config["max_message_bytes"]),
+                        )
                         inputs[port] = message
                         input_leases.extend(leases)
                     result = node.process(inputs)
@@ -338,7 +388,7 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
                 if output_allocations:
                     acknowledgement = connection.recv()
                     if acknowledgement.get("op") != "release_outputs":
-                        raise RuntimeError("Invalid Nodrix process output acknowledgement")
+                        raise RuntimeError("Invalid Plyctl process output acknowledgement")
                     for allocation in output_allocations:
                         allocation.lease.release()
             except BaseException as exc:
@@ -368,7 +418,7 @@ class ProcessNodeError(RuntimeError):
 
 
 class ProcessNodeProxy(Node):
-    """Runs a regular Nodrix node in an isolated worker process."""
+    """Runs a regular Plyctl node in an isolated worker process."""
 
     def __init__(
         self,
@@ -394,6 +444,7 @@ class ProcessNodeProxy(Node):
         device: str = "auto",
         memory_limit_mb: int | None = None,
         cpu_limit: float | None = None,
+        max_message_bytes: int = 256 * 1024 * 1024,
     ) -> None:
         super().__init__(parameters)
         self.name = name
@@ -412,6 +463,7 @@ class ProcessNodeProxy(Node):
         self.device = device
         self.memory_limit_mb = memory_limit_mb
         self.cpu_limit = cpu_limit
+        self.max_message_bytes = int(max_message_bytes)
         self.input_pool = SharedBufferPool(block_size, capacity, name=f"nodrix-in-{name}-{int(time.time_ns())}")
         output_block_size = block_size if output_block_size is None else int(output_block_size)
         output_capacity = capacity if output_capacity is None else int(output_capacity)
@@ -452,6 +504,10 @@ class ProcessNodeProxy(Node):
             "device": self.device,
             "memory_limit_mb": self.memory_limit_mb,
             "cpu_limit": self.cpu_limit,
+            "max_message_bytes": self.max_message_bytes,
+            "external_links": [
+                dict(item) for item in self.context.external_links
+            ],
         }
         process = self._ctx.Process(target=_child_main, args=(child, config), name=f"nodrix-process:{self.name}")
         process.start()
@@ -548,7 +604,9 @@ class ProcessNodeProxy(Node):
                 needs_ack = False
                 for port, encoded in response.get("outputs", {}).items():
                     message, output_leases, item_ack, used_slot = _decode_ipc_message(
-                        encoded, output_slot_buffers=output_slots
+                        encoded,
+                        output_slot_buffers=output_slots,
+                        max_payload_bytes=self.max_message_bytes,
                     )
                     outputs[port] = message
                     needs_ack = needs_ack or item_ack
@@ -615,7 +673,7 @@ class ProcessNodeProxy(Node):
 
 
 class ProcessSourceProxy(ProcessNodeProxy, SourceNode):
-    """Process-isolated synchronous SourceNode introduced in Nodrix 0.9."""
+    """Process-isolated synchronous SourceNode introduced in Plyctl 0.9."""
 
     input_types: dict[str, str] = {}
 

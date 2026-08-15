@@ -1,4 +1,4 @@
-"""Nodrix Vision SDK types."""
+"""Plyctl Vision SDK types."""
 
 from ..cv_types import (
     BoxFormat,

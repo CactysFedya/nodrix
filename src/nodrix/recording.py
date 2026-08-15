@@ -13,6 +13,7 @@ from typing import Any, BinaryIO, Iterable, Iterator
 
 from .messages import Message
 from .node import SinkNode, SourceNode
+from .queueing import PythonBoundedQueue
 from .streams import StreamClient, StreamPublisher
 from .wire import encode_message, read_message
 
@@ -167,7 +168,7 @@ class NdrxWriter:
 
     def write(self, message: Message, *, arrival_ns: int | None = None) -> None:
         if self.closed:
-            raise RecordingError("Nodrix recording is closed")
+            raise RecordingError("Plyctl recording is closed")
         self._start_chunk()
         packet = encode_message(message)
         packet_bytes = packet.nbytes
@@ -203,7 +204,7 @@ class NdrxWriter:
 
     def checkpoint(self) -> None:
         if self.closed:
-            raise RecordingError("Nodrix recording is closed")
+            raise RecordingError("Plyctl recording is closed")
         if self._chunk_offset is None:
             return
         index_data = {
@@ -290,6 +291,109 @@ class NdrxWriter:
         self.close()
 
 
+_ASYNC_WRITER_EOS = object()
+
+
+class AsyncNdrxWriter:
+    """Single-writer recording service that keeps disk I/O off graph workers."""
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        metadata: dict[str, Any] | None = None,
+        checkpoint_records: int = 1024,
+        durable: bool = True,
+        queue_capacity: int = 256,
+    ) -> None:
+        self.writer = NdrxWriter(
+            path,
+            metadata=metadata,
+            checkpoint_records=checkpoint_records,
+            durable=durable,
+        )
+        self._queue = PythonBoundedQueue(queue_capacity, "block")
+        self._error: BaseException | None = None
+        self._closed = False
+        self._thread = threading.Thread(
+            target=self._run,
+            name="nodrix-recording-writer",
+            daemon=False,
+        )
+        self._thread.start()
+
+    def write(self, message: Message, *, arrival_ns: int | None = None) -> None:
+        if self._error is not None:
+            raise RecordingError(f"Asynchronous recording failed: {self._error}")
+        if self._closed:
+            raise RecordingError("Plyctl recording is closed")
+        delivery = (message.fork(), arrival_ns)
+        if not self._queue.put(delivery):
+            if self._error is not None:
+                raise RecordingError(
+                    f"Asynchronous recording failed: {self._error}"
+                ) from self._error
+            raise RecordingError("Plyctl recording queue is closed")
+
+    def _run(self) -> None:
+        try:
+            while True:
+                item = self._queue.get()
+                if item is None or item is _ASYNC_WRITER_EOS:
+                    break
+                message, arrival_ns = item
+                self.writer.write(message, arrival_ns=arrival_ns)
+        except BaseException as exc:
+            self._error = exc
+            self._queue.close()
+        finally:
+            try:
+                if self._error is None:
+                    self.writer.close()
+                else:
+                    self.writer.abort()
+            except BaseException as exc:
+                if self._error is None:
+                    self._error = exc
+                try:
+                    self.writer.abort()
+                except BaseException:
+                    pass
+            self._queue.close()
+            if self._error is not None:
+                self._queue.discard_pending()
+
+    def report(self) -> dict[str, Any]:
+        return {
+            "messages": self.writer.messages,
+            "payload_bytes": self.writer.payload_bytes,
+            "chunks": self.writer.chunks,
+            "queue": self._queue.stats(),
+            "error": None if self._error is None else str(self._error),
+        }
+
+    def close(self) -> None:
+        if self._closed:
+            if self._error is not None:
+                raise RecordingError(
+                    f"Asynchronous recording failed: {self._error}"
+                ) from self._error
+            return
+        self._closed = True
+        self._queue.put_control(_ASYNC_WRITER_EOS)
+        self._thread.join()
+        if self._error is not None:
+            raise RecordingError(
+                f"Asynchronous recording failed: {self._error}"
+            ) from self._error
+
+    def __enter__(self) -> AsyncNdrxWriter:
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        self.close()
+
+
 class NdrxReader:
     def __init__(
         self,
@@ -324,24 +428,24 @@ class NdrxReader:
         self.handle: BinaryIO = self.path.open("rb")
         header = self.handle.read(_FILE_HEADER.size)
         if len(header) != _FILE_HEADER.size:
-            raise RecordingError("Truncated Nodrix recording header")
+            raise RecordingError("Truncated Plyctl recording header")
         magic, self.version, metadata_len = _FILE_HEADER.unpack(header)
         if magic != _FILE_MAGIC or self.version not in {
             _FILE_VERSION_V1,
             _FILE_VERSION_V2,
         }:
-            raise RecordingError("Unsupported Nodrix recording format")
+            raise RecordingError("Unsupported Plyctl recording format")
         if metadata_len > _MAX_METADATA_BYTES:
             raise RecordingError("NDRX metadata exceeds 16 MiB")
         metadata_bytes = self.handle.read(metadata_len)
         if len(metadata_bytes) != metadata_len:
-            raise RecordingError("Truncated Nodrix recording metadata")
+            raise RecordingError("Truncated Plyctl recording metadata")
         try:
             self.metadata = json.loads(metadata_bytes.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise RecordingError("Invalid Nodrix recording metadata") from exc
+            raise RecordingError("Invalid Plyctl recording metadata") from exc
         if not isinstance(self.metadata, dict):
-            raise RecordingError("Nodrix recording metadata must be a mapping")
+            raise RecordingError("Plyctl recording metadata must be a mapping")
         self.data_offset = self.handle.tell()
         self.recovered = False
         self.finalized = False
@@ -474,7 +578,7 @@ class NdrxReader:
         self.handle.seek(entry.offset)
         raw = self.handle.read(_RECORD_HEADER.size)
         if len(raw) != _RECORD_HEADER.size:
-            raise RecordingError("Truncated Nodrix record")
+            raise RecordingError("Truncated Plyctl record")
         arrival_ns, packet_bytes = _RECORD_HEADER.unpack(raw)
         if packet_bytes != entry.packet_bytes:
             raise RecordingError("NDRX index packet size mismatch")
@@ -482,9 +586,9 @@ class NdrxReader:
         try:
             message = read_message(limited)
         except Exception as exc:
-            raise RecordingError("Invalid Nodrix wire packet in recording") from exc
+            raise RecordingError("Invalid Plyctl wire packet in recording") from exc
         if limited.tell() != packet_bytes:
-            raise RecordingError("Nodrix recording packet length mismatch")
+            raise RecordingError("Plyctl recording packet length mismatch")
         return arrival_ns, message
 
     def _recover_tail(

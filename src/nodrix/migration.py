@@ -9,10 +9,36 @@ from typing import Any
 
 import yaml
 
+from .branding import MANIFEST_API_V1, MANIFEST_API_V2
 from .manifest import PipelineManifest, load_manifest_details
 
 
 MIGRATION_SCHEMA = "nodrix.migration/v1"
+
+
+def _legacy_use_paths(raw: Any) -> list[str]:
+    if not isinstance(raw, dict):
+        return []
+    result: list[str] = []
+    for section in ("sessions", "resources", "applications", "nodes"):
+        values = raw.get(section)
+        if not isinstance(values, dict):
+            continue
+        for name, value in values.items():
+            if isinstance(value, dict) and "use" in value:
+                result.append(f"{section}.{name}.use")
+    links = raw.get("links")
+    if isinstance(links, list):
+        for index, value in enumerate(links):
+            if isinstance(value, dict) and "use" in value:
+                result.append(f"links[{index}].use")
+    edges = raw.get("edges")
+    if isinstance(edges, list):
+        for index, value in enumerate(edges):
+            transport = value.get("transport") if isinstance(value, dict) else None
+            if isinstance(transport, dict) and "use" in transport:
+                result.append(f"edges[{index}].transport.use")
+    return result
 
 
 def _backup_path(source: Path) -> Path:
@@ -47,6 +73,10 @@ def _write_atomic(path: Path, text: str) -> None:
 
 def prepare_v2_manifest(source: str | Path) -> tuple[dict[str, Any], list[dict[str, str]]]:
     source_path = Path(source).expanduser().resolve()
+    try:
+        raw_source = yaml.safe_load(source_path.read_text(encoding="utf-8"))
+    except (OSError, yaml.YAMLError) as exc:
+        raise ValueError(f"Cannot read manifest for migration: {exc}") from exc
     details = load_manifest_details(source_path, expand_env=False)
     canonical = details.manifest.model_dump(
         by_alias=True,
@@ -54,14 +84,23 @@ def prepare_v2_manifest(source: str | Path) -> tuple[dict[str, Any], list[dict[s
         mode="json",
     )
     changes: list[dict[str, str]] = []
-    old_api = canonical.get("apiVersion", "nodrix.dev/v1")
-    canonical["apiVersion"] = "nodrix.dev/v2"
+    for path in _legacy_use_paths(raw_source):
+        changes.append(
+            {
+                "path": path,
+                "from": "use",
+                "to": "uses",
+                "reason": "Canonical provider reference field",
+            }
+        )
+    old_api = canonical.get("apiVersion", MANIFEST_API_V1)
+    canonical["apiVersion"] = MANIFEST_API_V2
     if old_api != canonical["apiVersion"]:
         changes.append(
             {
                 "path": "apiVersion",
                 "from": str(old_api),
-                "to": "nodrix.dev/v2",
+                "to": MANIFEST_API_V2,
                 "reason": "Stable Manifest v2 contract",
             }
         )
@@ -80,6 +119,34 @@ def prepare_v2_manifest(source: str | Path) -> tuple[dict[str, Any], list[dict[s
     canonical.setdefault("recording", {})
     canonical.setdefault("security", {})
     canonical.setdefault("placement", {})
+    canonical.setdefault("resources", {})
+    canonical.setdefault("applications", {})
+    legacy_links = list(canonical.pop("links", []) or [])
+    if legacy_links:
+        edges = canonical.setdefault("edges", [])
+        for index, link in enumerate(legacy_links):
+            link_value = dict(link)
+            uses = str(link_value.pop("uses"))
+            parameters = dict(link_value.pop("parameters", {}) or {})
+            edges.append(
+                {
+                    "from": link_value.pop("from"),
+                    "to": link_value.pop("to"),
+                    "transport": {
+                        "uses": uses,
+                        "parameters": parameters,
+                    },
+                }
+            )
+            changes.append(
+                {
+                    "path": f"links[{index}]",
+                    "from": uses,
+                    "to": f"edges[{len(edges) - 1}].transport.uses",
+                    "reason": "External links are canonical Edge transports",
+                }
+            )
+    canonical["links"] = []
     for name, node in dict(canonical.get("nodes") or {}).items():
         failure = dict(node.get("failure") or {})
         policy = failure.get("policy")

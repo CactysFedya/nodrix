@@ -1,0 +1,926 @@
+{
+  "schema": "nodrix-provider/2",
+  "metadata": {
+    "description": "Universal ROS 2 orchestration, supervision and transport provider",
+    "features": [
+      "platform.ros2",
+      "ros2.workspace",
+      "ros2.colcon.if_needed",
+      "ros2.node",
+      "ros2.launch",
+      "ros2.rviz",
+      "ros2.topic_monitor",
+      "ros2.topic_source",
+      "ros2.topic_sink",
+      "ros2.shared_executor",
+      "ros2.session",
+      "ros2.graph.worker",
+      "ros2.external_links",
+      "ros2.managed_applications",
+      "ros2.edge_transports"
+    ],
+    "id": "nodrix.ros2",
+    "name": "Plyctl ROS 2 Provider",
+    "provider_api": "2",
+    "requires_features": [
+      "python-node-api.2",
+      "provider-sessions.1",
+      "external-links.1",
+      "managed-applications.1",
+      "edge-transports.1"
+    ],
+    "requires_nodrix": ">=2.2.0a5,<3",
+    "version": "0.4.0"
+  },
+  "nodes": [
+    {
+      "factory": "nodrix_ros2.nodes.process_nodes:Ros2NodeProcess",
+      "features": [
+        "ros2.node",
+        "ros2.process_supervision"
+      ],
+      "id": "ros2.node",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "status": "core.object"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "package",
+          "executable"
+        ],
+        "properties": {
+          "package": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executable": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workspace": {
+            "type": "object"
+          },
+          "remappings": {
+            "type": "object"
+          },
+          "ros_parameters": {
+            "type": "object"
+          },
+          "params_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires_topics": {
+            "type": "array"
+          },
+          "startup_grace_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "heartbeat_interval_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "allow_clean_exit": {
+            "type": "boolean"
+          },
+          "restart_policy": {
+            "enum": [
+              "none",
+              "on-failure",
+              "always"
+            ]
+          },
+          "max_restarts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "restart_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "restart_max_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "expose_command": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.process_nodes:Ros2LaunchProcess",
+      "features": [
+        "ros2.launch",
+        "ros2.process_supervision"
+      ],
+      "id": "ros2.launch",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "status": "core.object"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "package",
+          "launch_file"
+        ],
+        "properties": {
+          "package": {
+            "type": "string",
+            "minLength": 1
+          },
+          "launch_file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workspace": {
+            "type": "object"
+          },
+          "arguments": {
+            "type": "object"
+          },
+          "ros_port_arguments": {
+            "type": "object"
+          },
+          "requires_topics": {
+            "type": "array"
+          },
+          "startup_grace_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "heartbeat_interval_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "allow_clean_exit": {
+            "type": "boolean"
+          },
+          "restart_policy": {
+            "enum": [
+              "none",
+              "on-failure",
+              "always"
+            ]
+          },
+          "max_restarts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "restart_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "restart_max_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "expose_command": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.process_nodes:Ros2RvizProcess",
+      "features": [
+        "ros2.rviz",
+        "ros2.process_supervision"
+      ],
+      "id": "ros2.rviz",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "status": "core.object"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "object"
+          },
+          "remappings": {
+            "type": "object"
+          },
+          "requires_topics": {
+            "type": "array"
+          },
+          "startup_grace_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "allow_clean_exit": {
+            "type": "boolean"
+          },
+          "restart_policy": {
+            "enum": [
+              "none",
+              "on-failure",
+              "always"
+            ]
+          },
+          "max_restarts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "restart_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "restart_max_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "expose_command": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_monitor:Ros2TopicMonitor",
+      "features": [
+        "ros2.topic_monitor",
+        "ros2.readiness"
+      ],
+      "id": "ros2.topic_monitor",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "status": "core.object"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "topic",
+          "message_type"
+        ],
+        "properties": {
+          "mode": {
+            "enum": [
+              "graph",
+              "sample",
+              "statistics"
+            ]
+          },
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "startup_timeout_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "sample_interval_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "stale_timeout_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "graph_stale_timeout_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "minimum_rate_hz": {
+            "type": "number",
+            "minimum": 0
+          },
+          "rate_failure_grace_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "executor_threads": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "preset": {
+            "enum": [
+              "sensor_data"
+            ]
+          },
+          "reliability": {
+            "enum": [
+              "reliable",
+              "best_effort"
+            ]
+          },
+          "durability": {
+            "enum": [
+              "volatile",
+              "transient_local"
+            ]
+          },
+          "history": {
+            "enum": [
+              "keep_last",
+              "keep_all"
+            ]
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_source:Ros2TopicSource",
+      "features": [
+        "ros2.topic_source"
+      ],
+      "id": "ros2.topic_source",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "output": "core.any"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "topic",
+          "message_type"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "capacity": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "raw_message": {
+            "type": "boolean"
+          },
+          "maximum_binary_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "maximum_sequence_items": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "executor_threads": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "preset": {
+            "enum": [
+              "sensor_data"
+            ]
+          },
+          "reliability": {
+            "enum": [
+              "reliable",
+              "best_effort"
+            ]
+          },
+          "durability": {
+            "enum": [
+              "volatile",
+              "transient_local"
+            ]
+          },
+          "history": {
+            "enum": [
+              "keep_last",
+              "keep_all"
+            ]
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_sink:Ros2TopicSink",
+      "features": [
+        "ros2.topic_sink"
+      ],
+      "id": "ros2.topic_sink",
+      "inputs": {
+        "input": "core.any"
+      },
+      "optional_inputs": [],
+      "outputs": {},
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "topic",
+          "message_type"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executor_threads": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "map_timestamp": {
+            "type": "boolean"
+          },
+          "preset": {
+            "enum": [
+              "sensor_data"
+            ]
+          },
+          "reliability": {
+            "enum": [
+              "reliable",
+              "best_effort"
+            ]
+          },
+          "durability": {
+            "enum": [
+              "volatile",
+              "transient_local"
+            ]
+          },
+          "history": {
+            "enum": [
+              "keep_last",
+              "keep_all"
+            ]
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_source:Ros2TopicSource",
+      "features": [
+        "ros2.topic_source",
+        "compatibility.alias"
+      ],
+      "id": "ros2.source",
+      "inputs": {},
+      "optional_inputs": [],
+      "outputs": {
+        "output": "core.any"
+      },
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "topic",
+          "message_type"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message_type": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    {
+      "factory": "nodrix_ros2.nodes.topic_sink:Ros2TopicSink",
+      "features": [
+        "ros2.topic_sink",
+        "compatibility.alias"
+      ],
+      "id": "ros2.sink",
+      "inputs": {
+        "input": "core.any"
+      },
+      "optional_inputs": [],
+      "outputs": {},
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "topic",
+          "message_type"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message_type": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "probes": [
+    {
+      "callable": "nodrix_ros2.probes:safe_probe",
+      "cooldown_seconds": 0,
+      "depth": "safe",
+      "id": "nodrix.ros2.safe",
+      "permissions": [],
+      "timeout_seconds": 2
+    },
+    {
+      "callable": "nodrix_ros2.probes:deep_probe",
+      "cooldown_seconds": 5,
+      "depth": "deep",
+      "id": "nodrix.ros2.deep",
+      "permissions": [
+        "ros-environment"
+      ],
+      "timeout_seconds": 5
+    }
+  ],
+  "templates": [
+    {
+      "id": "ros2",
+      "source": "templates/ros2",
+      "description": "Generic ROS 2 project with one shared graph session",
+      "features": [
+        "platform.ros2",
+        "ros2.session"
+      ]
+    },
+    {
+      "id": "ros2-fast-livo2",
+      "source": "templates/ros2-fast-livo2",
+      "description": "Livox and FAST-LIVO2 orchestration with one ROS session",
+      "features": [
+        "platform.ros2",
+        "ros2.session"
+      ]
+    }
+  ],
+  "sessions": [
+    {
+      "id": "ros2.session",
+      "factory": "nodrix_ros2.session:Ros2Session",
+      "features": [
+        "ros2.workspace",
+        "ros2.graph.worker"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "distro": {
+            "type": "string",
+            "default": "jazzy"
+          },
+          "path": {
+            "type": "string"
+          },
+          "underlays": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trust": {
+            "enum": [
+              "project",
+              "explicit",
+              "readonly"
+            ]
+          },
+          "build": {
+            "type": "object"
+          },
+          "environment": {
+            "type": "object"
+          },
+          "inherit_environment": {
+            "type": "boolean"
+          },
+          "pass_environment": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "executor_threads": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "graph_interval_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "graph_worker_command": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "worker_python": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "ros2.topic",
+      "features": [
+        "ros2.external_links"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "topic",
+          "message_type"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "qos": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ],
+  "applications": [
+    {
+      "id": "ros2.node",
+      "factory": "nodrix_ros2.applications:Ros2NodeApplication",
+      "features": [
+        "ros2.node",
+        "ros2.process_supervision",
+        "managed-application"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "package",
+          "executable"
+        ],
+        "properties": {
+          "package": {
+            "type": "string",
+            "minLength": 1
+          },
+          "executable": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workspace": {
+            "type": "object"
+          },
+          "remappings": {
+            "type": "object"
+          },
+          "ros_parameters": {
+            "type": "object"
+          },
+          "params_files": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "requires_topics": {
+            "type": "array"
+          },
+          "startup_grace_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "heartbeat_interval_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "allow_clean_exit": {
+            "type": "boolean"
+          },
+          "restart_policy": {
+            "enum": [
+              "none",
+              "on-failure",
+              "always"
+            ]
+          },
+          "max_restarts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "restart_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "restart_max_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "expose_command": {
+            "type": "boolean"
+          }
+        }
+      },
+      "bindings": {
+        "session": "ros2.session"
+      },
+      "external_inputs": {},
+      "external_outputs": {}
+    },
+    {
+      "id": "ros2.launch",
+      "factory": "nodrix_ros2.applications:Ros2LaunchApplication",
+      "features": [
+        "ros2.launch",
+        "ros2.process_supervision",
+        "managed-application"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "package",
+          "launch_file"
+        ],
+        "properties": {
+          "package": {
+            "type": "string",
+            "minLength": 1
+          },
+          "launch_file": {
+            "type": "string",
+            "minLength": 1
+          },
+          "workspace": {
+            "type": "object"
+          },
+          "arguments": {
+            "type": "object"
+          },
+          "ros_port_arguments": {
+            "type": "object"
+          },
+          "requires_topics": {
+            "type": "array"
+          },
+          "startup_grace_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "heartbeat_interval_s": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "allow_clean_exit": {
+            "type": "boolean"
+          },
+          "restart_policy": {
+            "enum": [
+              "none",
+              "on-failure",
+              "always"
+            ]
+          },
+          "max_restarts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "restart_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "restart_max_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "expose_command": {
+            "type": "boolean"
+          }
+        }
+      },
+      "bindings": {
+        "session": "ros2.session"
+      },
+      "external_inputs": {},
+      "external_outputs": {}
+    },
+    {
+      "id": "ros2.rviz",
+      "factory": "nodrix_ros2.applications:Ros2RvizApplication",
+      "features": [
+        "ros2.rviz",
+        "ros2.process_supervision",
+        "managed-application"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "properties": {
+          "config": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "object"
+          },
+          "remappings": {
+            "type": "object"
+          },
+          "requires_topics": {
+            "type": "array"
+          },
+          "startup_grace_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "allow_clean_exit": {
+            "type": "boolean"
+          },
+          "restart_policy": {
+            "enum": [
+              "none",
+              "on-failure",
+              "always"
+            ]
+          },
+          "max_restarts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "restart_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "restart_max_backoff_s": {
+            "type": "number",
+            "minimum": 0
+          },
+          "expose_command": {
+            "type": "boolean"
+          }
+        }
+      },
+      "bindings": {
+        "session": "ros2.session"
+      },
+      "external_inputs": {},
+      "external_outputs": {}
+    }
+  ],
+  "transports": [
+    {
+      "id": "ros2.topic",
+      "features": [
+        "ros2.external_links",
+        "edge-transport"
+      ],
+      "parameters_schema": {
+        "type": "object",
+        "required": [
+          "topic",
+          "message_type"
+        ],
+        "properties": {
+          "topic": {
+            "type": "string",
+            "minLength": 1
+          },
+          "message_type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "qos": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  ]
+}

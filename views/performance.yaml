@@ -1,0 +1,12 @@
+schema: nodrix.view/v1
+name: performance
+style:
+  borders: none
+  spacing: compact
+sections:
+  - runtime
+  - health
+  - performance
+  - applications
+  - queues
+  - attention

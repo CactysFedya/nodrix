@@ -6,6 +6,7 @@ from pathlib import Path
 import stat
 from typing import Any
 
+from .branding import MANIFEST_API_V2, is_manifest_v2
 from .manifest import PipelineManifest
 
 
@@ -23,6 +24,8 @@ class ValidationIssue:
 def _find_cycles(manifest: PipelineManifest) -> list[list[str]]:
     graph: dict[str, list[str]] = {name: [] for name in manifest.nodes}
     for edge in manifest.edges:
+        if edge.transport is not None:
+            continue
         source = edge.source.split(".", 1)[0]
         target = edge.target.split(".", 1)[0]
         graph.setdefault(source, []).append(target)
@@ -156,112 +159,115 @@ def validate_production(
                             f"nodes.{name}.parameters.{key}",
                         )
                     )
-            is_external = (
-                config.uses.startswith("native:")
-                or ":" in config.uses
-                or "/" in config.uses
-            )
-            signature_verified = False
-            if config.uses.count("/") == 1 and not config.uses.startswith(("./", "../")):
-                try:
-                    from .packages import package_verification
+        is_external = (
+            config.uses.startswith("native:")
+            or ":" in config.uses
+            or "/" in config.uses
+        )
+        signatures_required = (
+            manifest.security.require_signed_plugins
+            or not manifest.security.allow_unsigned_local_plugins
+        )
+        signature_verified = False
+        if config.uses.count("/") == 1 and not config.uses.startswith(("./", "../")):
+            try:
+                from .packages import package_verification
 
-                    signature_verified = bool(
-                        package_verification(config.uses.split("/", 1)[0]).get(
-                            "signature_verified"
-                        )
-                    )
-                except Exception:
-                    signature_verified = False
-            if (
-                is_external
-                and (
-                    manifest.security.require_signed_plugins
-                    or not manifest.security.allow_unsigned_local_plugins
-                )
-                and not signature_verified
-                and not config.uses.startswith(("ros2.",))
-            ):
-                issues.append(
-                    ValidationIssue(
-                        "error",
-                        "P504",
-                        "External plugin signature is not represented in this manifest; use a verified installed package",
-                        f"nodes.{name}.uses",
+                signature_verified = bool(
+                    package_verification(config.uses.split("/", 1)[0]).get(
+                        "signature_verified"
                     )
                 )
-            if config.uses.startswith("native:"):
-                reference = config.uses.removeprefix("native:")
-                library_text = reference.rsplit("#", 1)[0]
-                library = Path(library_text).expanduser()
-                allowlist: list[Path] = []
-                for item in manifest.security.native_plugin_allowlist:
-                    allow_root = Path(item).expanduser()
-                    if not allow_root.is_absolute():
-                        issues.append(
-                            ValidationIssue(
-                                "error",
-                                "P510",
-                                "Native plugin allowlist entries must be absolute",
-                                "security.native_plugin_allowlist",
-                            )
-                        )
-                        continue
-                    allowlist.append(allow_root.resolve())
-                if not library.is_absolute():
+            except Exception:
+                signature_verified = False
+        if (
+            is_external
+            and signatures_required
+            and not signature_verified
+            and not config.uses.startswith(("ros2.",))
+        ):
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "P504",
+                    "External plugin signature is not represented in this manifest; use a verified installed package",
+                    f"nodes.{name}.uses",
+                )
+            )
+        if config.uses.startswith("native:"):
+            reference = config.uses.removeprefix("native:")
+            library_text = reference.rsplit("#", 1)[0]
+            library = Path(library_text).expanduser()
+            allowlist: list[Path] = []
+            for item in manifest.security.native_plugin_allowlist:
+                allow_root = Path(item).expanduser()
+                if not allow_root.is_absolute():
                     issues.append(
                         ValidationIssue(
                             "error",
-                            "P506",
-                            "Production native plugin paths must be absolute",
+                            "P510",
+                            "Native plugin allowlist entries must be absolute",
+                            "security.native_plugin_allowlist",
+                        )
+                    )
+                    continue
+                allowlist.append(allow_root.resolve())
+            path_must_be_absolute = production or bool(
+                manifest.security.native_plugin_allowlist
+            )
+            if not library.is_absolute() and path_must_be_absolute:
+                issues.append(
+                    ValidationIssue(
+                        "error",
+                        "P506",
+                        "Native plugin path must be absolute when its security policy is enforced",
+                        f"nodes.{name}.uses",
+                    )
+                )
+            elif library.is_absolute():
+                resolved = library.resolve()
+                if (production or allowlist) and not any(
+                    resolved == root or root in resolved.parents
+                    for root in allowlist
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            "error",
+                            "P507",
+                            "Native plugin is outside security.native_plugin_allowlist",
                             f"nodes.{name}.uses",
                         )
                     )
-                else:
-                    resolved = library.resolve()
-                    if not allowlist or not any(
-                        resolved == root or root in resolved.parents
-                        for root in allowlist
-                    ):
-                        issues.append(
-                            ValidationIssue(
-                                "error",
-                                "P507",
-                                "Native plugin is outside security.native_plugin_allowlist",
-                                f"nodes.{name}.uses",
-                            )
+                if not resolved.is_file():
+                    issues.append(
+                        ValidationIssue(
+                            "error",
+                            "P508",
+                            "Native plugin library does not exist",
+                            f"nodes.{name}.uses",
                         )
-                    if not resolved.is_file():
-                        issues.append(
-                            ValidationIssue(
-                                "error",
-                                "P508",
-                                "Native plugin library does not exist",
-                                f"nodes.{name}.uses",
-                            )
+                    )
+                elif (
+                    os.name != "nt"
+                    and manifest.security.reject_world_writable_plugins
+                    and stat.S_IMODE(resolved.stat().st_mode) & stat.S_IWOTH
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            "error",
+                            "P509",
+                            "World-writable native plugins are forbidden",
+                            f"nodes.{name}.uses",
                         )
-                    elif (
-                        os.name != "nt"
-                        and manifest.security.reject_world_writable_plugins
-                        and stat.S_IMODE(resolved.stat().st_mode)
-                        & stat.S_IWOTH
-                    ):
-                        issues.append(
-                            ValidationIssue(
-                                "error",
-                                "P509",
-                                "World-writable native plugins are forbidden in production",
-                                f"nodes.{name}.uses",
-                            )
-                        )
+                    )
     if manifest.runtime.shutdown.timeout_ms < 100:
         issues.append(ValidationIssue("warning", "W601", "Graceful shutdown timeout is extremely short", "runtime.shutdown"))
-    if production and manifest.api_version != "nodrix.dev/v2":
+    if production and not is_manifest_v2(manifest.api_version):
         issues.append(
             ValidationIssue(
                 "error",
                 "P200",
-                "Production mode requires apiVersion: nodrix.dev/v2",
+                f"Production mode requires apiVersion: {MANIFEST_API_V2}",
                 "apiVersion",
             )
         )
@@ -275,3 +281,21 @@ def validate_production(
             )
         )
     return issues
+
+
+_CONFIGURED_SECURITY_CODES = frozenset(
+    {"P504", "P506", "P507", "P508", "P509", "P510"}
+)
+
+
+def configured_security_issues(
+    manifest: PipelineManifest,
+) -> list[ValidationIssue]:
+    """Return security errors that must apply outside CLI production mode."""
+
+    return [
+        issue
+        for issue in validate_production(manifest, {"edges": []})
+        if issue.code in _CONFIGURED_SECURITY_CODES
+        and issue.severity == "error"
+    ]

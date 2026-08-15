@@ -2,7 +2,7 @@
 set -euo pipefail
 
 OWNER="${1:-CactysFedya}"
-REPO="${2:-nodrix}"
+REPO="${2:-plyctl}"
 VISIBILITY="${3:-public}"
 SSH_URL="git@github.com:${OWNER}/${REPO}.git"
 

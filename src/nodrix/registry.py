@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import hashlib
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 from typing import Type
@@ -15,6 +17,8 @@ from .packages import resolve_package_node
 BUILTINS: dict[str, type[Node]] = {}
 _CORE_LOADED = False
 _LOADED_PROVIDERS: set[str] = set()
+_REGISTRY_LOCK = threading.RLock()
+_FILE_MODULE_CACHE: dict[Path, ModuleType] = {}
 _BUILTIN_PROVIDERS = {
     "vision.": "nodrix.vision.nodes",
     "media.": "nodrix.media",
@@ -25,27 +29,31 @@ _BUILTIN_PROVIDERS = {
 
 def register_builtin(name: str):
     def decorator(cls: type[Node]) -> type[Node]:
-        BUILTINS[name] = cls
+        with _REGISTRY_LOCK:
+            BUILTINS[name] = cls
         return cls
     return decorator
 
 
 def _load_core_builtins() -> None:
     global _CORE_LOADED
-    if _CORE_LOADED:
-        return
-    importlib.import_module("nodrix.builtin_nodes")
-    _CORE_LOADED = True
+    with _REGISTRY_LOCK:
+        if _CORE_LOADED:
+            return
+        importlib.import_module("nodrix.builtin_nodes")
+        importlib.import_module("nodrix.transport_nodes")
+        _CORE_LOADED = True
 
 
 def _load_provider(prefix: str) -> None:
-    if prefix in _LOADED_PROVIDERS:
-        return
-    module = importlib.import_module(_BUILTIN_PROVIDERS[prefix])
-    if prefix == "record.":
-        register_builtin("record.ndrx_source")(module.NdrxSourceNode)
-        register_builtin("record.ndrx_writer")(module.NdrxWriterNode)
-    _LOADED_PROVIDERS.add(prefix)
+    with _REGISTRY_LOCK:
+        if prefix in _LOADED_PROVIDERS:
+            return
+        module = importlib.import_module(_BUILTIN_PROVIDERS[prefix])
+        if prefix == "record.":
+            register_builtin("record.ndrx_source")(module.NdrxSourceNode)
+            register_builtin("record.ndrx_writer")(module.NdrxWriterNode)
+        _LOADED_PROVIDERS.add(prefix)
 
 
 def load_builtin_providers() -> None:
@@ -59,22 +67,62 @@ def load_builtin_providers() -> None:
             continue
 
 
+def reset_file_module_cache() -> None:
+    # Clear cached local modules for tests and development reloads.
+    with _REGISTRY_LOCK:
+        for module in tuple(_FILE_MODULE_CACHE.values()):
+            if sys.modules.get(module.__name__) is module:
+                sys.modules.pop(module.__name__, None)
+        _FILE_MODULE_CACHE.clear()
+
+
 def _load_file_module(path: Path) -> ModuleType:
-    module_name = f"nodrix_user_{abs(hash(path))}"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise PluginError(f"Cannot create module spec for {path}")
-    module = importlib.util.module_from_spec(spec)
-    parent = str(path.parent)
-    sys.path.insert(0, parent)
-    try:
-        spec.loader.exec_module(module)
-    finally:
+    canonical = path.expanduser().resolve()
+    with _REGISTRY_LOCK:
+        cached = _FILE_MODULE_CACHE.get(canonical)
+        if cached is not None:
+            return cached
+
+        digest = hashlib.sha256(
+            canonical.as_posix().encode("utf-8")
+        ).hexdigest()[:24]
+        module_name = f"nodrix_user_{digest}"
+
+        existing = sys.modules.get(module_name)
+        if (
+            isinstance(existing, ModuleType)
+            and Path(getattr(existing, "__file__", "")).resolve() == canonical
+        ):
+            _FILE_MODULE_CACHE[canonical] = existing
+            return existing
+
+        spec = importlib.util.spec_from_file_location(module_name, canonical)
+        if spec is None or spec.loader is None:
+            raise PluginError(f"Cannot create module spec for {canonical}")
+
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+
+        parent = str(canonical.parent)
+        inserted_parent = parent not in sys.path
+        if inserted_parent:
+            sys.path.insert(0, parent)
         try:
-            sys.path.remove(parent)
-        except ValueError:
-            pass
-    return module
+            spec.loader.exec_module(module)
+        except BaseException:
+            _FILE_MODULE_CACHE.pop(canonical, None)
+            if sys.modules.get(module_name) is module:
+                sys.modules.pop(module_name, None)
+            raise
+        finally:
+            if inserted_parent:
+                try:
+                    sys.path.remove(parent)
+                except ValueError:
+                    pass
+
+        _FILE_MODULE_CACHE[canonical] = module
+        return module
 
 
 def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
@@ -87,12 +135,14 @@ def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
             except ModuleNotFoundError as exc:
                 extra = prefix.removesuffix(".")
                 raise PluginError(
-                    f"Node pack {extra!r} is unavailable; install Nodrix with the appropriate extra"
+                    f"Node pack {extra!r} is unavailable; install Plyctl with the appropriate extra"
                 ) from exc
             break
 
-    if reference in BUILTINS:
-        return BUILTINS[reference]
+    with _REGISTRY_LOCK:
+        builtin = BUILTINS.get(reference)
+    if builtin is not None:
+        return builtin
 
     if ":" not in reference:
         # Provider API discovery is metadata-only.  The selected provider is
@@ -104,7 +154,7 @@ def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
         if provider_class is not None:
             if not issubclass(provider_class, Node):
                 raise PluginError(
-                    f"Provider Node {reference!r} is not a Nodrix Node class"
+                    f"Provider Node {reference!r} is not a Plyctl Node class"
                 )
             return provider_class
 
@@ -132,5 +182,5 @@ def load_node_class(reference: str, base_dir: Path | None = None) -> Type[Node]:
         raise PluginError(f"Cannot load node {reference!r}: {exc}") from exc
 
     if not isinstance(cls, type) or not issubclass(cls, Node):
-        raise PluginError(f"{reference!r} is not a Nodrix Node class")
+        raise PluginError(f"{reference!r} is not a Plyctl Node class")
     return cls

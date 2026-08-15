@@ -213,7 +213,10 @@ def test_discovery_is_metadata_only_and_node_import_is_lazy(
     marker, _, _ = _install_fake_provider(tmp_path)
     monkeypatch.syspath_prepend(str(tmp_path))
 
-    candidates = discover_providers(include_legacy=False)
+    candidates = discover_providers(
+        include_legacy=False,
+        paths=[tmp_path],
+    )
 
     assert [item.id for item in candidates] == ["acme.test"]
     assert marker.exists() is False
@@ -305,13 +308,17 @@ def test_signed_provider_uses_trust_store_and_allowlist(tmp_path: Path) -> None:
         signing_key=private_key,
     )
     trust_store = tmp_path / "trust"
-    trust_store.mkdir()
-    (trust_store / "acme.pem").write_bytes(
+    trust_store.mkdir(mode=0o700)
+    trust_store.chmod(0o700)
+
+    key_path = trust_store / "acme.pem"
+    key_path.write_bytes(
         private_key.public_key().public_bytes(
             serialization.Encoding.PEM,
             serialization.PublicFormat.SubjectPublicKeyInfo,
         )
     )
+    key_path.chmod(0o600)
     candidate = discover_providers(
         include_legacy=False,
         paths=[tmp_path],

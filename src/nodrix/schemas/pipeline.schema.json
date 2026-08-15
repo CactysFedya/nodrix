@@ -1,0 +1,1263 @@
+{
+  "$defs": {
+    "ApplicationConfig": {
+      "additionalProperties": false,
+      "description": "An external application supervised outside the local data plane.",
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uses"
+      ],
+      "title": "ApplicationConfig",
+      "type": "object"
+    },
+    "EdgeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "memory": {
+          "$ref": "#/$defs/EdgeMemoryConfig"
+        },
+        "queue": {
+          "$ref": "#/$defs/QueueConfig"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "transport": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TransportConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "title": "EdgeConfig",
+      "type": "object"
+    },
+    "EdgeMemoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_copy": {
+          "default": true,
+          "title": "Allow Copy",
+          "type": "boolean"
+        },
+        "domain": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "cpu",
+            "pinned_cpu",
+            "shared",
+            "dma_buf",
+            "cuda",
+            "rocm",
+            "vulkan",
+            "opencl",
+            "metal",
+            "npu",
+            "external"
+          ],
+          "title": "Domain",
+          "type": "string"
+        }
+      },
+      "title": "EdgeMemoryConfig",
+      "type": "object"
+    },
+    "ExecutionConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu_affinity": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Cpu Affinity",
+          "type": "array"
+        },
+        "device": {
+          "default": "auto",
+          "title": "Device",
+          "type": "string"
+        },
+        "isolation": {
+          "default": "in_process",
+          "enum": [
+            "in_process",
+            "process"
+          ],
+          "title": "Isolation",
+          "type": "string"
+        }
+      },
+      "title": "ExecutionConfig",
+      "type": "object"
+    },
+    "ExternalLinkConfig": {
+      "additionalProperties": false,
+      "description": "A control-plane link compiled by an optional integration provider.\n\nUnlike ``edges``, external links do not create a Plyctl queue or move a\npayload through the Plyctl runtime.  A provider can use them to describe\nDDS topics, broker routes, service bindings, or equivalent external data\npaths while keeping the ordinary node.port notation.",
+      "properties": {
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uses",
+        "from",
+        "to"
+      ],
+      "title": "ExternalLinkConfig",
+      "type": "object"
+    },
+    "FailureConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "backoff_ms": {
+          "default": 250,
+          "maximum": 600000,
+          "minimum": 0,
+          "title": "Backoff Ms",
+          "type": "integer"
+        },
+        "fallback_uses": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Uses"
+        },
+        "max_restarts": {
+          "default": 3,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Max Restarts",
+          "type": "integer"
+        },
+        "policy": {
+          "default": "stop_pipeline",
+          "enum": [
+            "stop_pipeline",
+            "restart",
+            "restart_node",
+            "skip_message",
+            "disable_branch",
+            "isolate_branch",
+            "fallback_node"
+          ],
+          "title": "Policy",
+          "type": "string"
+        }
+      },
+      "title": "FailureConfig",
+      "type": "object"
+    },
+    "FragmentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "blocks": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Blocks",
+          "type": "object"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "documentation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Documentation"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/EdgeConfig"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "fragments": {
+          "additionalProperties": {
+            "$ref": "#/$defs/FragmentConfig"
+          },
+          "title": "Fragments",
+          "type": "object"
+        },
+        "hardware_requirements": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Hardware Requirements",
+          "type": "array"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "nodes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/NodeConfig"
+          },
+          "title": "Nodes",
+          "type": "object"
+        },
+        "outputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "tests": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tests",
+          "type": "array"
+        },
+        "version": {
+          "default": "1.0.0",
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodes"
+      ],
+      "title": "FragmentConfig",
+      "type": "object"
+    },
+    "HealthConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "on_timeout": {
+          "default": "report",
+          "enum": [
+            "report",
+            "restart",
+            "stop_pipeline"
+          ],
+          "title": "On Timeout",
+          "type": "string"
+        },
+        "timeout_ms": {
+          "default": 0,
+          "maximum": 86400000,
+          "minimum": 0,
+          "title": "Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "title": "HealthConfig",
+      "type": "object"
+    },
+    "LoggingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "default": "info",
+          "enum": [
+            "debug",
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "structured": {
+          "default": true,
+          "title": "Structured",
+          "type": "boolean"
+        }
+      },
+      "title": "LoggingConfig",
+      "type": "object"
+    },
+    "MetadataConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "MetadataConfig",
+      "type": "object"
+    },
+    "MetricsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "interval_ms": {
+          "default": 1000,
+          "maximum": 60000,
+          "minimum": 100,
+          "title": "Interval Ms",
+          "type": "integer"
+        },
+        "listen": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Listen"
+        }
+      },
+      "title": "MetricsConfig",
+      "type": "object"
+    },
+    "NodeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "execution": {
+          "$ref": "#/$defs/ExecutionConfig"
+        },
+        "failure": {
+          "$ref": "#/$defs/FailureConfig"
+        },
+        "health": {
+          "$ref": "#/$defs/HealthConfig"
+        },
+        "inputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Inputs",
+          "type": "object"
+        },
+        "memory": {
+          "$ref": "#/$defs/NodeMemoryConfig"
+        },
+        "outputs": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Outputs",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "placement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Placement"
+        },
+        "resources": {
+          "$ref": "#/$defs/ResourceConfig"
+        },
+        "synchronization": {
+          "$ref": "#/$defs/SynchronizationConfig"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uses"
+      ],
+      "title": "NodeConfig",
+      "type": "object"
+    },
+    "NodeMemoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "inputs": {
+          "additionalProperties": true,
+          "title": "Inputs",
+          "type": "object"
+        },
+        "outputs": {
+          "additionalProperties": true,
+          "title": "Outputs",
+          "type": "object"
+        }
+      },
+      "title": "NodeMemoryConfig",
+      "type": "object"
+    },
+    "PlacementConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "default": "local",
+          "title": "Default",
+          "type": "string"
+        },
+        "nodes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Nodes",
+          "type": "object"
+        }
+      },
+      "title": "PlacementConfig",
+      "type": "object"
+    },
+    "ProviderResourceConfig": {
+      "additionalProperties": false,
+      "description": "One provider-owned resource shared by Nodes and Applications.",
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Bindings",
+          "type": "object"
+        },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uses"
+      ],
+      "title": "ProviderResourceConfig",
+      "type": "object"
+    },
+    "QueueConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "capacity": {
+          "default": 8,
+          "minimum": 1,
+          "title": "Capacity",
+          "type": "integer"
+        },
+        "policy": {
+          "default": "block",
+          "enum": [
+            "block",
+            "latest",
+            "drop_oldest",
+            "drop_newest"
+          ],
+          "title": "Policy",
+          "type": "string"
+        }
+      },
+      "title": "QueueConfig",
+      "type": "object"
+    },
+    "RecordingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "checkpoint_records": {
+          "default": 1024,
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Checkpoint Records",
+          "type": "integer"
+        },
+        "directory": {
+          "default": "recordings",
+          "title": "Directory",
+          "type": "string"
+        },
+        "durable": {
+          "default": true,
+          "title": "Durable",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "queue_capacity": {
+          "default": 256,
+          "maximum": 1000000,
+          "minimum": 1,
+          "title": "Queue Capacity",
+          "type": "integer"
+        },
+        "streams": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Streams",
+          "type": "array"
+        }
+      },
+      "title": "RecordingConfig",
+      "type": "object"
+    },
+    "ResourceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "cpu_limit": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cpu Limit"
+        },
+        "max_message_bytes": {
+          "default": 268435456,
+          "minimum": 1024,
+          "title": "Max Message Bytes",
+          "type": "integer"
+        },
+        "memory_limit_mb": {
+          "anyOf": [
+            {
+              "minimum": 16,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Memory Limit Mb"
+        }
+      },
+      "title": "ResourceConfig",
+      "type": "object"
+    },
+    "RuntimeConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "unified",
+            "native"
+          ],
+          "title": "Engine",
+          "type": "string"
+        },
+        "logging": {
+          "$ref": "#/$defs/LoggingConfig"
+        },
+        "memory": {
+          "$ref": "#/$defs/RuntimeMemoryConfig"
+        },
+        "metrics": {
+          "$ref": "#/$defs/MetricsConfig"
+        },
+        "mode": {
+          "default": "offline",
+          "enum": [
+            "offline",
+            "realtime"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "profile": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile"
+        },
+        "shutdown": {
+          "$ref": "#/$defs/ShutdownConfig"
+        },
+        "telemetry_samples": {
+          "default": 4096,
+          "maximum": 1000000,
+          "minimum": 64,
+          "title": "Telemetry Samples",
+          "type": "integer"
+        },
+        "tracing": {
+          "$ref": "#/$defs/TracingConfig"
+        },
+        "type_validation": {
+          "default": "first",
+          "enum": [
+            "off",
+            "first",
+            "always"
+          ],
+          "title": "Type Validation",
+          "type": "string"
+        }
+      },
+      "title": "RuntimeConfig",
+      "type": "object"
+    },
+    "RuntimeMemoryConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "default_domain": {
+          "default": "auto",
+          "enum": [
+            "auto",
+            "cpu",
+            "pinned_cpu",
+            "shared",
+            "dma_buf",
+            "cuda",
+            "rocm",
+            "vulkan",
+            "opencl",
+            "metal",
+            "npu",
+            "external"
+          ],
+          "title": "Default Domain",
+          "type": "string"
+        },
+        "forbid_implicit_copies": {
+          "default": false,
+          "title": "Forbid Implicit Copies",
+          "type": "boolean"
+        },
+        "process_output_pool": {
+          "$ref": "#/$defs/SharedPoolConfig"
+        },
+        "shared_pool": {
+          "$ref": "#/$defs/SharedPoolConfig"
+        }
+      },
+      "title": "RuntimeMemoryConfig",
+      "type": "object"
+    },
+    "SecurityConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_unsigned_local_plugins": {
+          "default": true,
+          "title": "Allow Unsigned Local Plugins",
+          "type": "boolean"
+        },
+        "native_plugin_allowlist": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Native Plugin Allowlist",
+          "type": "array"
+        },
+        "reject_world_writable_plugins": {
+          "default": true,
+          "title": "Reject World Writable Plugins",
+          "type": "boolean"
+        },
+        "require_signed_plugins": {
+          "default": false,
+          "title": "Require Signed Plugins",
+          "type": "boolean"
+        },
+        "secret_providers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Secret Providers",
+          "type": "array"
+        }
+      },
+      "title": "SecurityConfig",
+      "type": "object"
+    },
+    "SessionConfig": {
+      "additionalProperties": false,
+      "description": "One provider-owned resource shared by multiple pipeline Nodes.",
+      "properties": {
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uses"
+      ],
+      "title": "SessionConfig",
+      "type": "object"
+    },
+    "SharedPoolConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "block_size": {
+          "default": 8388608,
+          "minimum": 4096,
+          "title": "Block Size",
+          "type": "integer"
+        },
+        "capacity": {
+          "default": 8,
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Capacity",
+          "type": "integer"
+        },
+        "threshold": {
+          "default": 65536,
+          "minimum": 0,
+          "title": "Threshold",
+          "type": "integer"
+        }
+      },
+      "title": "SharedPoolConfig",
+      "type": "object"
+    },
+    "ShutdownConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "default": "graceful",
+          "enum": [
+            "graceful",
+            "immediate"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "timeout_ms": {
+          "default": 10000,
+          "maximum": 600000,
+          "minimum": 0,
+          "title": "Timeout Ms",
+          "type": "integer"
+        }
+      },
+      "title": "ShutdownConfig",
+      "type": "object"
+    },
+    "StreamAccessConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_ips": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allow Ips",
+          "type": "array"
+        },
+        "mode": {
+          "default": "open",
+          "enum": [
+            "open",
+            "token"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "token": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token"
+        },
+        "token_env": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Token Env"
+        }
+      },
+      "title": "StreamAccessConfig",
+      "type": "object"
+    },
+    "StreamExportConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/StreamAccessConfig"
+        },
+        "from": {
+          "title": "From",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "queue": {
+          "$ref": "#/$defs/QueueConfig"
+        }
+      },
+      "required": [
+        "name",
+        "from"
+      ],
+      "title": "StreamExportConfig",
+      "type": "object"
+    },
+    "StreamTlsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "certificate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Certificate"
+        },
+        "client_ca": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client Ca"
+        },
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "minimum_version": {
+          "default": "TLSv1.2",
+          "enum": [
+            "TLSv1.2",
+            "TLSv1.3"
+          ],
+          "title": "Minimum Version",
+          "type": "string"
+        },
+        "private_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Private Key"
+        },
+        "require_client_certificate": {
+          "default": false,
+          "title": "Require Client Certificate",
+          "type": "boolean"
+        }
+      },
+      "title": "StreamTlsConfig",
+      "type": "object"
+    },
+    "StreamsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "bind_host": {
+          "default": "127.0.0.1",
+          "title": "Bind Host",
+          "type": "string"
+        },
+        "exports": {
+          "items": {
+            "$ref": "#/$defs/StreamExportConfig"
+          },
+          "title": "Exports",
+          "type": "array"
+        },
+        "handshake_timeout_ms": {
+          "default": 5000,
+          "maximum": 60000,
+          "minimum": 100,
+          "title": "Handshake Timeout Ms",
+          "type": "integer"
+        },
+        "listen_port": {
+          "default": 0,
+          "maximum": 65535,
+          "minimum": 0,
+          "title": "Listen Port",
+          "type": "integer"
+        },
+        "max_clients": {
+          "default": 128,
+          "maximum": 65536,
+          "minimum": 1,
+          "title": "Max Clients",
+          "type": "integer"
+        },
+        "max_handshake_bytes": {
+          "default": 65536,
+          "maximum": 16777216,
+          "minimum": 1024,
+          "title": "Max Handshake Bytes",
+          "type": "integer"
+        },
+        "max_handshakes": {
+          "default": 32,
+          "maximum": 4096,
+          "minimum": 1,
+          "title": "Max Handshakes",
+          "type": "integer"
+        },
+        "max_message_bytes": {
+          "default": 268435456,
+          "minimum": 1024,
+          "title": "Max Message Bytes",
+          "type": "integer"
+        },
+        "tls": {
+          "$ref": "#/$defs/StreamTlsConfig"
+        }
+      },
+      "title": "StreamsConfig",
+      "type": "object"
+    },
+    "SynchronizationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "optional_inputs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional Inputs",
+          "type": "array"
+        },
+        "policy": {
+          "default": "exact_sequence",
+          "enum": [
+            "exact_sequence",
+            "approximate_timestamp",
+            "latest_available",
+            "zip"
+          ],
+          "title": "Policy",
+          "type": "string"
+        },
+        "tolerance_ms": {
+          "default": 20.0,
+          "minimum": 0.0,
+          "title": "Tolerance Ms",
+          "type": "number"
+        },
+        "trigger_port": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trigger Port"
+        }
+      },
+      "title": "SynchronizationConfig",
+      "type": "object"
+    },
+    "TracingConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        },
+        "exporter": {
+          "default": "none",
+          "enum": [
+            "none",
+            "console",
+            "otlp"
+          ],
+          "title": "Exporter",
+          "type": "string"
+        },
+        "service_name": {
+          "default": "plyctl",
+          "title": "Service Name",
+          "type": "string"
+        }
+      },
+      "title": "TracingConfig",
+      "type": "object"
+    },
+    "TransportConfig": {
+      "additionalProperties": false,
+      "description": "Physical or external transport used by one logical Edge.",
+      "properties": {
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "uses"
+      ],
+      "title": "TransportConfig",
+      "type": "object"
+    }
+  },
+  "$id": "https://plyctl.dev/schemas/pipeline-2.2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Canonical Plyctl 2.x pipeline manifest. The deprecated 'use' alias is accepted by the compatibility parser but intentionally omitted from this schema. Legacy nodrix.dev API versions remain accepted throughout the 2.x series.",
+  "properties": {
+    "apiVersion": {
+      "default": "plyctl.dev/v1",
+      "enum": [
+        "plyctl.dev/v1",
+        "plyctl.dev/v2",
+        "nodrix.dev/v1",
+        "nodrix.dev/v2"
+      ],
+      "title": "Apiversion",
+      "type": "string"
+    },
+    "applications": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ApplicationConfig"
+      },
+      "title": "Applications",
+      "type": "object"
+    },
+    "edges": {
+      "items": {
+        "$ref": "#/$defs/EdgeConfig"
+      },
+      "title": "Edges",
+      "type": "array"
+    },
+    "fragments": {
+      "additionalProperties": {
+        "$ref": "#/$defs/FragmentConfig"
+      },
+      "title": "Fragments",
+      "type": "object"
+    },
+    "kind": {
+      "const": "Pipeline",
+      "default": "Pipeline",
+      "title": "Kind",
+      "type": "string"
+    },
+    "links": {
+      "deprecated": true,
+      "items": {
+        "$ref": "#/$defs/ExternalLinkConfig"
+      },
+      "title": "Links",
+      "type": "array"
+    },
+    "metadata": {
+      "$ref": "#/$defs/MetadataConfig"
+    },
+    "nodes": {
+      "additionalProperties": {
+        "$ref": "#/$defs/NodeConfig"
+      },
+      "title": "Nodes",
+      "type": "object"
+    },
+    "placement": {
+      "$ref": "#/$defs/PlacementConfig"
+    },
+    "recording": {
+      "$ref": "#/$defs/RecordingConfig"
+    },
+    "resources": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProviderResourceConfig"
+      },
+      "title": "Resources",
+      "type": "object"
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeConfig"
+    },
+    "security": {
+      "$ref": "#/$defs/SecurityConfig"
+    },
+    "sessions": {
+      "additionalProperties": {
+        "$ref": "#/$defs/SessionConfig"
+      },
+      "title": "Sessions",
+      "type": "object"
+    },
+    "streams": {
+      "$ref": "#/$defs/StreamsConfig"
+    }
+  },
+  "required": [
+    "metadata",
+    "nodes",
+    "edges"
+  ],
+  "title": "Plyctl Pipeline Manifest",
+  "type": "object"
+}

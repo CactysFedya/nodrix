@@ -38,9 +38,13 @@ nodrix init app --template media
 nodrix init app --template network
 nodrix init app --template data-plane
 nodrix init app --template benchmark
+nodrix init robot --template ros2
 ```
 
-Templates contain actual Python implementations, tests, manifests and an optional C++ plugin example.
+Templates contain actual Python implementations, tests, manifests and an
+optional C++ plugin example. Installed providers may also publish templates;
+they appear in the same `--template` namespace. Provider templates are copied
+from validated package metadata without importing provider code.
 
 ## Replacing an empty skeleton
 

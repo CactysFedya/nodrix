@@ -124,8 +124,8 @@ def render_pipeline_graph(manifest: Any, *, details: bool = False) -> Group:
         style="cyan",
     )
     footer.append("   Discovery: ", style="dim")
-    footer.append("nodrix stream list", style="cyan")
-    return Group(Panel(header, title="Nodrix graph"), graph, footer)
+    footer.append("plyctl stream list", style="cyan")
+    return Group(Panel(header, title="Plyctl graph"), graph, footer)
 
 
 def render_node_details(manifest: Any, node_name: str) -> Group:
@@ -174,19 +174,42 @@ def render_node_details(manifest: Any, node_name: str) -> Group:
     )
 
 
-def render_startup_summary(manifest: Any, version: str) -> Group:
-    text = Text()
-    text.append(f"Nodrix {version}", style="bold cyan")
-    text.append(f" · {manifest.metadata.name}", style="bold")
-    text.append(
-        f"\n{manifest.runtime.mode} · {manifest.runtime.engine} · "
-        f"{manifest.runtime.profile or 'no profile'}"
+
+def render_startup_summary(
+    manifest: Any,
+    version: str,
+    *,
+    workspace: Any | None = None,
+) -> Group:
+    header = Text()
+    header.append("NODRIX", style="bold cyan")
+    header.append(f"  {manifest.metadata.name}", style="bold")
+    header.append(f"\nPlyctl {version}", style="dim")
+    header.append(
+        f" · {manifest.runtime.mode}"
+        f" · {manifest.runtime.engine}"
+        f" · {manifest.runtime.profile or 'no profile'}",
+        style="dim",
     )
-    text.append(
-        f"\nStarting {len(manifest.nodes)} nodes, {len(manifest.edges)} edges, "
-        f"{len(manifest.streams.exports)} streams…"
+    if workspace is not None:
+        context = getattr(workspace, "context_name", None) or "-"
+        alias = getattr(workspace, "pipeline_name", None)
+        header.append(
+            f"\nworkspace {getattr(workspace, 'root', '-')}"
+            f" · context {context}"
+            + (f" · {alias}" if alias else ""),
+            style="dim",
+        )
+
+    starting = Text()
+    starting.append("STARTING", style="bold cyan")
+    starting.append(
+        f"\n{len(manifest.nodes)} nodes"
+        f" · {len(manifest.edges)} edges"
+        f" · {len(manifest.streams.exports)} streams",
+        style="dim",
     )
-    return Group(Panel(text, title="Starting pipeline"))
+    return Group(header, Text(""), starting)
 
 
 def _runtime_info_text(info: dict[str, Any]) -> str:
@@ -205,44 +228,62 @@ def _runtime_info_text(info: dict[str, Any]) -> str:
     return " · ".join(selected)
 
 
-def render_runtime_event(event: dict[str, Any], indexes: dict[str, int], total: int) -> Text:
+
+
+def render_runtime_event(
+    event: dict[str, Any],
+    indexes: dict[str, int],
+    total: int,
+) -> Text:
+    _ = indexes
     kind = str(event.get("kind", "event"))
     text = Text()
+
     if kind == "pipeline_starting":
-        text.append("Runtime STARTING", style="bold cyan")
         return text
+
     if kind == "node_ready":
         name = str(event.get("node", "?"))
-        index = indexes.get(name, 0)
-        text.append(f"[{index}/{total}] ", style="dim")
+        text.append("✓ ", style="green")
         text.append(f"{name:<14}", style="bold")
-        text.append(f" {event.get('uses', ''):<28}")
-        text.append(" READY", style="bold green")
+        text.append(" ready", style="green")
+        uses = str(event.get("uses", "") or "")
+        if uses:
+            text.append(f" · {uses}", style="dim")
         info = _runtime_info_text(dict(event.get("runtime_info") or {}))
         if info:
             text.append(f" · {info}", style="cyan")
         return text
+
     if kind == "stream_server_ready":
-        text.append("Streams READY", style="bold green")
-        text.append(f" · port {event.get('port')}")
+        text.append("✓ streams", style="green")
+        text.append(f" ready · port {event.get('port')}")
         for name in event.get("streams") or []:
-            text.append(f"\n  nodrix-viewer {name}", style="cyan")
+            text.append(f"\n  plyctl-viewer {name}", style="cyan")
         return text
+
     if kind == "pipeline_running":
-        text.append("RUNNING", style="bold green")
-        text.append(" · press Ctrl+C to stop")
+        text.append(f"✓ {total}/{total} ready", style="green")
+        text.append("\n")
+        text.append("● RUNNING", style="bold green")
+        text.append(" · Ctrl+C to stop", style="dim")
         return text
+
     if kind == "node_failed":
-        text.append("FAILED ", style="bold red")
-        text.append(f"{event.get('node')}: {event.get('error')}")
+        text.append("✗ ", style="bold red")
+        text.append(str(event.get("node") or "?"), style="bold")
+        text.append(f" failed · {event.get('error')}", style="red")
         return text
+
     if kind == "node_stopped":
-        text.append("STOPPED ", style="dim")
-        text.append(str(event.get("node")))
+        text.append("✓ ", style="dim")
+        text.append(str(event.get("node") or "?"))
+        text.append(" stopped", style="dim")
         return text
+
     if kind == "pipeline_stopped":
-        text.append(f"Pipeline {event.get('status', 'stopped')}", style="yellow")
         return text
+
     text.append(kind, style="dim")
     return text
 
@@ -256,7 +297,8 @@ def _node_line(name: str, raw: dict[str, Any], bottleneck_p95: float) -> Text:
     p95 = float(raw.get("p95_ms", raw.get("processing", {}).get("p95_ms", 0.0)))
     text = Text()
     text.append(f"{name:<14}", style="bold")
-    text.append(f" {rate:6.1f} Hz")
+    rate_label = "monitor Hz" if name.endswith("_health") else "node Hz"
+    text.append(f" {rate:6.1f} {rate_label}")
     text.append(f" {p95:8.2f} ms")
     text.append(f"  {_bar(busy, 100.0, 16)} ")
     text.append(f"{busy:5.1f}%")
@@ -276,95 +318,187 @@ def _node_line(name: str, raw: dict[str, Any], bottleneck_p95: float) -> Text:
     status = str(health.get("status", "unknown"))
     if status != "healthy":
         text.append(f"  {status}", style="bold red")
-    if p95 > 0 and bottleneck_p95 > 0 and p95 >= bottleneck_p95 * 0.95:
+    if (
+        bool(health.get("participates_in_throughput", True))
+        and p95 > 0
+        and bottleneck_p95 > 0
+        and p95 >= bottleneck_p95 * 0.95
+    ):
         text.append("  BOTTLENECK", style="bold red")
     return text
 
 
 def render_top(data: dict[str, object]) -> Group:
-    raw_nodes = {str(name): dict(raw) for name, raw in dict(data.get("nodes", {})).items()}
+    raw_nodes = {
+        str(name): dict(raw)
+        for name, raw in dict(data.get("nodes", {})).items()
+    }
+    raw_applications = {
+        str(name): dict(raw)
+        for name, raw in dict(data.get("applications", {})).items()
+    }
     system = dict(data.get("system", {}))
-    process: dict[str, Any] = {}
+
+    executor_resources: dict[str, Any] = {}
     for raw in raw_nodes.values():
         resources = dict(raw.get("resources", {}))
         if resources.get("scope") == "executor_shared":
-            process = resources
+            executor_resources = resources
             break
 
     cpu_count = max(int(system.get("cpu_count", 1) or 1), 1)
-    process_cpu = float(process.get("executor_cpu_percent", 0.0))
-    rss = float(process.get("executor_rss_bytes", 0.0))
-    total_memory = float(system.get("memory_total_bytes", 0.0))
+    total_cpu = float(
+        executor_resources.get("executor_cpu_percent", 0.0) or 0.0
+    )
+    total_rss = float(
+        executor_resources.get("executor_rss_bytes", 0.0) or 0.0
+    )
+
+    for application in raw_applications.values():
+        resources = dict(application.get("resources", {}))
+        total_cpu += float(resources.get("cpu_percent", 0.0) or 0.0)
+        total_rss += float(resources.get("rss_bytes", 0.0) or 0.0)
+
+    total_memory = float(system.get("memory_total_bytes", 0.0) or 0.0)
     duration = float(data.get("duration_seconds", 0.0) or 0.0)
 
     header = Text()
-    header.append("Nodrix top", style="bold cyan")
+    header.append("Plyctl top", style="bold cyan")
     header.append(f" · {data.get('pipeline', '-')}", style="bold")
-    header.append(f" · {str(data.get('status', 'running')).upper()}", style="green")
+    header.append(
+        f" · {str(data.get('status', 'running')).upper()}",
+        style="green",
+    )
     header.append(f" · {duration:,.1f}s")
 
     machine = Text()
-    machine.append(f"CPU  {process_cpu:6.1f}/{cpu_count * 100}% ")
-    machine.append(_bar(process_cpu, cpu_count * 100.0, 24), style="green")
-    machine.append(f"   RAM {_format_bytes(rss)}")
+    machine.append(f"CPU  {total_cpu:6.1f}/{cpu_count * 100}% ")
+    machine.append(
+        _bar(total_cpu, cpu_count * 100.0, 24),
+        style="green",
+    )
+    machine.append(f"   RAM {_format_bytes(total_rss)}")
     if total_memory > 0:
         machine.append(f"/{_format_bytes(total_memory)} ")
-        machine.append(_bar(rss, total_memory, 16), style="blue")
+        machine.append(
+            _bar(total_rss, total_memory, 16),
+            style="blue",
+        )
     temperature = system.get("temperature_c")
     if temperature is not None:
         machine.append(f"   TEMP {float(temperature):.1f}°C")
     load = list(system.get("load_average") or [])
     if load:
-        machine.append("   LOAD " + " ".join(f"{float(item):.2f}" for item in load[:3]))
+        machine.append(
+            "   LOAD "
+            + " ".join(f"{float(item):.2f}" for item in load[:3])
+        )
 
-    node_rates = {name: float(raw.get("rate_hz", 0.0)) for name, raw in raw_nodes.items()}
-    rates = Text()
-    source_names = [name for name in raw_nodes if "source" in name.lower()]
-    detector_names = [name for name in raw_nodes if "detector" in name.lower()]
-    tracker_names = [name for name in raw_nodes if "tracker" in name.lower()]
-    output_names = [name for name in raw_nodes if "encoder" in name.lower() or "output" in name.lower()]
-    for label, names in (
-        ("IN", source_names),
-        ("DET", detector_names),
-        ("TRACK", tracker_names),
-        ("OUT", output_names),
-    ):
-        if names:
-            rates.append(f"{label} {max(node_rates[name] for name in names):.1f} FPS   ", style="bold")
+    throughput_nodes = [
+        raw
+        for raw in raw_nodes.values()
+        if bool(
+            dict(raw.get("health", {})).get(
+                "participates_in_throughput",
+                True,
+            )
+        )
+    ]
+    bottleneck_p95 = max(
+        (
+            float(raw.get("p95_ms", 0.0) or 0.0)
+            for raw in throughput_nodes
+        ),
+        default=0.0,
+    )
+    node_lines = [
+        _node_line(name, raw, bottleneck_p95)
+        for name, raw in raw_nodes.items()
+    ]
 
-    p95_values = [float(raw.get("p95_ms", 0.0)) for raw in raw_nodes.values()]
-    bottleneck_p95 = max(p95_values, default=0.0)
-    node_lines: list[Text] = []
-    for name, raw in raw_nodes.items():
-        node_lines.append(_node_line(name, raw, bottleneck_p95))
+    application_lines = Text()
+    for name, raw in raw_applications.items():
+        resources = dict(raw.get("resources", {}))
+        cpu = float(resources.get("cpu_percent", 0.0) or 0.0)
+        memory = int(resources.get("rss_bytes", 0) or 0)
+        running = bool(raw.get("running", False))
+        status = str(raw.get("status", "unknown"))
+        pid = raw.get("pid")
+        restarts = int(raw.get("restart_count", 0) or 0)
+
+        application_lines.append(f"{name:<18}", style="bold")
+        application_lines.append(
+            f"pid={pid or '-':<8} "
+            f"cpu={cpu:6.1f}% "
+            f"ram={_format_bytes(memory):>10} "
+            f"proc={int(resources.get('process_count', 0) or 0):<3} "
+            f"threads={int(resources.get('thread_count', 0) or 0):<4} "
+            f"restarts={restarts:<3} "
+        )
+        style = (
+            "green"
+            if running and status in {"ok", "healthy", "running"}
+            else "yellow"
+        )
+        application_lines.append(status, style=style)
+        application_lines.append("\n")
 
     edge_lines = Text()
-    edge_count = 0
+    active_edges = 0
     for edge_raw in list(data.get("edges") or []):
         edge = dict(edge_raw)
-        stale = int(edge.get("stale_skips", 0))
-        overflow = int(edge.get("overflow_drops", 0))
-        depth = int(edge.get("depth", 0))
-        capacity = int(edge.get("capacity", 1))
+        stale = int(edge.get("stale_skips", 0) or 0)
+        overflow = int(edge.get("overflow_drops", 0) or 0)
+        depth = int(edge.get("depth", 0) or 0)
+        capacity = int(edge.get("capacity", 1) or 1)
         if stale == 0 and overflow == 0 and depth == 0:
             continue
-        edge_count += 1
-        edge_lines.append(f"{edge.get('source')} → {edge.get('target')}")
-        edge_lines.append(f"  queue {depth}/{capacity} {edge.get('policy')}", style="dim")
+        active_edges += 1
+        edge_lines.append(
+            f"{edge.get('source')} → {edge.get('target')}"
+        )
+        edge_lines.append(
+            f"  queue {depth}/{capacity} {edge.get('policy')}",
+            style="dim",
+        )
         if stale:
-            edge_lines.append(f"  stale-skipped {stale}", style="yellow")
+            edge_lines.append(
+                f"  stale-skipped {stale}",
+                style="yellow",
+            )
         if overflow:
-            edge_lines.append(f"  overflow {overflow}", style="red")
+            edge_lines.append(
+                f"  overflow {overflow}",
+                style="red",
+            )
         edge_lines.append("\n")
-    if edge_count == 0:
-        edge_lines.append("No active queue pressure or overflow", style="dim")
 
-    return Group(
+    if active_edges == 0:
+        edge_lines.append(
+            "No active queue pressure or overflow",
+            style="dim",
+        )
+
+    sections: list[Any] = [
         Panel(header, title="Runtime"),
         machine,
-        rates,
         Text("\n"),
         *node_lines,
-        Text("\n"),
-        Panel(edge_lines, title="Edges"),
+    ]
+    if raw_applications:
+        sections.extend(
+            [
+                Text("\n"),
+                Panel(
+                    application_lines,
+                    title="Managed applications",
+                ),
+            ]
+        )
+    sections.extend(
+        [
+            Text("\n"),
+            Panel(edge_lines, title="Edges"),
+        ]
     )
+    return Group(*sections)

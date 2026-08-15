@@ -1,0 +1,22 @@
+schema: nodrix.environment/v1
+name: ros2
+
+shell:
+  source:
+    - /opt/ros/jazzy/setup.bash
+    - ${HOME}/livox_ws/install/setup.bash
+
+environment:
+  ROS_DISTRO: jazzy
+  ROS_DOMAIN_ID: "26"
+  ROS_AUTOMATIC_DISCOVERY_RANGE: SUBNET
+  ROBOT_WS: ${HOME}/livox_ws
+  FASTLIO_CONFIG_FILE: mid360s_handheld.yaml
+
+checks:
+  - type: file
+    path: /opt/ros/jazzy/setup.bash
+  - type: directory
+    path: ${HOME}/livox_ws/install
+  - type: command
+    command: ros2 --help

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from abc import ABC
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .cv_types import ManagedBuffer
 from .messages import Message
@@ -19,6 +19,8 @@ class NodeContext:
     runtime_mode: str
     engine: str = "unified"
     device: str = "auto"
+    bindings: Mapping[str, Any] = field(default_factory=dict)
+    external_links: tuple[Mapping[str, Any], ...] = ()
     _output_allocator: Callable[[int, bool], ManagedBuffer] | None = None
 
     def allocate_buffer(self, size: int, *, readonly: bool = False) -> ManagedBuffer:
@@ -32,7 +34,7 @@ class NodeContext:
 
         if self._output_allocator is None:
             raise RuntimeError(
-                "This Nodrix execution context has no executor-owned output allocator; "
+                "This Plyctl execution context has no executor-owned output allocator; "
                 "use BufferPool/SharedBufferPool explicitly or configure process isolation"
             )
         return self._output_allocator(int(size), bool(readonly))
@@ -41,9 +43,17 @@ class NodeContext:
     def has_output_allocator(self) -> bool:
         return self._output_allocator is not None
 
+    def binding(self, name: str = "session", *, required: bool = True) -> Any:
+        """Return a provider resource bound to this Node in the pipeline."""
+
+        value = self.bindings.get(name)
+        if value is None and required:
+            raise RuntimeError(f"Node {self.name!r} has no binding {name!r}")
+        return value
+
 
 class Node(ABC):
-    """Base class for Nodrix nodes.
+    """Base class for Plyctl nodes.
 
     ``input_memory`` and ``output_memory`` are optional per-port contracts. A
     missing entry means that the port preserves/accepts any memory domain. The
@@ -67,7 +77,7 @@ class Node(ABC):
         self.context = context
         return None
 
-    # Nodrix 1.x lifecycle. Existing 0.x nodes that only override open/flush/close
+    # Plyctl 1.x lifecycle. Existing 0.x nodes that only override open/flush/close
     # remain source-compatible through these default adapters.
     def configure(self, context: NodeContext) -> Any:
         self._lifecycle.transition(LifecycleState.CONFIGURING)

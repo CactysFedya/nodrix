@@ -1,0 +1,16 @@
+schema: nodrix.workflow/v1
+name: prepare
+description: Explicitly acquire and normalize Raspberry Pi 5 mapping sources
+steps:
+  - id: acquire-reference-sources
+    run: python3 scripts/prepare_rpi5_mapping_sources.py
+    when:
+      system: Linux
+      architecture: aarch64
+      command_exists: git
+  - id: rosdep
+    run: rosdep install --from-paths workspaces/livox_ws/src workspaces/fast_lio2_ws/src --ignore-src -r -y --rosdistro jazzy
+    when:
+      system: Linux
+      architecture: aarch64
+      command_exists: rosdep

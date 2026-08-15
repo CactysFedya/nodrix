@@ -574,8 +574,8 @@ class RealtimeByteTrackNode(Node):
         backend = str(self.parameters.get("backend", "native"))
         if backend == "native" and not native_tracking_available():
             raise RuntimeError(
-                "vision.realtime_bytetrack requires the Nodrix native C++20 tracking extension. "
-                "Install a compiled Nodrix wheel/editable build, or explicitly set backend: python."
+                "vision.realtime_bytetrack requires the Plyctl native C++20 tracking extension. "
+                "Install a compiled Plyctl wheel/editable build, or explicitly set backend: python."
             )
         core = ByteTrackCore(
             track_threshold=float(self.parameters.get("track_thresh", 0.25)),

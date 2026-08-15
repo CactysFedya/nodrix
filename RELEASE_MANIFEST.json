@@ -1,0 +1,61 @@
+{
+  "schema": "plyctl-release/v1",
+  "name": "Plyctl 2.8.0 Release",
+  "release": "2.8.0",
+  "display_release": "2.8.0",
+  "core_contracts": {
+    "provider_api": [
+      "1",
+      "2"
+    ],
+    "provider_schema": [
+      "plyctl-provider/1",
+      "plyctl-provider/2",
+      "nodrix-provider/1",
+      "nodrix-provider/2"
+    ],
+    "manifest_compatibility": [
+      "plyctl.dev/v1",
+      "plyctl.dev/v2",
+      "nodrix.dev/v1",
+      "nodrix.dev/v2"
+    ],
+    "features": [
+      "provider-sessions.1",
+      "external-links.1",
+      "managed-resources.1",
+      "managed-applications.1",
+      "edge-transports.1",
+      "provider-templates.1"
+    ]
+  },
+  "packages": {
+    "plyctl-spatial": "0.1.0",
+    "plyctl-mapping": "0.1.1",
+    "plyctl-ros2": "0.4.0",
+    "plyctl-spatial-ros2": "0.1.0"
+  },
+  "compatibility": {
+    "provider_api_1": true,
+    "pipelines_without_integrations": true,
+    "use_and_links_aliases": true,
+    "ros2_source_sink_aliases": true,
+    "ros2_spatial_adapter_import_shims": true,
+    "nodrix_python_import_alias": true,
+    "nodrix_cli_alias": true,
+    "nodrix_manifest_api_alias": true,
+    "nodrix_provider_entry_point_alias": true,
+    "legacy_native_abi": true
+  },
+  "validation": {
+    "offline_contract_tests": "covered by core and modular CI",
+    "python_compile": "passed",
+    "provider_discovery": "passed in isolated metadata path",
+    "provider_template_generation": "passed",
+    "compact_template_validation": "passed",
+    "canonical_integration_validation": "passed",
+    "independent_wheels": "passed",
+    "ros2_jazzy_smoke": "configured in modular CI",
+    "ros2_hardware_validation": "Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy hardware smoke passed; semantic mapping remains experimental"
+  }
+}

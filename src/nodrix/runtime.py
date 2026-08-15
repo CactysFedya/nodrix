@@ -338,14 +338,21 @@ class PipelineRuntime:
             if port not in loaded.node.output_types:
                 raise RuntimeGraphError(f"Node {loaded.name!r} emitted unknown port {port!r}")
             expected = loaded.node.output_types[port]
-            if not self._types_compatible(message.type, expected):
+            if expected != "core.any" and message.type != expected:
                 raise RuntimeGraphError(
                     f"Node {loaded.name!r} emitted {message.type!r} on {port!r}; expected {expected!r}"
                 )
             stream_id = f"{loaded.name}.{port}"
             outgoing = message.with_updates(stream_id=stream_id)
             for edge in loaded.outputs.get(port, []):
-                await edge.put(outgoing)
+                target_node, target_port = edge.edge.target.split(".", 1)
+                target_type = self.nodes[target_node].node.input_types[target_port]
+                if target_type != "core.any" and outgoing.type != target_type:
+                    raise RuntimeGraphError(
+                        f"Message {outgoing.type!r} from {stream_id!r} cannot enter "
+                        f"{edge.edge.target!r}; expected {target_type!r}"
+                    )
+                await edge.put(outgoing.fork())
 
     async def _publish_eos(self, loaded: LoadedNode) -> None:
         for queues in loaded.outputs.values():

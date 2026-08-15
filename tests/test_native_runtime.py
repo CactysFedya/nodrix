@@ -5,6 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
+import nodrix
 import pytest
 
 from nodrix.manifest import load_manifest
@@ -22,6 +23,7 @@ def test_native_manifest_builds() -> None:
     assert len(description["edges"]) == 3
 
 
+@pytest.mark.timeout(180)
 def test_native_runtime_executes_end_to_end(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -81,7 +83,7 @@ edges:
         capture_output=True,
         text=True,
     )
-    assert version.stdout.strip() == "nodrix-native-runner 2.1.0"
+    assert version.stdout.strip() == f"nodrix-native-runner {nodrix.__version__}"
     assert report["engine"] == "native-cpp20"
     assert report["status"] == "completed"
     assert report["nodes"]["stage"]["messages"] == 4096

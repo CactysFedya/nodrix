@@ -6,10 +6,13 @@ from typing import Callable
 
 import yaml
 
+from .branding import MANIFEST_API_V2
+from .manifest_schema import write_manifest_schema
+
 
 def _manifest_v2(document: dict) -> dict:
     result = dict(document)
-    result["apiVersion"] = "nodrix.dev/v2"
+    result["apiVersion"] = MANIFEST_API_V2
     runtime = dict(result.get("runtime") or {})
     runtime.setdefault("engine", "unified")
     result["runtime"] = runtime
@@ -23,7 +26,19 @@ def _manifest_v2(document: dict) -> dict:
 
 
 SKELETON_FILES: dict[str, str] = {
-    "nodrix.toml": dedent(
+    ".vscode/settings.json": dedent(
+        '''
+        {
+          "yaml.schemas": {
+            ".plyctl-schema.json": [
+              "pipeline.yaml",
+              "pipelines/*.yaml"
+            ]
+          }
+        }
+        '''
+    ).lstrip(),
+    "plyctl.toml": dedent(
         '''
         [project]
         name = "{project_name}"
@@ -35,11 +50,11 @@ SKELETON_FILES: dict[str, str] = {
         type_validation = "first"
         '''
     ).lstrip(),
-    "requirements.txt": "nodrix==2.1.0\n",
+    "requirements.txt": "plyctl==2.8.0\n",
     ".gitignore": ".nodrix/\n/outputs/*\n!/outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
-        apiVersion: nodrix.dev/v2
+        apiVersion: plyctl.dev/v2
         kind: Pipeline
         metadata:
           name: {project_name}
@@ -58,8 +73,8 @@ SKELETON_FILES: dict[str, str] = {
         placement: {}
         '''
     ).lstrip(),
-    "nodes/__init__.py": '"""User Nodrix nodes."""\n',
-    "types/README.md": "# Custom types\n\nAdd schemas here and run `nodrix type build`.\n",
+    "nodes/__init__.py": '"""User Plyctl nodes."""\n',
+    "types/README.md": "# Custom types\n\nAdd schemas here and run `plyctl type build`.\n",
     "models/.gitkeep": "",
     "data/.gitkeep": "",
     "outputs/.gitkeep": "",
@@ -70,13 +85,13 @@ SKELETON_FILES: dict[str, str] = {
         '''
         # {project_name}
 
-        Empty Nodrix project skeleton. `pipeline.yaml` is intentionally not
+        Empty Plyctl project skeleton. `pipeline.yaml` is intentionally not
         runnable until nodes are added.
 
         Create a runnable example instead:
 
         ```bash
-        nodrix init {project_name} --template vision --force
+        plyctl init {project_name} --template vision --force
         ```
         '''
     ).lstrip(),
@@ -161,7 +176,7 @@ def _with_native(files: dict[str, str]) -> dict[str, str]:
 
 def _core_files(project_name: str) -> dict[str, str]:
     pipeline = {
-        "apiVersion": "nodrix.dev/v1",
+        "apiVersion": "plyctl.dev/v1",
         "kind": "Pipeline",
         "metadata": {"name": project_name},
         "runtime": {"mode": "offline", "engine": "unified", "type_validation": "first"},
@@ -182,7 +197,7 @@ def _core_files(project_name: str) -> dict[str, str]:
         "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
         "nodes/source.py": dedent(
             '''
-            from nodrix import Message, SourceNode
+            from plyctl import Message, SourceNode
 
             class CounterSource(SourceNode):
                 output_types = {"output": "core.object"}
@@ -193,7 +208,7 @@ def _core_files(project_name: str) -> dict[str, str]:
         ).lstrip(),
         "nodes/transform.py": dedent(
             '''
-            from nodrix import Node
+            from plyctl import Node
 
             class MultiplyNode(Node):
                 input_types = {"input": "core.object"}
@@ -208,7 +223,7 @@ def _core_files(project_name: str) -> dict[str, str]:
         ).lstrip(),
         "nodes/sink.py": dedent(
             """
-            from nodrix import SinkNode
+            from plyctl import SinkNode
 
             class ConsoleSink(SinkNode):
                 input_types = {"input": "core.object"}
@@ -218,7 +233,7 @@ def _core_files(project_name: str) -> dict[str, str]:
         ).lstrip(),
         "tests/test_nodes.py": dedent(
             '''
-            from nodrix import Message
+            from plyctl import Message
             from nodes.transform import MultiplyNode
 
             def test_multiply_node():
@@ -237,7 +252,7 @@ def _core_files(project_name: str) -> dict[str, str]:
 def _vision_files(project_name: str) -> dict[str, str]:
     pipeline = dedent(
         f"""
-        apiVersion: nodrix.dev/v2
+        apiVersion: plyctl.dev/v2
         kind: Pipeline
         name: {project_name}
         profile: realtime-low-latency
@@ -472,7 +487,7 @@ def _vision_files(project_name: str) -> dict[str, str]:
         encoder: auto
 
         # Probe hardware encoders first. If the platform has no encoder,
-        # Nodrix reports the fallback explicitly instead of hiding it.
+        # Plyctl reports the fallback explicitly instead of hiding it.
         acceleration: preferred
 
         # Applied only when the preferred policy selects a software fallback.
@@ -503,7 +518,7 @@ def _vision_files(project_name: str) -> dict[str, str]:
 
     return {
         "pipeline.yaml": pipeline,
-        "requirements.txt": "nodrix[vision,media,viewer]==2.1.0\n",
+        "requirements.txt": "plyctl[vision,media,viewer]==2.8.0\n",
         "blocks/sources/ffmpeg.yaml": source,
         "blocks/preprocess/letterbox-320.yaml": preprocess,
         "blocks/detectors/yolo26n-ncnn.yaml": detector,
@@ -535,22 +550,22 @@ def _vision_files(project_name: str) -> dict[str, str]:
             Configure each implementation in its own block YAML, then run:
 
             ```bash
-            nodrix validate
-            nodrix inspect
-            nodrix run
+            plyctl validate
+            plyctl inspect
+            plyctl run
             ```
 
             Discover and view from another LAN computer:
 
             ```bash
-            nodrix stream list
-            nodrix-viewer /{project_name}/preview/h264 --overlay
+            plyctl stream list
+            plyctl-viewer /{project_name}/preview/h264 --overlay
             ```
 
             Direct URI remains available:
 
             ```bash
-            nodrix-viewer nodrix://DEVICE_IP:7420/{project_name}/preview/h264 --overlay
+            plyctl-viewer nodrix://DEVICE_IP:7420/{project_name}/preview/h264 --overlay
             ```
 
             The selected encoder block always probes hardware first and prints
@@ -584,7 +599,7 @@ def _media_files(project_name: str) -> dict[str, str]:
     }
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
-        "requirements.txt": "nodrix[media,viewer]==2.1.0\n",
+        "requirements.txt": "plyctl[media,viewer]==2.8.0\n",
         "README.md": dedent(
             f"""
             # {project_name}
@@ -593,10 +608,10 @@ def _media_files(project_name: str) -> dict[str, str]:
             defaults, while the full recording path explicitly remains lossless.
 
             ```bash
-            nodrix media select-encoder h264
-            nodrix inspect --resolved
-            nodrix run
-            nodrix-viewer /{project_name}/h264
+            plyctl media select-encoder h264
+            plyctl inspect --resolved
+            plyctl run
+            plyctl-viewer /{project_name}/h264
             ```
             """
         ).lstrip(),
@@ -604,7 +619,7 @@ def _media_files(project_name: str) -> dict[str, str]:
 
 def _network_files(project_name: str) -> dict[str, str]:
     publisher = {
-        "apiVersion": "nodrix.dev/v1", "kind": "Pipeline", "metadata": {"name": f"{project_name}-publisher"},
+        "apiVersion": "plyctl.dev/v1", "kind": "Pipeline", "metadata": {"name": f"{project_name}-publisher"},
         "runtime": {"mode": "realtime", "engine": "unified"},
         "nodes": {"source": {"uses": "core.synthetic_source", "parameters": {"count": 1000000, "interval_ms": 100}}},
         "edges": [],
@@ -616,7 +631,7 @@ def _network_files(project_name: str) -> dict[str, str]:
         }]},
     }
     subscriber = {
-        "apiVersion": "nodrix.dev/v1", "kind": "Pipeline", "metadata": {"name": f"{project_name}-subscriber"},
+        "apiVersion": "plyctl.dev/v1", "kind": "Pipeline", "metadata": {"name": f"{project_name}-subscriber"},
         "runtime": {"mode": "realtime", "engine": "unified"},
         "nodes": {
             "remote": {"uses": "core.stream_source", "parameters": {"name": f"/{project_name}/events", "max_messages": 5}},
@@ -628,12 +643,12 @@ def _network_files(project_name: str) -> dict[str, str]:
     return _with_native({
         "pipeline.yaml": yaml.safe_dump(_manifest_v2(publisher), sort_keys=False),
         "subscriber.yaml": yaml.safe_dump(_manifest_v2(subscriber), sort_keys=False),
-        "README.md": f"# {project_name}\n\nDevice A: `nodrix run`\n\nDevice B: `nodrix stream list && nodrix run subscriber.yaml`\n",
+        "README.md": f"# {project_name}\n\nDevice A: `plyctl run`\n\nDevice B: `plyctl stream list && plyctl run subscriber.yaml`\n",
     })
 
 def _data_plane_files(project_name: str) -> dict[str, str]:
     pipeline = {
-        "apiVersion": "nodrix.dev/v1", "kind": "Pipeline", "metadata": {"name": project_name},
+        "apiVersion": "plyctl.dev/v1", "kind": "Pipeline", "metadata": {"name": project_name},
         "runtime": {
             "mode": "offline", "engine": "unified", "type_validation": "first",
             "memory": {"shared_pool": {"block_size": 1048576, "capacity": 8, "threshold": 65536}},
@@ -656,7 +671,7 @@ def _data_plane_files(project_name: str) -> dict[str, str]:
         "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
         "nodes/shared_source.py": dedent(
             '''
-            from nodrix import Message, SharedBufferPool, SourceNode
+            from plyctl import Message, SharedBufferPool, SourceNode
 
             class SharedSource(SourceNode):
                 output_types = {"output": "core.bytes"}
@@ -678,7 +693,7 @@ def _data_plane_files(project_name: str) -> dict[str, str]:
         "nodes/checksum.py": dedent(
             '''
             import hashlib
-            from nodrix import Node
+            from plyctl import Node
 
             class Checksum(Node):
                 input_types = {"input": "core.bytes"}
@@ -689,13 +704,13 @@ def _data_plane_files(project_name: str) -> dict[str, str]:
                     return {"output": source.with_updates(type="core.object", payload={"checksum": digest})}
             '''
         ).lstrip(),
-        "README.md": f"# {project_name}\n\n`nodrix inspect --live` demonstrates descriptor-only shared-memory input to an isolated worker.\n",
+        "README.md": f"# {project_name}\n\n`plyctl inspect --live` demonstrates descriptor-only shared-memory input to an isolated worker.\n",
     })
 
 
 def _device_files(project_name: str) -> dict[str, str]:
     pipeline = {
-        "apiVersion": "nodrix.dev/v1", "kind": "Pipeline", "metadata": {"name": project_name},
+        "apiVersion": "plyctl.dev/v1", "kind": "Pipeline", "metadata": {"name": project_name},
         "runtime": {
             "mode": "offline", "engine": "unified", "type_validation": "first",
             "memory": {
@@ -724,7 +739,7 @@ def _device_files(project_name: str) -> dict[str, str]:
         "pipeline.yaml": yaml.safe_dump(_manifest_v2(pipeline), sort_keys=False),
         "nodes/device_source.py": dedent(
             '''
-            from nodrix import Message, SourceNode
+            from plyctl import Message, SourceNode
 
             class DeviceSource(SourceNode):
                 output_types = {"output": "core.bytes"}
@@ -743,7 +758,7 @@ def _device_files(project_name: str) -> dict[str, str]:
         ).lstrip(),
         "nodes/sink.py": dedent(
             '''
-            from nodrix import SinkNode
+            from plyctl import SinkNode
 
             class MemorySink(SinkNode):
                 input_types = {"input": "core.bytes"}
@@ -757,7 +772,7 @@ def _device_files(project_name: str) -> dict[str, str]:
                     self.count += 1
             '''
         ).lstrip(),
-        "README.md": f"# {project_name}\n\nRun `nodrix device doctor`, `nodrix inspect --memory`, then `nodrix inspect --live`. The isolated source uses executor-owned shared output buffers with zero output copies.\n",
+        "README.md": f"# {project_name}\n\nRun `plyctl device doctor`, `plyctl inspect --memory`, then `plyctl inspect --live`. The isolated source uses executor-owned shared output buffers with zero output copies.\n",
     })
 
 
@@ -767,7 +782,7 @@ def _benchmark_files(project_name: str) -> dict[str, str]:
     manifest["metadata"]["name"] = f"{project_name}-benchmark"
     manifest["nodes"]["source"]["parameters"]["count"] = 100000
     files["pipeline.yaml"] = yaml.safe_dump(manifest, sort_keys=False)
-    files["README.md"] = f"# {project_name}\n\n`nodrix benchmark --warmup 2 --repeat 5`\n"
+    files["README.md"] = f"# {project_name}\n\n`plyctl benchmark --warmup 2 --repeat 5`\n"
     return files
 
 
@@ -788,7 +803,7 @@ def _package_files(project_name: str) -> dict[str, str]:
         }, sort_keys=False),
         "python/passthrough.py": dedent(
             """
-            from nodrix import Node
+            from plyctl import Node
 
             class Passthrough(Node):
                 input_types = {"input": "core.any"}
@@ -800,7 +815,7 @@ def _package_files(project_name: str) -> dict[str, str]:
         "tests/test_package.py": dedent(
             """
             from python.passthrough import Passthrough
-            from nodrix import Message
+            from plyctl import Message
 
             def test_passthrough():
                 node = Passthrough()
@@ -842,4 +857,6 @@ def create_project(directory: Path, template: str | None = None, *, force: bool 
         if relative.endswith(".sh"):
             path.chmod(0o755)
         created.append(path)
+    schema_path = write_manifest_schema(directory / ".plyctl-schema.json")
+    created.append(schema_path)
     return created

@@ -1,6 +1,10 @@
-# Contributing to Nodrix
+# Contributing to Plyctl
 
-Nodrix accepts bug fixes, documentation improvements, performance work, new typed-message codecs, and carefully scoped runtime features.
+<!-- nodrix-principles-link -->
+All architectural and public-contract changes must follow [the product principles](docs/PRINCIPLES.md). Changes to those principles require a decision issue and an ADR.
+
+
+Plyctl accepts bug fixes, documentation improvements, performance work, new typed-message codecs, and carefully scoped runtime features.
 
 ## Development setup
 

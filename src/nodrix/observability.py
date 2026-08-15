@@ -27,7 +27,7 @@ class EventTracer:
             )
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "Tracing requires `pip install nodrix[otel]`"
+                "Tracing requires `pip install plyctl[otel]`"
             ) from exc
         provider = TracerProvider(
             resource=Resource.create({"service.name": service_name})
@@ -41,7 +41,7 @@ class EventTracer:
                 )
             except ModuleNotFoundError as exc:
                 raise RuntimeError(
-                    "OTLP tracing requires `pip install nodrix[otel]`"
+                    "OTLP tracing requires `pip install plyctl[otel]`"
                 ) from exc
             selected = OTLPSpanExporter(endpoint=endpoint)
         else:

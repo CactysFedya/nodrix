@@ -18,9 +18,11 @@ Domain SDKs define payload contracts and reusable nodes:
 ```text
 Nodrix Core
 ├── Nodrix Vision
-├── Nodrix LiDAR      planned
+├── nodrix-spatial
+├── nodrix-mapping
+├── nodrix-ros2
+├── nodrix-spatial-ros2
 ├── Nodrix Audio      planned
-├── Nodrix ROS        planned
 └── user packages
 ```
 
@@ -32,7 +34,11 @@ Nodrix Core
 | Graph | Resolved executable structure |
 | Node | Processing component |
 | Port | Typed input or output |
-| Edge | Local connection between ports |
+| Edge | Logical connection between ports |
+| Transport | Physical/local/external mechanism used by an Edge |
+| Resource | Provider-owned dependency shared for one pipeline run |
+| Session | 2.x-compatible specialized Resource |
+| Application | Supervised external work outside the Nodrix data plane |
 | Stream | Named output available to other processes/devices |
 | Runtime | Graph executor and transport system |
 
@@ -241,6 +247,27 @@ edit .cpp → build that plugin → nodrix run
 ```
 
 There is no workspace-wide mandatory build or environment sourcing step.
+An optional platform provider may manage its own workspace through a Session;
+for example, `nodrix-ros2` prepares one colcon overlay per pipeline rather than
+once per Node.
+
+## Integration resources, applications, and transports
+
+Provider API 2 keeps external systems out of the hot data plane:
+
+```text
+Provider Resource / Session
+├── environment / connection pool / graph watcher
+├── managed Applications
+└── Edge Transports (DDS topics, broker routes, services)
+```
+
+An Edge is always the logical connection. Without an explicit `transport`, it
+carries typed Nodrix messages through a bounded local queue. With a provider
+Transport, it expresses external routing or remapping and appears in the
+resolved plan with zero planned Nodrix copies. `Session` and top-level `links`
+remain compatibility vocabulary through 2.x; new providers can use the generic
+`Resource`, `Application`, and `Transport` contracts. None is tied to ROS 2.
 
 ## Intentional limitations after 0.6.0
 
@@ -249,7 +276,8 @@ There is no workspace-wide mandatory build or environment sourcing step.
 - automatic certificate-based security is not included;
 - native source plugins still use the fully native executor;
 - LAN discovery requires multicast or an explicit `nodrix://` URI fallback;
-- ROS 2 bridge, record/play, CUDA IPC, and DMA-BUF are future packages.
+- advanced ROS 2 loaned-message bridges, CUDA IPC, and DMA-BUF remain
+  target-specific capabilities rather than implicit Core guarantees.
 
 ## Nodrix 0.8 data plane
 

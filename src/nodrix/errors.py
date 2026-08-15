@@ -1,5 +1,10 @@
 class NodrixError(Exception):
-    """Base Nodrix exception."""
+    """Base runtime exception under the stable legacy name."""
+
+
+# An alias, rather than a subclass, keeps exception identity stable for users
+# that mix the old and new import paths during the 2.x compatibility window.
+PlyctlError = NodrixError
 
 
 class ManifestError(NodrixError):

@@ -1,0 +1,29 @@
+schema: nodrix.environment/v1
+name: rpi5-jazzy
+description: Raspberry Pi 5 Ubuntu 24.04 ROS 2 Jazzy mapping qualification environment
+
+platform:
+  system: Linux
+  architecture: aarch64
+
+shell:
+  source:
+    - /opt/ros/jazzy/setup.bash
+
+environment:
+  ROS_DISTRO: jazzy
+  ROS_DOMAIN_ID: "26"
+  ROS_AUTOMATIC_DISCOVERY_RANGE: SUBNET
+  CMAKE_BUILD_PARALLEL_LEVEL: "4"
+
+checks:
+  - type: file
+    path: /opt/ros/jazzy/setup.bash
+  - type: command
+    command: git
+  - type: command
+    command: cmake
+  - type: command
+    command: colcon
+  - type: command
+    command: rosdep

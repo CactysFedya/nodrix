@@ -109,14 +109,17 @@ def _validate_runtime_compatibility(manifest: dict[str, Any]) -> None:
     requirement = str(manifest.get("nodrix", "")).strip()
     if requirement:
         try:
-            compatible = Version(__version__) in SpecifierSet(requirement)
+            compatible = SpecifierSet(requirement).contains(
+                Version(__version__),
+                prereleases=True,
+            )
         except (InvalidSpecifier, InvalidVersion) as exc:
             raise ValueError(
-                f"Invalid Nodrix compatibility requirement: {requirement!r}"
+                f"Invalid Plyctl compatibility requirement: {requirement!r}"
             ) from exc
         if not compatible:
             raise ValueError(
-                f"Package requires Nodrix {requirement}, runtime is {__version__}"
+                f"Package requires Plyctl {requirement}, runtime is {__version__}"
             )
     platforms = set(manifest["platforms"])
     if "any" not in platforms and not (_platform_tags() & platforms):
@@ -153,14 +156,14 @@ def _sign_metadata(metadata: dict[str, Any], private_key_path: Path) -> dict[str
         from cryptography.hazmat.primitives.asymmetric import ed25519
     except ModuleNotFoundError as exc:
         raise RuntimeError(
-            "Package signing requires `pip install nodrix[security]`"
+            "Package signing requires `pip install plyctl[security]`"
         ) from exc
     private_key = serialization.load_pem_private_key(
         private_key_path.read_bytes(),
         password=None,
     )
     if not isinstance(private_key, ed25519.Ed25519PrivateKey):
-        raise ValueError("Nodrix package signing key must be an Ed25519 private key")
+        raise ValueError("Plyctl package signing key must be an Ed25519 private key")
     public_der = private_key.public_key().public_bytes(
         serialization.Encoding.DER,
         serialization.PublicFormat.SubjectPublicKeyInfo,
@@ -345,7 +348,7 @@ def _verify_archive(
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("Package metadata is not valid JSON") from exc
     if metadata.get("format") != PACKAGE_FORMAT:
-        raise ValueError("Unsupported Nodrix package format")
+        raise ValueError("Unsupported Plyctl package format")
     raw_checksums = metadata.get("checksums")
     if not isinstance(raw_checksums, dict):
         raise ValueError("Package metadata checksums must be a mapping")
@@ -396,7 +399,7 @@ def _verify_archive(
             from cryptography.hazmat.primitives.asymmetric import ed25519
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "Package signature verification requires `pip install nodrix[security]`"
+                "Package signature verification requires `pip install plyctl[security]`"
             ) from exc
         key = serialization.load_pem_public_key(
             Path(public_key).expanduser().resolve().read_bytes()
@@ -526,7 +529,7 @@ def _current_package_dir(name: str) -> Path:
         return base / marker.read_text(encoding="utf-8").strip()
     versions = sorted((p for p in base.iterdir() if p.is_dir()), reverse=True) if base.is_dir() else []
     if not versions:
-        raise LookupError(f"Nodrix package is not installed: {name}")
+        raise LookupError(f"Plyctl package is not installed: {name}")
     return versions[0]
 
 

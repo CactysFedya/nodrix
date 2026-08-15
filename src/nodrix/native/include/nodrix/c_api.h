@@ -39,6 +39,17 @@ extern "C" {
 #define NODRIX_C_FEATURE_CORRELATION ((uint64_t)1u << 3u)
 #define NODRIX_C_FEATURE_DEVICE_HANDLES ((uint64_t)1u << 4u)
 
+/* Stable type id used by the C ABI and the C++ SDK. */
+static inline uint64_t nodrix_type_id_v2(const char* value) {
+  uint64_t hash = UINT64_C(1469598103934665603);
+  if (value == NULL) return hash;
+  while (*value != '\0') {
+    hash ^= (uint8_t)*value++;
+    hash *= UINT64_C(1099511628211);
+  }
+  return hash;
+}
+
 typedef int32_t nodrix_status_v2;
 
 enum {

@@ -1,0 +1,8 @@
+schema: nodrix.workflow/v1
+name: test
+description: Validate the reference System and native mapping package
+steps:
+  - id: mapping-tests
+    run: python -m pytest -q packages/nodrix-mapping/tests
+  - id: system-structure
+    run: plyctl system validate systems/rpi5-mapping.yaml

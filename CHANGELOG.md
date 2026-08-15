@@ -1,5 +1,67 @@
 # Changelog
 
+## 2.3.0b1 — Beta stabilization
+
+- Added one canonical module instance per local Python file, registered it in
+  `sys.modules` before execution, removed failed imports from the cache, and
+  added regression tests for dataclasses and class identity across nodes.
+- Normalized package, native, compatibility, citation, release-manifest, test,
+  README, and documentation version metadata to `2.3.0b1`.
+- Corrected public repository URLs to the actual `CactysFedya/nodrix`
+  repository.
+- Added release-metadata consistency tests and a release-critical
+  documentation checker.
+- Added bilingual product principles, stabilization register, portable
+  deployment guide, FAST-LIVO2 semantic-mapping qualification notes, and
+  current release notes.
+- Documented Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy hardware-smoke
+  evidence without marking semantic mapping production-ready.
+- Kept FAST-LIVO2, Livox, ROS 2, Vision, and semantic mapping outside Core as
+  providers, managed applications, project-owned packages, and reference
+  integrations.
+
+## 2.2.0a5 — Plyctl compatibility rebrand
+
+- Renamed the public product, distribution, CLI, Python SDK, manifest API,
+  provider entry point, and documentation to Plyctl.
+- Preserved the `nodrix` import and CLI, `nodrix.dev/v1`/`v2` manifests,
+  Provider API entry points, native ABI, recordings, stream URIs, provider
+  ids, environment variables, and run-artifact paths for the 2.x line.
+- Added canonical `plyctl-spatial`, `plyctl-mapping`, `plyctl-ros2`, and
+  `plyctl-spatial-ros2` distributions with legacy Python import shims.
+- Added a metadata-only `nodrix` compatibility distribution that installs the
+  matching Plyctl version.
+- Added a Sphinx/MyST documentation site and GitHub Pages build/deployment
+  workflow.
+- Kept the generic ROS 2 YAML model and FAST-LIVO2 orchestration independent
+  of algorithm-specific plugins.
+
+## 2.2.0-alpha.4 — Core Boundaries
+
+- Split manifest, provider, CLI, and unified-runtime implementation into
+  focused modules while preserving the established import facades.
+- Added transport-neutral managed Resources and Applications.
+- Kept Edge as the logical connection and attached external provider
+  Transports through `edges[].transport`.
+- Kept `use`, top-level `links`, sessions, and ROS process Nodes readable as
+  Nodrix 2.x compatibility paths with migration/strict diagnostics.
+- Added canonical JSON Schema generation and editor mappings to every new
+  Core or provider-owned project.
+- Moved ROS process supervision to managed Applications and retained DDS/RMW
+  as the data plane for ROS-to-ROS transported Edges.
+- Isolated modular provider tests from stale global editable installs and
+  included API contract fixtures in the source distribution.
+
+## 2.2.0-alpha.3 — Modular Integration Sessions
+
+- Added Provider API 2 sessions, external links, parameter schemas, and
+  provider-owned `nodrix init` templates.
+- Split typed ROS/Spatial bridges into `nodrix-spatial-ros2`.
+- Added one shared ROS workspace/graph session, persistent graph worker,
+  graph-only monitoring, inter-process build locking, bounded logs, and robust
+  startup cleanup.
+- Preserved Provider API 1 and existing pipeline YAML compatibility.
+
 ## 2.1.0 — Provider API 1 and Unified Doctor
 - Added the official `vision.ncnn_detector_native` Plugin C ABI 2 backend:
   NCNN preprocessing, inference, YOLO decoding, filtering, and NMS now run

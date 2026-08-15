@@ -1,11 +1,11 @@
 cff-version: 1.2.0
-title: Nodrix
-message: "If you use Nodrix in research, please cite the software repository and release."
+title: Plyctl
+message: "If you use Plyctl in research, please cite the software repository and release."
 type: software
 authors:
   - name: CactysFedya
-version: 2.1.0
-date-released: 2026-07-29
-repository-code: "https://github.com/CactysFedya/nodrix"
-url: "https://pypi.org/project/nodrix/"
+version: 2.8.0
+date-released: 2026-08-14
+repository-code: "https://github.com/CactysFedya/plyctl"
+url: "https://pypi.org/project/plyctl/"
 license: Apache-2.0

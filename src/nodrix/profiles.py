@@ -110,4 +110,4 @@ def get_profile(name: str | None) -> dict[str, Any]:
     try:
         return deepcopy(PROFILE_DEFAULTS[name])
     except KeyError as exc:
-        raise ValueError(f"Unknown Nodrix profile {name!r}; choose: {', '.join(profile_names())}") from exc
+        raise ValueError(f"Unknown Plyctl profile {name!r}; choose: {', '.join(profile_names())}") from exc

@@ -1,0 +1,55 @@
+apiVersion: plyctl.dev/v2
+kind: Pipeline
+
+metadata:
+  name: ros2-demo
+  description: Generic ROS 2 applications supervised by Plyctl
+
+runtime:
+  engine: unified
+  mode: realtime
+
+sessions:
+  ros:
+    uses: ros2.session
+    parameters:
+      distro: ${ROS_DISTRO:-jazzy}
+      underlays:
+        - /opt/ros/${ROS_DISTRO:-jazzy}
+      trust: readonly
+      build:
+        mode: never
+
+resources: {}
+
+applications:
+  talker:
+    uses: ros2.node
+    bindings: {session: ros}
+    parameters:
+      package: demo_nodes_cpp
+      executable: talker
+
+  listener:
+    uses: ros2.node
+    bindings: {session: ros}
+    parameters:
+      package: demo_nodes_cpp
+      executable: listener
+
+nodes: {}
+fragments: {}
+
+edges:
+  - from: talker.chatter
+    to: listener.chatter
+    transport:
+      uses: ros2.topic
+      parameters:
+        topic: /chatter
+        message_type: std_msgs/msg/String
+
+streams: {}
+recording: {}
+security: {}
+placement: {}

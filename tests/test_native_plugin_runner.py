@@ -275,6 +275,11 @@ def test_python_plugin_plugin_python_preserves_message_context(
         "{}",
     )
     payload = bytearray([9] * 64)
+    selected_trace_id = (
+        "trace:0123456789abcdef"
+        if isinstance(trace_id, str)
+        else trace_id
+    )
     original = Message(
         "core.bytes",
         payload,
@@ -284,11 +289,9 @@ def test_python_plugin_plugin_python_preserves_message_context(
         run_id="run-0001",
         source_id="camera.front",
         stream_id="/frames/main",
-        trace_id=trace_id,
+        trace_id=selected_trace_id,
         span_id="span:fedcba9876543210",
     )
-    if isinstance(trace_id, str):
-        original.trace_id = "trace:0123456789abcdef"
     first_output = first.process({"input": original})["output"]
     output = second.process({"input": first_output})["output"]
     payload[0] = 9

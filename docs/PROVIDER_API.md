@@ -1,7 +1,9 @@
-# Provider API 1
+# Provider APIs 1 and 2
 
-Provider API 1 lets an independently versioned Python distribution add Nodrix
-Nodes, probes, and templates without changing or patching Core.
+Provider APIs let an independently versioned Python distribution add Nodrix
+Nodes, probes, templates, shared sessions, and external-link kinds without
+changing or patching Core. API 1 remains supported; API 2 adds sessions and
+external links.
 
 ## Security and loading order
 
@@ -69,8 +71,9 @@ The wheel contains one `nodrix-provider.json` package-data file:
 ```
 
 The public SDK exports `ProviderMetadata`, `NodeDescriptor`,
-`ProbeDescriptor`, `TemplateDescriptor`, `ProviderManifest`,
-`ProviderRuntime`, and `negotiate_features`.
+`ProbeDescriptor`, `TemplateDescriptor`, `SessionDescriptor`,
+`LinkDescriptor`, `ProviderManifest`, `ProviderRuntime`, and
+`negotiate_features`.
 
 The entry point may return `None` and use the manifest import references
 directly, or return a `ProviderRuntime` with concrete Node classes and probe
@@ -78,6 +81,59 @@ callables. Runtime registrations may override only ids already declared in
 metadata.
 
 See `examples/provider_api` for a buildable external provider.
+
+## Provider API 2
+
+API 2 uses `schema: nodrix-provider/2` and `provider_api: "2"`. A session is a
+pipeline-scoped resource shared by multiple Nodes; a link describes an
+external path which creates no Nodrix queue and performs no Nodrix payload
+copy. This general contract can support ROS 2, Zenoh, MQTT, Kafka, databases,
+remote inference pools, or future transports.
+
+```json
+{
+  "schema": "nodrix-provider/2",
+  "metadata": {
+    "id": "example.bus",
+    "name": "Example Bus",
+    "version": "1.0.0",
+    "provider_api": "2",
+    "requires_nodrix": ">=2.1,<3",
+    "features": ["example.bus"],
+    "requires_features": ["provider-sessions.1", "external-links.1"]
+  },
+  "nodes": [],
+  "sessions": [{
+    "id": "example.session",
+    "factory": "example_bus:BusSession",
+    "parameters_schema": {"type": "object"}
+  }],
+  "links": [{
+    "id": "example.topic",
+    "parameters_schema": {
+      "type": "object",
+      "required": ["topic"],
+      "properties": {"topic": {"type": "string"}}
+    }
+  }]
+}
+```
+
+Provider-owned templates are also available to the normal project generator:
+
+```bash
+nodrix init my-project --template provider-template-id
+```
+
+Template discovery and copying are metadata-first. Sources must remain inside
+the installed provider package and symbolic links are rejected.
+
+Development and hermetic test environments can restrict metadata discovery to
+an explicit set of distribution directories with the platform-separated
+`NODRIX_PROVIDER_PATH` environment variable. Imports still follow normal
+Python rules; the override changes only which installed provider metadata is
+considered and prevents unrelated global editable installs from leaking into a
+test run.
 
 ## Signatures and trust
 

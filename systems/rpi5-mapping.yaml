@@ -1,0 +1,109 @@
+apiVersion: nodrix.system/v1
+kind: System
+name: rpi5-mapping
+description: Raspberry Pi 5 Livox MID-360S to FAST-LIO2 to native Nodrix voxel map
+
+targets:
+  - name: pi5
+    kind: host
+    properties:
+      backend: local
+      os: linux
+      architecture: aarch64
+
+resources:
+  - name: ros
+    uses: ros2.session
+    target: pi5
+    parameters:
+      distro: jazzy
+      underlays:
+        - /opt/ros/jazzy
+        - workspaces/livox_ws/install
+      path: workspaces/fast_lio2_ws
+      trust: project
+      environment:
+        ROS_DOMAIN_ID: "26"
+        ROS_AUTOMATIC_DISCOVERY_RANGE: SUBNET
+        LD_LIBRARY_PATH: "${PROJECT_ROOT}/.nodrix/prefix/livox-sdk2/lib"
+      build:
+        mode: never
+
+applications:
+  - name: livox
+    uses: ros2.launch
+    target: pi5
+    resources:
+      session: ros
+    parameters:
+      package: livox_ros_driver2
+      launch_file: msg_MID360s_launch.py
+      arguments:
+        rviz_enable: false
+      restart_policy: on-failure
+      max_restarts: 3
+      restart_backoff_s: 2.0
+
+  - name: fast_lio
+    uses: ros2.launch
+    target: pi5
+    resources:
+      session: ros
+    parameters:
+      package: fast_lio
+      launch_file: mapping.launch.py
+      arguments:
+        config_file: mid360.yaml
+      requires_topics:
+        - /livox/lidar
+        - /livox/imu
+      requirements_timeout_s: 60.0
+
+graphs:
+  - name: metric_mapping
+    nodes:
+      - name: registered_cloud
+        uses: ros2.point_cloud2_source
+        target: pi5
+        resources:
+          session: ros
+        parameters:
+          topic: /cloud_registered
+          message_type: sensor_msgs/msg/PointCloud2
+          capacity: 1
+      - name: voxel_map
+        uses: mapping.voxel_map
+        target: pi5
+        parameters:
+          voxel_size_m: 0.10
+          max_voxels: 500000
+          snapshot_interval_s: 5.0
+          eviction_window: 64
+          delta_capacity: 16
+          snapshot_capacity: 2
+      - name: ply_store
+        uses: mapping.ply_store
+        target: pi5
+        parameters:
+          path: artifacts/maps/metric/latest.ply
+          write_final: true
+          capacity: 1
+    connections:
+      - from: registered_cloud.cloud
+        to: voxel_map.cloud
+      - from: voxel_map.snapshot
+        to: ply_store.map
+
+artifacts:
+  - name: metric-map
+    kind: metric-3d-map
+    producer: metric_mapping/voxel_map.snapshot
+    path: artifacts/maps/metric/latest.ply
+    media_type: application/vnd.ply
+
+metadata:
+  hardware: raspberry-pi-5
+  lidar: livox-mid-360s
+  ros_distro: jazzy
+  ros_domain_id: 26
+  qualification: fast-lio2-jazzy

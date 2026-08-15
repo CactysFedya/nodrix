@@ -7,6 +7,7 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+docs/_build/
 .mypy_cache/
 .coverage
 htmlcov/
@@ -49,3 +50,9 @@ Makefile.native
 .env.*
 !.env.example
 .pypirc
+.patch-backups/
+
+# Raspberry Pi 5 reference-system acquired/build artifacts
+/sources/
+/workspaces/
+/artifacts/
