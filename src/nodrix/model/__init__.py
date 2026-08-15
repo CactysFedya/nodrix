@@ -1,5 +1,6 @@
 """Canonical cross-domain object model for Nodrix."""
 
+from .executions import ExecutionRecord, ExecutionState
 from .identity import EntityRef, RevisionRef
 from .operations import (
     BENCHMARK,
@@ -31,6 +32,8 @@ __all__ = [
     "DIAGNOSE",
     "EXPORT",
     "EntityRef",
+    "ExecutionRecord",
+    "ExecutionState",
     "Operation",
     "OperationKind",
     "PACKAGE",
