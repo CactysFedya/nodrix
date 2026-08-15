@@ -406,11 +406,108 @@ def plugin_remove_command(name: str) -> None:
     package_remove_command(name)
 
 
+def _run_subject_label(item: dict[str, object]) -> str:
+    """Return the primary human-readable subject of one indexed Run."""
+
+    subject = item.get("subject")
+    if isinstance(subject, str) and subject:
+        prefix = "nodrix://"
+        return subject[len(prefix):] if subject.startswith(prefix) else subject
+
+    pipeline = item.get("pipeline")
+    if isinstance(pipeline, str) and pipeline:
+        return pipeline
+
+    return "-"
+
+
+def _run_operation_label(item: dict[str, object]) -> str:
+    """Return a canonical Operation name or '-' for legacy Runs."""
+
+    operation = item.get("operation")
+    if isinstance(operation, str) and operation:
+        return operation
+
+    return "-"
+
+
+def _run_subject_label(item: dict[str, object]) -> str:
+    """Return the primary human-readable subject of one indexed Run."""
+
+    subject = item.get("subject")
+    if isinstance(subject, str) and subject:
+        prefix = "nodrix://"
+        if subject.startswith(prefix):
+            return subject[len(prefix):]
+        return subject
+
+    pipeline = item.get("pipeline")
+    if isinstance(pipeline, str) and pipeline:
+        return pipeline
+
+    return "-"
+
+
+def _run_operation_label(item: dict[str, object]) -> str:
+    """Return a canonical Operation name or '-' for legacy Runs."""
+
+    operation = item.get("operation")
+    if isinstance(operation, str) and operation:
+        return operation
+
+    return "-"
+
+
 @runs_app.command("list")
-def runs_list_command(project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd()) -> None:
-    table = Table("Run", "Pipeline", "Status", "Seconds")
-    for item in list_runs(project):
-        table.add_row(item["id"], str(item.get("pipeline") or "-"), item["status"], str(item.get("duration_seconds") or "-"))
+def runs_list_command(
+    project: Annotated[
+        Path,
+        typer.Option("--project", "-p"),
+    ] = Path.cwd(),
+    json_output: Annotated[
+        bool,
+        typer.Option("--json"),
+    ] = False,
+) -> None:
+    """List legacy and canonical execution history."""
+
+    items = list_runs(project)
+
+    if json_output:
+        console.print_json(
+            json.dumps(
+                items,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    table = Table(
+        box=None,
+        show_edge=False,
+        pad_edge=False,
+    )
+    table.add_column("Run")
+    table.add_column("Operation")
+    table.add_column("Subject / Pipeline")
+    table.add_column("Status")
+    table.add_column("Seconds")
+
+    for item in items:
+        duration = item.get("duration_seconds")
+
+        table.add_row(
+            str(item["id"]),
+            _run_operation_label(item),
+            _run_subject_label(item),
+            str(item["status"]),
+            (
+                "-"
+                if duration is None
+                else str(duration)
+            ),
+        )
+
     console.print(table)
 
 
