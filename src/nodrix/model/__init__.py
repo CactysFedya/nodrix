@@ -1,5 +1,6 @@
 """Canonical cross-domain object model for Nodrix."""
 
+from .data import ArtifactRecord, DatasetRecord
 from .executions import ExecutionRecord, ExecutionState
 from .identity import EntityRef, RevisionRef
 from .operations import (
@@ -26,11 +27,13 @@ from .plans import (
 from .runs import RunRecord
 
 __all__ = [
+    "ArtifactRecord",
     "BENCHMARK",
     "BUILD",
     "CALIBRATE",
     "CLEANUP",
     "DIAGNOSE",
+    "DatasetRecord",
     "EXPORT",
     "EntityRef",
     "ExecutionRecord",
