@@ -21,6 +21,7 @@ app = typer.Typer(
     help="The Pipeline OS for real-time local and distributed systems.",
     no_args_is_help=False,
     invoke_without_command=True,
+    rich_markup_mode=None,
 )
 node_app = typer.Typer(help="Inspect available node types.")
 stream_app = typer.Typer(help="Discover, inspect, and subscribe to named streams.")
