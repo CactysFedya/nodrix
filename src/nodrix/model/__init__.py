@@ -23,6 +23,7 @@ from .plans import (
     PlanKind,
     PlanRecord,
 )
+from .runs import RunRecord
 
 __all__ = [
     "BENCHMARK",
@@ -42,6 +43,7 @@ __all__ = [
     "PlanRecord",
     "RUN",
     "RevisionRef",
+    "RunRecord",
     "SYSTEM_EXECUTION",
     "TEST",
     "VALIDATE",
