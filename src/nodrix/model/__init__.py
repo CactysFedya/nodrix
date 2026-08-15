@@ -31,6 +31,12 @@ from .plans import (
     PlanKind,
     PlanRecord,
 )
+from .provenance import (
+    MaterializedRef,
+    combine_provenance,
+    run_io_relations,
+    run_ref,
+)
 from .references import (
     CanonicalRef,
     RecordRef,
@@ -70,6 +76,7 @@ __all__ = [
     "EntityRef",
     "ExecutionRecord",
     "ExecutionState",
+    "MaterializedRef",
     "Operation",
     "OperationKind",
     "PACKAGE",
@@ -93,10 +100,13 @@ __all__ = [
     "TEST",
     "VALIDATE",
     "WORKFLOW",
+    "combine_provenance",
     "execution_record_ref",
     "parse_canonical_ref",
     "plan_record_ref",
     "record_run",
+    "run_io_relations",
     "run_lifecycle_relations",
     "run_record_ref",
+    "run_ref",
 ]
