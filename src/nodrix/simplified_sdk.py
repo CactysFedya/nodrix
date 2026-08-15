@@ -43,6 +43,7 @@ __all__ = [
     "MessageDefinition",
     "NodeDefinition",
     "Outputs",
+    "_PACKAGE_NAMESPACE_OVERRIDE",
     "Param",
     "ParameterDefinition",
     "ParameterSpec",
