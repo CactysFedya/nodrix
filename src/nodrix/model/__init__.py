@@ -2,6 +2,13 @@
 
 from .data import ArtifactRecord, DatasetRecord
 from .executions import ExecutionRecord, ExecutionState
+from .history import (
+    execution_record_ref,
+    plan_record_ref,
+    record_run,
+    run_lifecycle_relations,
+    run_record_ref,
+)
 from .identity import EntityRef, RevisionRef
 from .operations import (
     BENCHMARK,
@@ -86,5 +93,10 @@ __all__ = [
     "TEST",
     "VALIDATE",
     "WORKFLOW",
+    "execution_record_ref",
     "parse_canonical_ref",
+    "plan_record_ref",
+    "record_run",
+    "run_lifecycle_relations",
+    "run_record_ref",
 ]
