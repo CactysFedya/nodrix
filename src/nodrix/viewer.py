@@ -453,11 +453,13 @@ class OpenCVReader:
         self.source_fps = 0.0
 
     def start(self) -> None:
-        self.capture = cv2.VideoCapture(self.source, self.backend) if self.backend else cv2.VideoCapture(self.source)
-        if not self.capture.isOpened():
+        capture = cv2.VideoCapture(self.source, self.backend) if self.backend else cv2.VideoCapture(self.source)
+        if not capture.isOpened():
+            capture.release()
             raise ViewerError(f"Cannot open video source: {self.original_source}")
-        self.capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-        self.source_fps = float(self.capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        self.source_fps = float(capture.get(cv2.CAP_PROP_FPS) or 0.0)
+        self.capture = capture
         self._thread = threading.Thread(target=self._loop, name="plyctl-viewer-capture", daemon=True)
         self._thread.start()
 
@@ -465,9 +467,13 @@ class OpenCVReader:
         sequence = 0
         next_deadline = time.perf_counter()
         file_like = _is_local_file_source(self.original_source)
+        capture = self.capture
+        if capture is None:
+            self.slot.close()
+            return
         try:
             while not self._stop.is_set():
-                ok, frame = self.capture.read()
+                ok, frame = capture.read()
                 if not ok:
                     break
                 message = Message(
@@ -494,15 +500,18 @@ class OpenCVReader:
             if not self._stop.is_set():
                 self.slot.fail(exc)
         finally:
+            capture.release()
+            if self.capture is capture:
+                self.capture = None
             self.slot.close()
 
     def close(self) -> None:
         self._stop.set()
-        if self.capture is not None:
-            self.capture.release()
-        if self._thread is not None:
-            self._thread.join(timeout=1.0)
-            self._thread = None
+        thread = self._thread
+        if thread is not None:
+            thread.join(timeout=1.0)
+            if not thread.is_alive():
+                self._thread = None
         self.slot.close()
 
 
