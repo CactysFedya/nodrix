@@ -31,6 +31,7 @@ from .optimization_canonical import (
 from .optimization_executor import (
     OptimizationExecutor,
 )
+from .storage_layout import StorageLayout
 
 
 def optimization_subject(
@@ -156,11 +157,9 @@ def execute_optimization_operation(
         .expanduser()
         .resolve()
         if output_dir is not None
-        else (
+        else StorageLayout(
             plan.pipeline.parent
-            / ".nodrix"
-            / "optimization"
-        ).resolve()
+        ).optimization_root
     )
 
     # Materialize the exact plan before execution.  This preserves the

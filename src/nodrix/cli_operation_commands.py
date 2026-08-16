@@ -39,6 +39,7 @@ from .planning import (
     diagnose_report,
     explain_target,
 )
+from .storage_layout import StorageLayout
 
 
 @recording_app.command("info")
@@ -319,7 +320,12 @@ def plan_command(
 def _latest_run_report(root: Path) -> Path:
     candidates = [
         path
-        for base in (root / ".nodrix" / "runs", root / "runs")
+        for base in (
+            StorageLayout(
+                root
+            ).runs_root,
+            root / "runs",
+        )
         if base.is_dir()
         for path in base.rglob("summary.json")
     ]

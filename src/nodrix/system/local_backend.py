@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
 
 from ..manifest import PipelineManifest, dump_manifest
+from ..storage_layout import StorageLayout
 from .backend import (
     BackendCapabilities,
     BackendContext,
@@ -495,7 +496,9 @@ class LocalBackend(ExecutionBackend):
         else:
             project_root = self.working_directory
 
-        generated_dir = project_root / ".nodrix" / "system-generated"
+        generated_dir = StorageLayout(
+            project_root
+        ).system_generated_root
         generated_dir.mkdir(parents=True, exist_ok=True)
         scope_suffix = f"-{self.scope_name}" if self.scope_name else ""
         manifest_path = generated_dir / (

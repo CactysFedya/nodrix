@@ -591,7 +591,13 @@ def _cache_state_path(root: Path, workflow: str, step_id: str) -> Path:
     safe_step = "".join(
         item if item.isalnum() or item in "-_" else "-" for item in step_id
     ).strip("-") or "step"
-    return root / ".nodrix" / "cache" / "workflows" / safe_workflow / f"{safe_step}.json"
+    return (
+        StorageLayout(
+            root
+        ).workflow_cache_root
+        / safe_workflow
+        / f"{safe_step}.json"
+    )
 
 
 def _cache_outputs_exist(
@@ -695,9 +701,9 @@ def execute_workflow_plan(
     ).strip("-") or "workflow"
 
     run_directory = (
-        project_root
-        / ".nodrix"
-        / "operations"
+        StorageLayout(
+            project_root
+        ).operations_root
         / f"{stamp}-{safe_name}"
     )
 

@@ -14,6 +14,8 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import yaml
 
+from .storage_layout import StorageLayout
+
 
 BENCHMARK_SCHEMA = "nodrix.benchmark/v1"
 RunCallable = Callable[[Path, Path, str | None, list[str], list[str]], Mapping[str, Any]]
@@ -375,7 +377,9 @@ def run_benchmark_suite(
     root = (
         Path(output_root).expanduser().resolve()
         if output_root is not None
-        else plan.pipeline.parent / ".nodrix" / "benchmarks"
+        else StorageLayout(
+            plan.pipeline.parent
+        ).benchmarks_root
     )
     suite_dir = root / f"{stamp}-{_safe_name(plan.pipeline.stem)}"
     suite_dir.mkdir(parents=True, exist_ok=False)

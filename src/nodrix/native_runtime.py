@@ -56,7 +56,12 @@ class NativeToolchain:
     def __init__(self, project_dir: Path, build_dir: Path | None = None) -> None:
         self.project_dir = project_dir.resolve()
         self.source_dir = Path(__file__).with_name("native")
-        self.build_dir = (build_dir or self.project_dir / ".nodrix" / "native-build").resolve()
+        self.build_dir = (
+            build_dir
+            or StorageLayout(
+                self.project_dir
+            ).native_build_root
+        ).resolve()
 
     @property
     def runner(self) -> Path:

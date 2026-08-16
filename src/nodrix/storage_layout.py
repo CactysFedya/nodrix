@@ -110,6 +110,30 @@ class StorageLayout:
         return self.managed_root / "generated"
 
     @property
+    def cache_root(self) -> Path:
+        """Return disposable Nodrix-managed cache storage."""
+
+        return self.managed_root / "cache"
+
+    @property
+    def workflow_cache_root(self) -> Path:
+        """Return workflow step-cache state."""
+
+        return self.cache_root / "workflows"
+
+    @property
+    def native_build_root(self) -> Path:
+        """Return the compatibility native runtime build directory."""
+
+        return self.managed_root / "native-build"
+
+    @property
+    def system_generated_root(self) -> Path:
+        """Return generated compatibility System manifests."""
+
+        return self.managed_root / "system-generated"
+
+    @property
     def context_file(self) -> Path:
         """Return the active workspace-context state file."""
 

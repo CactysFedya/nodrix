@@ -19,6 +19,8 @@ from typing import Any, Callable
 
 import yaml
 
+from .storage_layout import StorageLayout
+
 from .workspace import PROJECT_FILE, find_workspace
 
 
@@ -485,7 +487,12 @@ def compile_project_build_workflow(
         },
         "steps": steps,
     }
-    output = project_root / ".nodrix" / "generated" / "build.workflow.yaml"
+    output = (
+        StorageLayout(
+            project_root
+        ).generated_root
+        / "build.workflow.yaml"
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     rendered = yaml.safe_dump(workflow, sort_keys=False)
     if not output.is_file() or output.read_text(encoding="utf-8") != rendered:
