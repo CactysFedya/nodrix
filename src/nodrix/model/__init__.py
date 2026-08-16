@@ -1,6 +1,7 @@
 """Canonical cross-domain object model for Nodrix."""
 
 from .data import ArtifactRecord, DatasetRecord
+from .definitions import DefinitionRecord
 from .executions import ExecutionRecord, ExecutionState
 from .history import (
     execution_record_ref,
@@ -80,6 +81,7 @@ __all__ = [
     "DERIVED_FROM",
     "DIAGNOSE",
     "DatasetRecord",
+    "DefinitionRecord",
     "EXECUTED_AS",
     "EXPORT",
     "EntityRef",
