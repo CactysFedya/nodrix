@@ -1,6 +1,7 @@
 """Canonical public SDK frontend and backend-neutral definition layer."""
 
 from ..model import DefinitionRecord, EntityRef, RevisionRef
+from .custom_definition import CustomDefinition
 from .decorators import Context, message, node, resource
 from .definitions import (
     CallableDefinition,
@@ -27,6 +28,7 @@ __all__ = [
     "CallableDefinition",
     "ComponentSpec",
     "Context",
+    "CustomDefinition",
     "DependencyDefinition",
     "DependencySpec",
     "DefinitionRecord",
