@@ -51,7 +51,7 @@ SKELETON_FILES: dict[str, str] = {
         '''
     ).lstrip(),
     "requirements.txt": "plyctl==2.3.0b1\n",
-    ".gitignore": ".nodrix/\n/outputs/*\n!/outputs/.gitkeep\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
+    ".gitignore": ".nodrix/\n/datasets/*\n!/datasets/.gitkeep\n/artifacts/*\n!/artifacts/.gitkeep\n/outputs/\n__pycache__/\n*.py[cod]\nbuild/\n*.so\n*.dylib\n.venv/\n",
     "pipeline.yaml": dedent(
         '''
         apiVersion: plyctl.dev/v2
@@ -77,7 +77,8 @@ SKELETON_FILES: dict[str, str] = {
     "types/README.md": "# Custom types\n\nAdd schemas here and run `plyctl type build`.\n",
     "models/.gitkeep": "",
     "data/.gitkeep": "",
-    "outputs/.gitkeep": "",
+    "datasets/.gitkeep": "",
+    "artifacts/.gitkeep": "",
     "tests/.gitkeep": "",
     "scripts/.gitkeep": "",
     "docs/README.md": "# Project documentation\n",

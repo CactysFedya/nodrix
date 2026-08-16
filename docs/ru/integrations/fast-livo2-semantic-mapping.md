@@ -68,3 +68,16 @@ Reference project может содержать calibration, ROS bringup package
 thresholds и hardware profiles. Они не являются Core defaults. Generic spatial
 и semantic contracts должны стать версированными provider contracts до
 объявления интеграции production-qualified.
+
+## Семантика канонического хранения
+
+Пути `artifacts/maps/metric/latest.ply`,
+`artifacts/maps/semantic/objects.sqlite` и
+`artifacts/maps/semantic/objects.json` являются изменяемыми
+представлениями/snapshot-файлами предметной области. Они не являются
+идентичностью неизменяемой канонической ревизии Artifact.
+
+Когда такой snapshot сохраняется как каноническая ревизия Nodrix Artifact,
+его содержимое отдельно материализуется согласно Canonical Storage Standard
+в неизменяемый revision layout внутри `artifacts/`. Поэтому обновление
+`latest.ply` не перезаписывает и не изменяет уже материализованные ревизии.

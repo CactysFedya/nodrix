@@ -76,3 +76,15 @@ The reference project may contain calibration, ROS bringup packages,
 thresholds, and hardware profiles. None of these are Core defaults. Generic
 spatial and semantic contracts must be versioned provider contracts before
 this example can be called production-qualified.
+
+## Canonical storage semantics
+
+The paths `artifacts/maps/metric/latest.ply`,
+`artifacts/maps/semantic/objects.sqlite`, and
+`artifacts/maps/semantic/objects.json` are domain-facing mutable snapshots.
+They are not canonical immutable Artifact revision identity.
+
+When a snapshot is preserved as a canonical Nodrix Artifact revision, its
+content is materialized independently through the Canonical Storage Standard
+under the immutable revision layout in `artifacts/`. Updating `latest.ply`
+therefore does not overwrite or change previously materialized revisions.

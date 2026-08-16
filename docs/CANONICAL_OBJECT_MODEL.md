@@ -243,7 +243,7 @@ revision:
   nodrix://dataset/project/livox-session@sha256:<digest>
 
 
-uri:
+example physical uri:
   datasets/livox/session.ndrx
 
 Changing the physical URI does not change logical identity or content revision.
@@ -272,7 +272,7 @@ revision:
   nodrix://artifact/project/global-map@sha256:<digest>
 
 
-uri:
+example physical uri:
   artifacts/maps/map.ply
 
 The existing System v1 Artifact model is an expected-output declaration.
@@ -499,3 +499,18 @@ test, benchmark, profile, diagnostics, calibration, and export to the same:
 Operation → Plan → Execution → Run
 
 without changing the fundamental canonical vocabulary defined here.
+
+## Canonical local materialized storage
+
+The URI stored by a `DatasetRecord` or `ArtifactRecord` is a physical location, not canonical identity.
+
+Examples such as `datasets/livox/session.ndrx` and `artifacts/maps/map.ply` may represent user-managed, remote, compatibility, or domain-facing locations.
+
+When Nodrix owns local canonical materialization, immutable revisions use the layout defined by `CANONICAL_STORAGE_STANDARD.md` beneath `datasets/` or `artifacts/`.
+
+Therefore:
+
+- `EntityRef` identifies the logical entity;
+- `RevisionRef` identifies immutable content;
+- the storage URI only locates that materialization;
+- moving or replacing a mutable alias does not redefine identity.

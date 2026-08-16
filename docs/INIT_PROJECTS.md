@@ -17,7 +17,8 @@ my_project/
 ├── types/
 ├── models/
 ├── data/
-├── outputs/
+├── datasets/             # canonical materialized Dataset storage
+├── artifacts/            # canonical materialized Artifact storage
 ├── tests/
 ├── native/
 ├── scripts/
@@ -61,3 +62,9 @@ nodrix init device_demo --template device
 ```
 
 Creates a process-isolated source that writes into executor-owned shared output buffers. Use `nodrix inspect --memory` and `nodrix inspect --live` to verify zero output copies.
+
+## Canonical materialized storage
+
+`datasets/` and `artifacts/` are the canonical project roots for materialized immutable Dataset and Artifact revisions.
+
+Existing projects may still contain `outputs/`. That root remains available for legacy or explicitly user-managed compatibility data, but new project scaffolds do not create it as canonical storage.

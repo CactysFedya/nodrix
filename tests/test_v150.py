@@ -56,8 +56,11 @@ def test_v150_template_is_multirate_hardware_first_and_self_contained(tmp_path: 
     assert not (project / "native").exists()
     assert (project / "blocks/outputs/h264-software.yaml").is_file()
     project_gitignore = (project / ".gitignore").read_text(encoding="utf-8")
-    assert "/outputs/*" in project_gitignore
-    assert "!/outputs/.gitkeep" in project_gitignore
+    assert "/datasets/*" in project_gitignore
+    assert "!/datasets/.gitkeep" in project_gitignore
+    assert "/artifacts/*" in project_gitignore
+    assert "!/artifacts/.gitkeep" in project_gitignore
+    assert "/outputs/" in project_gitignore
 
 
 def test_realtime_tracker_predicts_every_frame_and_replays_delayed_measurement() -> None:

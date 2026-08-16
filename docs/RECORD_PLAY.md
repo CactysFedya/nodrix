@@ -102,3 +102,11 @@ source:
 
 The source output is `core.any`, so the original message type remains attached
 to every message and is validated by downstream ports.
+
+## Canonical Dataset storage
+
+A path such as `outputs/experiment.ndrx` is an explicit user-selected compatibility output path.
+
+Writing a recording there does not by itself create a canonical `DatasetRecord` or immutable `RevisionRef`.
+
+When a finalized recording must participate in canonical Dataset identity, provenance and retention, it is materialized separately through the Canonical Storage Standard.
