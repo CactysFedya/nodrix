@@ -169,3 +169,10 @@ def test_same_entity_can_be_subject_of_different_operations() -> None:
 
     assert run.subject == benchmark.subject
     assert run.kind != benchmark.kind
+
+
+def test_prepare_is_canonical_builtin_operation_kind() -> None:
+    from nodrix.model import PREPARE
+
+    assert PREPARE == OperationKind("prepare")
+    assert PREPARE.value == "prepare"

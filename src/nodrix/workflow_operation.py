@@ -20,8 +20,17 @@ from pathlib import Path
 from typing import Any
 
 from .model import (
+    BENCHMARK,
     BUILD,
+    CALIBRATE,
+    CLEANUP,
+    DIAGNOSE,
+    EXPORT,
+    PACKAGE,
+    PREPARE,
+    PROFILE,
     TEST,
+    VALIDATE,
     ExecutionRecord,
     Operation,
     OperationKind,
@@ -44,6 +53,20 @@ from .workflow_planning import (
 
 
 WORKFLOW_RUN_OPERATION = OperationKind("workflow.run")
+
+WORKFLOW_OPERATION_KINDS = {
+    "prepare": PREPARE,
+    "build": BUILD,
+    "test": TEST,
+    "validate": VALIDATE,
+    "profile": PROFILE,
+    "benchmark": BENCHMARK,
+    "diagnose": DIAGNOSE,
+    "calibrate": CALIBRATE,
+    "export": EXPORT,
+    "package": PACKAGE,
+    "cleanup": CLEANUP,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,16 +154,35 @@ class WorkflowOperationResult:
         }
 
 
-def _operation_kind(
+def resolve_workflow_operation_kind(
     workflow: str,
+    *,
+    requested: OperationKind | str | None = None,
 ) -> OperationKind:
-    if workflow == "build":
-        return BUILD
+    """Resolve the canonical OperationKind implemented by one workflow.
 
-    if workflow == "test":
-        return TEST
+    Conventional engineering workflow names map to their canonical built-in
+    operation kinds.  Unknown workflow names remain valid and use the generic
+    ``workflow.run`` kind.
 
-    return WORKFLOW_RUN_OPERATION
+    Callers may explicitly bind any workflow to another built-in or
+    user-defined OperationKind through ``requested``.
+    """
+
+    if not isinstance(workflow, str):
+        raise TypeError("workflow must be a string")
+
+    normalized = workflow.strip().lower()
+    if not normalized:
+        raise ValueError("workflow must be non-empty")
+
+    if requested is not None:
+        return OperationKind.parse(requested)
+
+    return WORKFLOW_OPERATION_KINDS.get(
+        normalized,
+        WORKFLOW_RUN_OPERATION,
+    )
 
 
 def execute_workflow_operation(
@@ -150,6 +192,7 @@ def execute_workflow_operation(
     environment_name: str | None = None,
     dry_run: bool = False,
     force: bool = False,
+    operation_kind: OperationKind | str | None = None,
     executor: WorkflowExecutor | None = None,
 ) -> WorkflowOperationResult:
     """Plan, execute and persist one workflow-backed canonical Operation."""
@@ -178,7 +221,10 @@ def execute_workflow_operation(
         parameters["environment"] = environment_name
 
     operation = Operation(
-        kind=_operation_kind(workflow),
+        kind=resolve_workflow_operation_kind(
+            workflow,
+            requested=operation_kind,
+        ),
         subject=entity,
         subject_revision=revision,
         parameters=parameters,

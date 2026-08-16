@@ -97,6 +97,7 @@ An action requested against an entity.
 
 Examples:
 
+prepare
 build
 test
 validate

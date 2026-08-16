@@ -58,6 +58,7 @@ class OperationKind:
         return cls(value)
 
 
+PREPARE = OperationKind("prepare")
 BUILD = OperationKind("build")
 TEST = OperationKind("test")
 VALIDATE = OperationKind("validate")

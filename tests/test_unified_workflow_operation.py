@@ -318,7 +318,7 @@ def test_prepare_cli_uses_canonical_workflow_history(
     )
 
     assert document["plan"]["kind"] == "workflow"
-    assert document["operation"]["kind"] == "workflow.run"
+    assert document["operation"]["kind"] == "prepare"
     assert (
         document["operation"]["parameters"]["workflow"]
         == "prepare"
@@ -330,3 +330,66 @@ def test_prepare_cli_uses_canonical_workflow_history(
         )
     )
     assert legacy_summaries == []
+
+
+def test_builtin_workflow_names_resolve_to_canonical_operations() -> None:
+    from nodrix.workflow_operation import (
+        resolve_workflow_operation_kind,
+    )
+
+    expected = {
+        "prepare": "prepare",
+        "build": "build",
+        "test": "test",
+        "validate": "validate",
+        "profile": "profile",
+        "benchmark": "benchmark",
+        "diagnose": "diagnose",
+        "calibrate": "calibrate",
+        "export": "export",
+        "package": "package",
+        "cleanup": "cleanup",
+    }
+
+    assert {
+        workflow: resolve_workflow_operation_kind(workflow).value
+        for workflow in expected
+    } == expected
+
+
+def test_unknown_workflow_resolves_to_generic_workflow_operation() -> None:
+    from nodrix.workflow_operation import (
+        WORKFLOW_RUN_OPERATION,
+        resolve_workflow_operation_kind,
+    )
+
+    assert (
+        resolve_workflow_operation_kind("deploy")
+        == WORKFLOW_RUN_OPERATION
+    )
+
+
+def test_workflow_operation_kind_can_be_explicitly_overridden() -> None:
+    from nodrix.workflow_operation import (
+        resolve_workflow_operation_kind,
+    )
+
+    resolved = resolve_workflow_operation_kind(
+        "flash",
+        requested="mycompany.flash-firmware",
+    )
+
+    assert resolved.value == "mycompany.flash-firmware"
+
+
+def test_explicit_operation_kind_overrides_builtin_binding() -> None:
+    from nodrix.workflow_operation import (
+        resolve_workflow_operation_kind,
+    )
+
+    resolved = resolve_workflow_operation_kind(
+        "build",
+        requested="vendor.cross-build",
+    )
+
+    assert resolved.value == "vendor.cross-build"
