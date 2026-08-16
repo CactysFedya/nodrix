@@ -41,8 +41,11 @@ from .plans import (
 from .provenance import (
     MaterializedRef,
     combine_provenance,
+    materialized_lineage_relations,
+    materialized_revision,
     run_io_relations,
     run_ref,
+    superseded_by,
 )
 from .references import (
     CanonicalRef,
@@ -116,6 +119,8 @@ __all__ = [
     "canonical_plan_id",
     "combine_provenance",
     "execution_record_ref",
+    "materialized_lineage_relations",
+    "materialized_revision",
     "parse_canonical_ref",
     "plan_record_ref",
     "record_run",
@@ -123,4 +128,5 @@ __all__ = [
     "run_lifecycle_relations",
     "run_record_ref",
     "run_ref",
+    "superseded_by",
 ]
