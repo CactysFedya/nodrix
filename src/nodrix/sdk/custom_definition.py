@@ -13,6 +13,8 @@ from ..custom_definition import (
 from ..model import (
     DefinitionRecord,
     EntityRef,
+    Operation,
+    OperationKind,
 )
 
 
@@ -112,6 +114,69 @@ class CustomDefinition:
             custom_definition_entity_ref(
                 self._document
             )
+        )
+
+    def operation(
+        self,
+        kind: (
+            str
+            | OperationKind
+        ),
+        *,
+        parameters: (
+            Mapping[str, Any]
+            | None
+        ) = None,
+        pin_revision: bool = True,
+    ) -> Operation:
+        """Author one canonical Operation over this Definition.
+
+        When ``pin_revision`` is true, the Operation targets the exact
+        immutable Definition revision currently represented by this authoring
+        object.
+
+        Set ``pin_revision=False`` when revision resolution should be deferred
+        to a future planner or definition resolver.
+
+        This method only authors intent.  It does not plan, execute, dispatch,
+        persist, or select an Executor.
+        """
+
+        if not isinstance(
+            pin_revision,
+            bool,
+        ):
+            raise TypeError(
+                "pin_revision must be a boolean"
+            )
+
+        if pin_revision:
+            record = (
+                custom_definition_record(
+                    self._document
+                )
+            )
+
+            subject = record.entity
+            revision = record.revision
+        else:
+            subject = (
+                custom_definition_entity_ref(
+                    self._document
+                )
+            )
+
+            revision = None
+
+        return Operation(
+            kind=kind,
+            subject=subject,
+            subject_revision=revision,
+            parameters=(
+                {}
+                if parameters is None
+                else parameters
+            ),
         )
 
     def definition_record(

@@ -1,6 +1,12 @@
 """Canonical public SDK frontend and backend-neutral definition layer."""
 
-from ..model import DefinitionRecord, EntityRef, RevisionRef
+from ..model import (
+    DefinitionRecord,
+    EntityRef,
+    Operation,
+    OperationKind,
+    RevisionRef,
+)
 from .custom_definition import CustomDefinition
 from .decorators import Context, message, node, resource
 from .definitions import (
@@ -36,6 +42,8 @@ __all__ = [
     "Input",
     "MessageDefinition",
     "NodeDefinition",
+    "Operation",
+    "OperationKind",
     "Outputs",
     "PACKAGE_NAMESPACE_OVERRIDE",
     "Param",
