@@ -3,11 +3,23 @@
 from ..model import (
     DefinitionRecord,
     EntityRef,
+    ExecutionRecord,
+    ExecutionState,
     Operation,
     OperationKind,
+    PlanKind,
+    PlanRecord,
     RevisionRef,
 )
+from ..executor_contract import PlanExecutor
+from ..extension_registry import ExtensionRegistry
+from ..planner_contract import (
+    DefinitionResolver,
+    OperationPlanner,
+    PlanningContext,
+)
 from .custom_definition import CustomDefinition
+from .extension import Extension
 from .decorators import Context, message, node, resource
 from .definitions import (
     CallableDefinition,
@@ -38,13 +50,23 @@ __all__ = [
     "DependencyDefinition",
     "DependencySpec",
     "DefinitionRecord",
+    "DefinitionResolver",
     "EntityRef",
+    "ExecutionRecord",
+    "ExecutionState",
+    "Extension",
+    "ExtensionRegistry",
     "Input",
     "MessageDefinition",
     "NodeDefinition",
     "Operation",
     "OperationKind",
+    "OperationPlanner",
     "Outputs",
+    "PlanExecutor",
+    "PlanKind",
+    "PlanRecord",
+    "PlanningContext",
     "PACKAGE_NAMESPACE_OVERRIDE",
     "Param",
     "ParameterDefinition",
