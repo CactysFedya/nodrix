@@ -56,6 +56,7 @@ class PlanKind:
 
 SYSTEM_EXECUTION = PlanKind("system-execution")
 WORKFLOW = PlanKind("workflow")
+BENCHMARK_PLAN = PlanKind("benchmark")
 
 
 def _plan_id(value: str) -> str:

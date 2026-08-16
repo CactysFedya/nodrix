@@ -27,6 +27,7 @@ from .operations import (
     OperationKind,
 )
 from .plans import (
+    BENCHMARK_PLAN,
     SYSTEM_EXECUTION,
     WORKFLOW,
     PlanKind,
@@ -63,6 +64,7 @@ from .runs import RunRecord
 __all__ = [
     "ArtifactRecord",
     "BENCHMARK",
+    "BENCHMARK_PLAN",
     "BUILD",
     "CALIBRATE",
     "CLEANUP",
