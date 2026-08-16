@@ -40,7 +40,12 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     return dict(value)
 
 
-def _atomic_yaml(path: Path, value: dict[str, Any]) -> None:
+def _atomic_text(
+    path: Path,
+    text: str,
+) -> None:
+    """Atomically write one user- or machine-facing text document."""
+
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(
         prefix=f".{path.name}.",
@@ -48,13 +53,41 @@ def _atomic_yaml(path: Path, value: dict[str, Any]) -> None:
         dir=path.parent,
         text=True,
     )
+
     try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            yaml.safe_dump(value, stream, sort_keys=False)
-        os.replace(temporary, path)
+        with os.fdopen(
+            handle,
+            "w",
+            encoding="utf-8",
+        ) as stream:
+            stream.write(text)
+
+        os.replace(
+            temporary,
+            path,
+        )
     except Exception:
-        Path(temporary).unlink(missing_ok=True)
+        Path(temporary).unlink(
+            missing_ok=True
+        )
         raise
+
+
+def _atomic_yaml(
+    path: Path,
+    value: dict[str, Any],
+) -> None:
+    """Atomically write clean machine-oriented YAML."""
+
+    rendered = yaml.safe_dump(
+        value,
+        sort_keys=False,
+    )
+
+    _atomic_text(
+        path,
+        rendered,
+    )
 
 
 def _project_root(value: str | Path | None = None) -> Path:
@@ -165,7 +198,7 @@ def _system_document(name: str) -> dict[str, Any]:
 def _workflow_document(name: str, template: str | None) -> dict[str, Any]:
     selected = (template or "empty").lower()
     commands: dict[str, str] = {
-        "empty": f'echo "Configure the {name} workflow in workflows/{name}.yaml"',
+        "empty": f'echo "Hello from Nodrix workflow {name}"',
         "python-build": "python3 -m build",
         "python-test": "python3 -m pytest -q",
         "python-install": "python3 -m pip install -e . --no-build-isolation",
@@ -273,6 +306,115 @@ def _resource_document(
     raise ValueError(f"Unknown resource kind {kind!r}; choose: {available}")
 
 
+def _workflow_scaffold(
+    name: str,
+    document: dict[str, Any],
+) -> str:
+    """Render a human-facing workflow source file.
+
+    Comments teach the public model but are intentionally not part of the
+    canonical workflow definition.
+    """
+
+    steps = list(
+        document.get("steps") or []
+    )
+
+    first = (
+        dict(steps[0])
+        if steps
+        and isinstance(steps[0], dict)
+        else {}
+    )
+
+    step_id = str(
+        first.get("id")
+        or "hello"
+    )
+
+    command = str(
+        first.get("run")
+        or "echo Hello"
+    )
+
+    canonical = yaml.safe_dump(
+        document,
+        sort_keys=False,
+    ).rstrip()
+
+    header = f"""# Nodrix Workflow
+#
+# What:
+#   A Workflow is a finite engineering operation made of command steps.
+#   It finishes with success or failure.
+#
+# Run:
+#   plyctl workflow run {name}
+#
+# Python SDK:
+#   from nodrix.sdk import Workflow
+#   workflow = Workflow({name!r})
+#   workflow.run({step_id!r}, {command!r})
+#
+# The YAML below is the canonical nodrix.workflow/v1 definition.
+#
+"""
+
+    footer = """
+#
+# Optional step fields:
+#
+#   depends_on: [prepare]       # Run after earlier steps.
+#   cwd: .                      # Working directory inside the project.
+#   timeout_seconds: 60         # Stop a step that runs too long.
+#   continue_on_error: true     # Continue after this step fails.
+#
+#   environment:                # Environment values for this step.
+#     MODE: debug
+#
+#   when:                       # Run only when conditions match.
+#     system: Linux
+#
+#   cache:                      # Reuse unchanged successful work.
+#     inputs: [src]
+#     outputs: [build/app]
+#
+#   recipe: example.recipe      # Optional authoring/source hint.
+#
+# Start with id + run. Add optional fields only when you need them.
+"""
+
+    return (
+        header
+        + canonical
+        + "\n"
+        + footer
+    )
+
+
+def _render_resource_scaffold(
+    kind: str,
+    name: str,
+    document: dict[str, Any],
+) -> str:
+    """Render a resource created for direct user editing.
+
+    Canonical documents remain plain data. Human-facing resources may add
+    comments that explain the model and its SDK/CLI entry points.
+    """
+
+    if kind == "workflow":
+        return _workflow_scaffold(
+            name,
+            document,
+        )
+
+    return yaml.safe_dump(
+        document,
+        sort_keys=False,
+    )
+
+
 def add_project_resource(
     kind: str,
     name: str,
@@ -320,8 +462,23 @@ def add_project_resource(
             "--default is supported for system, pipeline, environment and profile"
         )
 
-    document = _resource_document(normalized_kind, normalized_name, template)
-    _atomic_yaml(target, document)
+    document = _resource_document(
+        normalized_kind,
+        normalized_name,
+        template,
+    )
+
+    rendered = _render_resource_scaffold(
+        normalized_kind,
+        normalized_name,
+        document,
+    )
+
+    _atomic_text(
+        target,
+        rendered,
+    )
+
     entries[normalized_name] = relative.as_posix()
     config[section] = entries
 
