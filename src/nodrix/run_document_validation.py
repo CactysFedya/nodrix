@@ -19,8 +19,12 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .model import (
+    CONSUMES,
+    DERIVED_FROM,
     EXECUTED_AS,
+    PRODUCES,
     RECORDED_AS,
+    SUPERSEDES,
     EntityRef,
     ExecutionState,
     OperationKind,
@@ -398,6 +402,94 @@ def _validate_lifecycle_relation_consistency(
             )
 
 
+def _validate_materialized_provenance_consistency(
+    graph: RelationGraph,
+    *,
+    run_ref: RecordRef,
+) -> None:
+    """Validate canonical materialized provenance relation semantics."""
+
+    for relation in graph.relations:
+        if relation.kind in (
+            CONSUMES,
+            PRODUCES,
+        ):
+            if relation.source != run_ref:
+                raise _error(
+                    "relations",
+                    f"{relation.kind_name} relation "
+                    "must originate from this run",
+                )
+
+            if not isinstance(
+                relation.target,
+                RevisionRef,
+            ):
+                raise _error(
+                    "relations",
+                    f"{relation.kind_name} relation "
+                    "must target a RevisionRef",
+                )
+
+        elif relation.kind == DERIVED_FROM:
+            if not isinstance(
+                relation.source,
+                RevisionRef,
+            ) or not isinstance(
+                relation.target,
+                RevisionRef,
+            ):
+                raise _error(
+                    "relations",
+                    "derived_from must connect "
+                    "RevisionRef objects",
+                )
+
+            if (
+                relation.source
+                == relation.target
+            ):
+                raise _error(
+                    "relations",
+                    "a revision cannot be "
+                    "derived from itself",
+                )
+
+        elif relation.kind == SUPERSEDES:
+            if not isinstance(
+                relation.source,
+                RevisionRef,
+            ) or not isinstance(
+                relation.target,
+                RevisionRef,
+            ):
+                raise _error(
+                    "relations",
+                    "supersedes must connect "
+                    "RevisionRef objects",
+                )
+
+            if (
+                relation.source
+                == relation.target
+            ):
+                raise _error(
+                    "relations",
+                    "a revision cannot "
+                    "supersede itself",
+                )
+
+            if (
+                relation.source.entity
+                != relation.target.entity
+            ):
+                raise _error(
+                    "relations",
+                    "supersedes must connect revisions "
+                    "of the same logical entity",
+                )
+
+
 def validate_run_document(
     document: Mapping[str, Any],
 ) -> ValidatedRunDocument:
@@ -715,6 +807,11 @@ def validate_run_document(
         relation_graph,
         plan_ref=plan_ref,
         execution_ref=execution_ref,
+        run_ref=run_ref,
+    )
+
+    _validate_materialized_provenance_consistency(
+        relation_graph,
         run_ref=run_ref,
     )
 
