@@ -1,12 +1,12 @@
 """Durable canonical history for terminal executions.
 
-Execution domains own execution semantics.  This module owns the common
+Execution domains own execution semantics. This module owns the common
 persistence boundary shared by workflows, systems, benchmarks and future
 executors:
 
 ExecutionRecord
     -> RunRecord
-    -> lifecycle relations
+    -> lifecycle + materialized provenance
     -> nodrix.run/v1
 
 No domain-specific PlanKind or executor identity is required here.
@@ -48,6 +48,7 @@ def persist_execution(
     run_id: str | None = None,
     inputs: Iterable[MaterializedRef] = (),
     outputs: Iterable[MaterializedRef] = (),
+    additional_provenance: RelationGraph | None = None,
     summary: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> PersistedRun:
@@ -73,6 +74,18 @@ def persist_execution(
             "execution history requires execution.finished_at"
         )
 
+    if (
+        additional_provenance is not None
+        and not isinstance(
+            additional_provenance,
+            RelationGraph,
+        )
+    ):
+        raise TypeError(
+            "additional_provenance must be "
+            "a RelationGraph or None"
+        )
+
     canonical_run_id = (
         execution.execution_id
         if run_id is None
@@ -86,13 +99,26 @@ def persist_execution(
         metadata=metadata,
     )
 
+    lifecycle = run_lifecycle_relations(
+        run
+    )
+
+    io = run_io_relations(
+        run,
+        inputs=inputs,
+        outputs=outputs,
+    )
+
+    extra = (
+        RelationGraph()
+        if additional_provenance is None
+        else additional_provenance
+    )
+
     provenance = combine_provenance(
-        run_lifecycle_relations(run),
-        run_io_relations(
-            run,
-            inputs=inputs,
-            outputs=outputs,
-        ),
+        lifecycle,
+        io,
+        extra,
     )
 
     path = write_run_document(
