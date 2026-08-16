@@ -871,9 +871,4 @@ def run_workflow(
         finished_at=finished.isoformat(),
         steps=tuple(step_results),
     )
-    summary = run_directory / "summary.json"
-    summary.write_text(
-        json.dumps(result.as_dict(), indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
     return result

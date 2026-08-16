@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import yaml
@@ -67,7 +66,7 @@ def test_raspberry_pi_environment_template(tmp_path: Path) -> None:
     assert document["environment"]["CMAKE_BUILD_PARALLEL_LEVEL"] == "4"
 
 
-def test_workflow_runs_and_writes_summary(tmp_path: Path) -> None:
+def test_workflow_runs_and_keeps_step_logs(tmp_path: Path) -> None:
     root = tmp_path / "robot"
     create_progressive_project(root)
     result = add_project_resource("workflow", "build", root=root)
@@ -101,9 +100,16 @@ def test_workflow_runs_and_writes_summary(tmp_path: Path) -> None:
     assert run.succeeded
     assert (root / "built.txt").read_text(encoding="utf-8") == "ok"
     assert [step.status for step in run.steps] == ["succeeded", "skipped"]
-    summary = Path(run.run_directory) / "summary.json"
-    data = json.loads(summary.read_text(encoding="utf-8"))
-    assert data["status"] == "succeeded"
+
+    operation_directory = Path(run.run_directory)
+
+    assert operation_directory.is_dir()
+    assert not (operation_directory / "summary.json").exists()
+
+    logs = sorted(
+        (operation_directory / "logs").glob("*.log")
+    )
+    assert len(logs) == 2
 
 
 def test_failed_workflow_stops_at_first_failed_step(tmp_path: Path) -> None:

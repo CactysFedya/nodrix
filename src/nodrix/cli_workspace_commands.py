@@ -224,8 +224,8 @@ def prepare_command(
     from .workflow_execution import (
         check_project_environment,
         has_workflow,
-        run_workflow,
     )
+    from .workflow_operation import execute_workflow_operation
 
     root = find_workspace()
     if root is not None:
@@ -256,19 +256,30 @@ def prepare_command(
         if failed:
             raise typer.Exit(1)
         if has_workflow(root, "prepare"):
-            result = run_workflow(
+            outcome = execute_workflow_operation(
                 "prepare",
                 root=root,
                 environment_name=environment,
                 dry_run=dry_run,
                 force=rebuild,
             )
-            for step in result.steps:
+            result = outcome.legacy_result()
+
+            for step in result["steps"]:
                 console.print(
-                    f"{step.status.upper():<10} {step.step_id:<24} {step.log_path}"
+                    f"{str(step.get('status', '')).upper():<10} "
+                    f"{str(step.get('step_id', '-')):<24} "
+                    f"{str(step.get('log_path', '-'))}"
                 )
-            console.print(f"Artifacts: {result.run_directory}")
-            if not result.succeeded and not dry_run:
+
+            console.print(
+                f"Artifacts: {result.get('run_directory') or '-'}"
+            )
+            console.print(
+                f"History: {outcome.history.path}"
+            )
+
+            if not outcome.successful:
                 raise typer.Exit(1)
         console.print(f"[green]READY[/green] {root.name}")
         console.print(f"Project: {root}")

@@ -239,3 +239,94 @@ def test_build_cli_preserves_result_shape_and_writes_canonical_history(
 
     assert document["operation"]["kind"] == "build"
     assert document["plan"]["kind"] == "workflow"
+
+
+def test_workflow_operation_keeps_logs_without_legacy_summary(
+    tmp_path: Path,
+) -> None:
+    _build_project(
+        tmp_path,
+        command="echo built",
+    )
+
+    outcome = execute_workflow_operation(
+        "build",
+        root=tmp_path,
+    )
+
+    operation_directory = Path(
+        str(outcome.execution.details["run_directory"])
+    )
+
+    assert operation_directory.is_dir()
+    assert not (
+        operation_directory / "summary.json"
+    ).exists()
+
+    logs = list(
+        (operation_directory / "logs").glob("*.log")
+    )
+    assert logs
+
+    assert outcome.history.path.is_file()
+
+
+def test_prepare_cli_uses_canonical_workflow_history(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    create_progressive_project(tmp_path)
+
+    workflow = add_project_resource(
+        "workflow",
+        "prepare",
+        root=tmp_path,
+    )
+
+    workflow.path.write_text(
+        "schema: nodrix.workflow/v1\n"
+        "name: prepare\n"
+        "steps:\n"
+        "  - id: prepare\n"
+        "    run: echo prepared\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["prepare"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "READY" in result.output
+    assert "History:" in result.output
+
+    canonical_runs = list(
+        (tmp_path / ".nodrix" / "runs").glob(
+            "*/run.json"
+        )
+    )
+
+    assert len(canonical_runs) == 1
+
+    document = json.loads(
+        canonical_runs[0].read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert document["plan"]["kind"] == "workflow"
+    assert document["operation"]["kind"] == "workflow.run"
+    assert (
+        document["operation"]["parameters"]["workflow"]
+        == "prepare"
+    )
+
+    legacy_summaries = list(
+        (tmp_path / ".nodrix" / "operations").glob(
+            "*/summary.json"
+        )
+    )
+    assert legacy_summaries == []

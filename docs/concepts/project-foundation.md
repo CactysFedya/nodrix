@@ -46,8 +46,11 @@ steps:
       cmake --build build --parallel
 ```
 
-Each execution writes immutable evidence under
-`.nodrix/operations/<timestamp>-<workflow>/`: per-step logs and `summary.json`.
+Each workflow execution keeps per-step diagnostic logs under
+`.nodrix/operations/<timestamp>-<workflow>/logs/`.
+
+Canonical execution history is stored separately as immutable
+`nodrix.run/v1` evidence under `.nodrix/runs/<run-id>/run.json`.
 
 ```bash
 plyctl prepare --environment raspberry-pi5
