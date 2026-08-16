@@ -115,4 +115,4 @@ releases/index
 contributing/index
 ```
 
-- [Русская документация](ru/index.md)
+- <a href="../../ru/latest/">Русская документация</a>

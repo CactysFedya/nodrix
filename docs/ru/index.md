@@ -115,4 +115,4 @@ releases/index
 contributing/index
 ```
 
-- [English documentation](../index.md)
+- <a href="../../en/latest/">English documentation</a>

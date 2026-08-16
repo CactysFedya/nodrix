@@ -23,6 +23,43 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def is_canonical_run_report(report: Mapping[str, Any]) -> bool:
+    """Return whether a run report uses the canonical Run document format."""
+
+    return (
+        report.get("schema") == "nodrix.run/v1"
+        and report.get("kind") == "Run"
+    )
+
+
+def _canonical_subject(
+    report: Mapping[str, Any],
+) -> str | None:
+    if not is_canonical_run_report(report):
+        return None
+
+    subject = report.get("subject")
+    if not isinstance(subject, Mapping):
+        return None
+
+    entity = subject.get("entity")
+    return entity if isinstance(entity, str) else None
+
+
+def _canonical_operation(
+    report: Mapping[str, Any],
+) -> str | None:
+    if not is_canonical_run_report(report):
+        return None
+
+    operation = report.get("operation")
+    if not isinstance(operation, Mapping):
+        return None
+
+    kind = operation.get("kind")
+    return kind if isinstance(kind, str) else None
+
+
 def run_root(project: str | Path = ".") -> Path:
     return Path(project).expanduser().resolve() / ".nodrix" / "runs"
 
@@ -60,6 +97,10 @@ def list_runs(project: str | Path = ".") -> list[dict[str, Any]]:
                 "status": report.get("status", "starting"),
                 "duration_seconds": report.get("duration_seconds"),
                 "updated_ns": updated_ns,
+                "schema": report.get("schema"),
+                "canonical": is_canonical_run_report(report),
+                "subject": _canonical_subject(report),
+                "operation": _canonical_operation(report),
             }
         )
 

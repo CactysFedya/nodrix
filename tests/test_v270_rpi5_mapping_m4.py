@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
+import pytest
 import yaml
 from typer.testing import CliRunner
 
@@ -33,10 +35,18 @@ ROOT = Path(__file__).resolve().parents[1]
 runner = CliRunner()
 
 
+def _requires_repo_path(relative: str):
+    return pytest.mark.skipif(
+        not (ROOT / relative).exists(),
+        reason=f"repository fixture is not shipped in sdist: {relative}",
+    )
+
+
 def _project() -> dict:
     return yaml.safe_load((ROOT / "nodrix.yaml").read_text(encoding="utf-8"))
 
 
+@_requires_repo_path("nodrix.yaml")
 def test_root_project_registers_rpi5_mapping_dogfood() -> None:
     project = _project()
     assert project["defaults"]["system"] == "rpi5-mapping"
@@ -60,6 +70,7 @@ def test_root_project_registers_rpi5_mapping_dogfood() -> None:
     ] == "1"
 
 
+@_requires_repo_path("systems/rpi5-mapping.yaml")
 def test_reference_system_is_structurally_valid_and_maps_registered_cloud() -> None:
     system = load_system(ROOT / "systems/rpi5-mapping.yaml")
     report = validate_system(system)
@@ -86,6 +97,11 @@ def test_reference_system_is_structurally_valid_and_maps_registered_cloud() -> N
     assert system.artifacts[0].path == "artifacts/maps/metric/latest.ply"
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="RPi5 build recipe setup requires a POSIX shell",
+)
+@_requires_repo_path("nodrix.yaml")
 def test_build_recipe_compiler_exposes_real_dependency_chain() -> None:
     compiled = compile_project_build_workflow(ROOT, project=_project())
     assert compiled is not None
@@ -124,6 +140,11 @@ def test_new_system_session_binding_lowers_without_legacy_extension(
     assert report.valid, report.diagnostics
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="RPi5 ROS environment expansion is POSIX-targeted",
+)
+@_requires_repo_path("packages/nodrix-ros2/src")
 def test_ros_session_expands_project_root_environment(
     tmp_path: Path,
     monkeypatch,
@@ -224,6 +245,7 @@ def test_nested_registered_system_executes_from_workspace_root(
     assert _FakeBackend.instances[-1].kwargs["working_directory"] == project.resolve()
 
 
+@_requires_repo_path("environments/rpi5-jazzy.yaml")
 def test_rpi5_environment_uses_supported_check_schema() -> None:
     environment = yaml.safe_load(
         (ROOT / "environments/rpi5-jazzy.yaml").read_text(encoding="utf-8")
