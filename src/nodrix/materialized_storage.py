@@ -30,7 +30,7 @@ from pathlib import Path
 import shutil
 import stat
 import tempfile
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 from .model import (
     ArtifactRecord,
@@ -44,6 +44,23 @@ from .storage_layout import StorageLayout
 _ENTITY_PREFIX_LIMIT = 48
 _TREE_DIGEST_SCHEMA = b"nodrix.materialized-tree/v1\n"
 _PAYLOAD_NAME = "payload"
+_DESCRIPTOR_NAME = "materialization.json"
+_MATERIALIZATION_SCHEMA = "nodrix.materialization/v1"
+
+
+@dataclass(frozen=True, slots=True)
+class MaterializedLocation:
+    """One discovered local immutable materialization.
+
+    This is a storage view, not a DatasetRecord or ArtifactRecord.  It exposes
+    only intrinsic physical facts needed to locate a canonical RevisionRef.
+    """
+
+    scope: Literal["dataset", "artifact"]
+    revision: RevisionRef
+    uri: str
+    payload_type: Literal["file", "directory"]
+    size_bytes: int
 
 
 class MaterializationError(RuntimeError):
@@ -90,10 +107,8 @@ def _require_entity(
 
 
 def _entity_storage_key(
-    revision: RevisionRef,
+    entity: EntityRef,
 ) -> str:
-    entity = revision.entity
-
     digest = hashlib.sha256(
         entity.canonical.encode(
             "utf-8"
@@ -144,7 +159,7 @@ def _revision_directory(
         root
         / resolved.entity.kind
         / _entity_storage_key(
-            resolved
+            resolved.entity
         )
         / "revisions"
         / _revision_storage_key(
@@ -401,6 +416,249 @@ def _payload_uri(
     ).as_posix()
 
 
+def _descriptor_document(
+    location: MaterializedLocation,
+) -> dict[str, Any]:
+    return {
+        "schema": _MATERIALIZATION_SCHEMA,
+        "scope": location.scope,
+        "entity": location.revision.entity.canonical,
+        "revision": location.revision.canonical,
+        "uri": location.uri,
+        "payload_type": location.payload_type,
+        "size_bytes": location.size_bytes,
+    }
+
+
+def _write_descriptor(
+    path: Path,
+    location: MaterializedLocation,
+    *,
+    atomic: bool,
+) -> None:
+    rendered = (
+        json.dumps(
+            _descriptor_document(
+                location
+            ),
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n"
+    )
+
+    if not atomic:
+        path.write_text(
+            rendered,
+            encoding="utf-8",
+        )
+        return
+
+    temporary = (
+        path.parent
+        / (
+            f".{path.name}"
+            f".{os.getpid()}.tmp"
+        )
+    )
+
+    try:
+        temporary.write_text(
+            rendered,
+            encoding="utf-8",
+        )
+
+        os.replace(
+            temporary,
+            path,
+        )
+
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _parse_descriptor(
+    path: Path,
+) -> MaterializedLocation:
+    try:
+        raw = json.loads(
+            path.read_text(
+                encoding="utf-8",
+            )
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise MaterializationConflictError(
+            f"invalid materialization descriptor: {path}"
+        ) from exc
+
+    if not isinstance(
+        raw,
+        dict,
+    ):
+        raise MaterializationConflictError(
+            f"materialization descriptor must be a mapping: {path}"
+        )
+
+    if raw.get("schema") != _MATERIALIZATION_SCHEMA:
+        raise MaterializationConflictError(
+            f"unsupported materialization descriptor schema: {path}"
+        )
+
+    scope = raw.get(
+        "scope"
+    )
+
+    if scope not in {
+        "dataset",
+        "artifact",
+    }:
+        raise MaterializationConflictError(
+            f"invalid materialization scope: {path}"
+        )
+
+    try:
+        entity = EntityRef.parse(
+            raw["entity"]
+        )
+
+        revision = RevisionRef.parse(
+            raw["revision"]
+        )
+
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise MaterializationConflictError(
+            f"invalid materialization identity: {path}"
+        ) from exc
+
+    if revision.entity != entity:
+        raise MaterializationConflictError(
+            "materialization descriptor entity/revision mismatch: "
+            f"{path}"
+        )
+
+    uri = raw.get(
+        "uri"
+    )
+
+    if not isinstance(
+        uri,
+        str,
+    ) or not uri:
+        raise MaterializationConflictError(
+            f"invalid materialization uri: {path}"
+        )
+
+    payload_type = raw.get(
+        "payload_type"
+    )
+
+    if payload_type not in {
+        "file",
+        "directory",
+    }:
+        raise MaterializationConflictError(
+            f"invalid materialization payload type: {path}"
+        )
+
+    size_bytes = raw.get(
+        "size_bytes"
+    )
+
+    if (
+        isinstance(
+            size_bytes,
+            bool,
+        )
+        or not isinstance(
+            size_bytes,
+            int,
+        )
+        or size_bytes < 0
+    ):
+        raise MaterializationConflictError(
+            f"invalid materialization size: {path}"
+        )
+
+    return MaterializedLocation(
+        scope=scope,
+        revision=revision,
+        uri=uri,
+        payload_type=payload_type,
+        size_bytes=size_bytes,
+    )
+
+
+def _location_for(
+    *,
+    dataset: bool,
+    layout: StorageLayout,
+    revision: RevisionRef,
+    payload: Path,
+    payload_info: _PayloadInfo,
+) -> MaterializedLocation:
+    return MaterializedLocation(
+        scope=(
+            "dataset"
+            if dataset
+            else "artifact"
+        ),
+        revision=revision,
+        uri=_payload_uri(
+            layout,
+            payload,
+        ),
+        payload_type=payload_info.payload_type,
+        size_bytes=payload_info.size_bytes,
+    )
+
+
+def _validate_descriptor_location(
+    *,
+    layout: StorageLayout,
+    revision_directory: Path,
+    expected: MaterializedLocation,
+) -> MaterializedLocation:
+    descriptor_path = (
+        revision_directory
+        / _DESCRIPTOR_NAME
+    )
+
+    actual = _parse_descriptor(
+        descriptor_path
+    )
+
+    if actual != expected:
+        raise MaterializationConflictError(
+            "materialization descriptor does not match "
+            f"canonical storage: {descriptor_path}"
+        )
+
+    expected_payload = (
+        revision_directory
+        / _PAYLOAD_NAME
+    )
+
+    if actual.uri != _payload_uri(
+        layout,
+        expected_payload,
+    ):
+        raise MaterializationConflictError(
+            "materialization descriptor uri does not match "
+            f"canonical payload location: {descriptor_path}"
+        )
+
+    return actual
+
+
 def _matches_payload(
     payload: Path,
     expected: _PayloadInfo,
@@ -547,6 +805,14 @@ def _materialize(
         / _PAYLOAD_NAME
     )
 
+    location = _location_for(
+        dataset=dataset,
+        layout=layout,
+        revision=revision,
+        payload=payload,
+        payload_info=source_info,
+    )
+
     if (
         source_info.payload_type
         == "directory"
@@ -568,6 +834,30 @@ def _materialize(
             payload,
             source_info,
         )
+
+        descriptor_path = (
+            revision_directory
+            / _DESCRIPTOR_NAME
+        )
+
+        if descriptor_path.exists():
+            _validate_descriptor_location(
+                layout=layout,
+                revision_directory=revision_directory,
+                expected=location,
+            )
+        else:
+            _write_descriptor(
+                descriptor_path,
+                location,
+                atomic=True,
+            )
+
+            _validate_descriptor_location(
+                layout=layout,
+                revision_directory=revision_directory,
+                expected=location,
+            )
 
         return _build_record(
             dataset=dataset,
@@ -617,6 +907,13 @@ def _materialize(
                 "materialization source changed while it was being copied"
             )
 
+        _write_descriptor(
+            staging
+            / _DESCRIPTOR_NAME,
+            location,
+            atomic=False,
+        )
+
         try:
             os.replace(
                 staging,
@@ -631,7 +928,17 @@ def _materialize(
                     source_info,
                 )
             ):
-                pass
+                descriptor_path = (
+                    revision_directory
+                    / _DESCRIPTOR_NAME
+                )
+
+                if not descriptor_path.exists():
+                    _write_descriptor(
+                        descriptor_path,
+                        location,
+                        atomic=True,
+                    )
             else:
                 raise MaterializationConflictError(
                     "canonical revision storage appeared concurrently "
@@ -652,6 +959,12 @@ def _materialize(
         source_info,
     )
 
+    _validate_descriptor_location(
+        layout=layout,
+        revision_directory=revision_directory,
+        expected=location,
+    )
+
     return _build_record(
         dataset=dataset,
         layout=layout,
@@ -663,7 +976,6 @@ def _materialize(
         size_bytes=source_info.size_bytes,
         metadata=metadata,
     )
-
 
 def materialize_dataset(
     *,
@@ -797,11 +1109,300 @@ def verify_materialized_record(
     return True
 
 
+def _find_revision(
+    *,
+    project: str | Path,
+    revision: RevisionRef,
+    dataset: bool,
+) -> MaterializedLocation | None:
+    resolved = _require_revision(
+        revision
+    )
+
+    layout = StorageLayout(
+        project
+    )
+
+    revision_directory = (
+        dataset_revision_directory(
+            layout.project_root,
+            resolved,
+        )
+        if dataset
+        else artifact_revision_directory(
+            layout.project_root,
+            resolved,
+        )
+    )
+
+    descriptor_path = (
+        revision_directory
+        / _DESCRIPTOR_NAME
+    )
+
+    if not descriptor_path.is_file():
+        return None
+
+    location = _parse_descriptor(
+        descriptor_path
+    )
+
+    expected_scope = (
+        "dataset"
+        if dataset
+        else "artifact"
+    )
+
+    if (
+        location.scope
+        != expected_scope
+        or location.revision
+        != resolved
+    ):
+        raise MaterializationConflictError(
+            "materialization descriptor does not match "
+            f"requested revision: {descriptor_path}"
+        )
+
+    payload = (
+        revision_directory
+        / _PAYLOAD_NAME
+    )
+
+    if location.uri != _payload_uri(
+        layout,
+        payload,
+    ):
+        raise MaterializationConflictError(
+            "materialization descriptor does not point "
+            f"to its canonical payload: {descriptor_path}"
+        )
+
+    if location.payload_type == "file":
+        valid_payload = (
+            payload.is_file()
+            and not payload.is_symlink()
+        )
+    else:
+        valid_payload = (
+            payload.is_dir()
+            and not payload.is_symlink()
+        )
+
+    if not valid_payload:
+        raise MaterializationConflictError(
+            "materialization payload is missing or has "
+            f"the wrong type: {payload}"
+        )
+
+    return location
+
+
+def find_dataset_revision(
+    project: str | Path,
+    revision: RevisionRef,
+) -> MaterializedLocation | None:
+    """Find one exact locally materialized Dataset revision."""
+
+    return _find_revision(
+        project=project,
+        revision=revision,
+        dataset=True,
+    )
+
+
+def find_artifact_revision(
+    project: str | Path,
+    revision: RevisionRef,
+) -> MaterializedLocation | None:
+    """Find one exact locally materialized Artifact revision."""
+
+    return _find_revision(
+        project=project,
+        revision=revision,
+        dataset=False,
+    )
+
+
+def _entity_revision_root(
+    *,
+    project: str | Path,
+    entity: EntityRef,
+    dataset: bool,
+) -> Path:
+    resolved = _require_entity(
+        entity
+    )
+
+    layout = StorageLayout(
+        project
+    )
+
+    root = (
+        layout.datasets_root
+        if dataset
+        else layout.artifacts_root
+    )
+
+    return (
+        root
+        / resolved.kind
+        / _entity_storage_key(
+            resolved
+        )
+        / "revisions"
+    )
+
+
+def _list_revisions(
+    *,
+    project: str | Path,
+    entity: EntityRef,
+    dataset: bool,
+) -> tuple[MaterializedLocation, ...]:
+    root = _entity_revision_root(
+        project=project,
+        entity=entity,
+        dataset=dataset,
+    )
+
+    if not root.is_dir():
+        return ()
+
+    expected_scope = (
+        "dataset"
+        if dataset
+        else "artifact"
+    )
+
+    result: list[
+        MaterializedLocation
+    ] = []
+
+    for revision_directory in sorted(
+        root.iterdir(),
+        key=lambda item: item.name,
+    ):
+        if (
+            revision_directory.name.startswith(".")
+            or not revision_directory.is_dir()
+            or revision_directory.is_symlink()
+        ):
+            continue
+
+        descriptor_path = (
+            revision_directory
+            / _DESCRIPTOR_NAME
+        )
+
+        if not descriptor_path.is_file():
+            continue
+
+        location = _parse_descriptor(
+            descriptor_path
+        )
+
+        if (
+            location.scope
+            != expected_scope
+            or location.revision.entity
+            != entity
+        ):
+            raise MaterializationConflictError(
+                "materialization descriptor does not match "
+                f"its entity storage directory: {descriptor_path}"
+            )
+
+        canonical_directory = (
+            dataset_revision_directory(
+                project,
+                location.revision,
+            )
+            if dataset
+            else artifact_revision_directory(
+                project,
+                location.revision,
+            )
+        )
+
+        if (
+            canonical_directory
+            != revision_directory.resolve()
+        ):
+            raise MaterializationConflictError(
+                "materialization descriptor is stored outside "
+                f"its canonical revision directory: {descriptor_path}"
+            )
+
+        payload = (
+            revision_directory
+            / _PAYLOAD_NAME
+        )
+
+        layout = StorageLayout(
+            project
+        )
+
+        if location.uri != _payload_uri(
+            layout,
+            payload,
+        ):
+            raise MaterializationConflictError(
+                "materialization descriptor has a non-canonical uri: "
+                f"{descriptor_path}"
+            )
+
+        result.append(
+            location
+        )
+
+    return tuple(
+        sorted(
+            result,
+            key=lambda item: (
+                item.revision.algorithm,
+                item.revision.digest,
+            ),
+        )
+    )
+
+
+def list_dataset_revisions(
+    project: str | Path,
+    entity: EntityRef,
+) -> tuple[MaterializedLocation, ...]:
+    """List locally discoverable Dataset revisions for one logical entity."""
+
+    return _list_revisions(
+        project=project,
+        entity=entity,
+        dataset=True,
+    )
+
+
+def list_artifact_revisions(
+    project: str | Path,
+    entity: EntityRef,
+) -> tuple[MaterializedLocation, ...]:
+    """List locally discoverable Artifact revisions for one logical entity."""
+
+    return _list_revisions(
+        project=project,
+        entity=entity,
+        dataset=False,
+    )
+
+
 __all__ = [
     "MaterializationConflictError",
     "MaterializationError",
+    "MaterializedLocation",
     "artifact_revision_directory",
     "dataset_revision_directory",
+    "find_artifact_revision",
+    "find_dataset_revision",
+    "list_artifact_revisions",
+    "list_dataset_revisions",
     "materialize_artifact",
     "materialize_dataset",
     "verify_materialized_record",
