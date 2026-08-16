@@ -1,15 +1,27 @@
 """Canonical public SDK frontend and backend-neutral definition layer."""
 
 from ..model import (
+    DERIVED_FROM,
+    SUPERSEDES,
+    ArtifactRecord,
+    DatasetRecord,
     DefinitionRecord,
     EntityRef,
     ExecutionRecord,
     ExecutionState,
+    MaterializedRef,
     Operation,
     OperationKind,
     PlanKind,
     PlanRecord,
+    Relation,
+    RelationGraph,
+    RelationKind,
     RevisionRef,
+    combine_provenance,
+    materialized_lineage_relations,
+    materialized_revision,
+    superseded_by,
 )
 from ..executor_contract import PlanExecutor
 from ..extension_registry import ExtensionRegistry
@@ -43,10 +55,13 @@ from .workflow import (
 )
 
 __all__ = [
+    "ArtifactRecord",
     "CallableDefinition",
     "ComponentSpec",
     "Context",
     "CustomDefinition",
+    "DERIVED_FROM",
+    "DatasetRecord",
     "DependencyDefinition",
     "DependencySpec",
     "DefinitionRecord",
@@ -57,6 +72,7 @@ __all__ = [
     "Extension",
     "ExtensionRegistry",
     "Input",
+    "MaterializedRef",
     "MessageDefinition",
     "NodeDefinition",
     "Operation",
@@ -74,12 +90,20 @@ __all__ = [
     "PortDefinition",
     "PortSpec",
     "Resource",
+    "Relation",
+    "RelationGraph",
+    "RelationKind",
     "ResourceDefinition",
     "RevisionRef",
+    "SUPERSEDES",
     "WORKFLOW_SCHEMA",
     "Workflow",
     "WorkflowStep",
+    "combine_provenance",
+    "materialized_lineage_relations",
+    "materialized_revision",
     "message",
     "node",
     "resource",
+    "superseded_by",
 ]
