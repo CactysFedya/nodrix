@@ -249,3 +249,259 @@ steps:
         workflow.to_dict()
         == expected
     )
+
+
+def test_workflow_sdk_has_full_yaml_field_parity() -> None:
+    source = """
+schema: nodrix.workflow/v1
+name: build
+environment:
+  GLOBAL_FLAG: enabled
+steps:
+  - id: configure
+    run: cmake -S . -B build
+  - id: compile
+    run: cmake --build build
+    depends_on:
+      - configure
+    recipe: cmake.build
+    cwd: work
+    environment:
+      CC: clang
+      CXX: clang++
+    when:
+      environment: GLOBAL_FLAG
+    timeout_seconds: 300.0
+    continue_on_error: true
+    cache:
+      inputs:
+        - source.txt
+      outputs:
+        - out.txt
+      environment:
+        - CC
+        - CXX
+"""
+
+    expected = yaml.safe_load(
+        source
+    )
+
+    workflow = Workflow(
+        "build",
+        environment={
+            "GLOBAL_FLAG": "enabled",
+        },
+    )
+
+    configure = workflow.run(
+        "configure",
+        "cmake -S . -B build",
+    )
+
+    workflow.run(
+        "compile",
+        "cmake --build build",
+        after=configure,
+        recipe="cmake.build",
+        cwd="work",
+        environment={
+            "CC": "clang",
+            "CXX": "clang++",
+        },
+        when={
+            "environment": (
+                "GLOBAL_FLAG"
+            ),
+        },
+        timeout_seconds=300,
+        continue_on_error=True,
+        cache={
+            "inputs": [
+                "source.txt",
+            ],
+            "outputs": [
+                "out.txt",
+            ],
+            "environment": [
+                "CC",
+                "CXX",
+            ],
+        },
+    )
+
+    assert (
+        workflow.to_dict()
+        == expected
+    )
+
+
+def test_workflow_sdk_full_definition_uses_existing_planner(
+    tmp_path: Path,
+) -> None:
+    create_progressive_project(
+        tmp_path
+    )
+
+    resource = add_project_resource(
+        "workflow",
+        "build",
+        root=tmp_path,
+    )
+
+    (tmp_path / "work").mkdir()
+
+    (tmp_path / "source.txt").write_text(
+        "source\n",
+        encoding="utf-8",
+    )
+
+    workflow = Workflow(
+        "build",
+        environment={
+            "GLOBAL_FLAG": "enabled",
+        },
+    )
+
+    step = workflow.run(
+        "compile",
+        "echo compile",
+        recipe="cmake.build",
+        cwd="work",
+        environment={
+            "CC": "clang",
+        },
+        when={
+            "environment": (
+                "GLOBAL_FLAG"
+            ),
+        },
+        timeout_seconds=120,
+        continue_on_error=True,
+        cache={
+            "inputs": [
+                "source.txt",
+            ],
+            "outputs": [
+                "out.txt",
+            ],
+            "environment": [
+                "CC",
+            ],
+        },
+    )
+
+    assert (
+        step.recipe
+        == "cmake.build"
+    )
+
+    resource.path.write_text(
+        yaml.safe_dump(
+            workflow.to_dict(),
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    plan = plan_workflow(
+        "build",
+        root=tmp_path,
+    )
+
+    assert len(plan.steps) == 1
+
+    planned = plan.steps[0]
+
+    assert (
+        planned.step_id
+        == "compile"
+    )
+
+    assert (
+        planned.command
+        == "echo compile"
+    )
+
+    assert (
+        planned.recipe
+        == "cmake.build"
+    )
+
+    assert (
+        planned.cwd
+        == "work"
+    )
+
+    assert (
+        planned.environment_overrides
+        == (
+            ("CC", "clang"),
+        )
+    )
+
+    assert (
+        planned.when_json
+        == '{"environment":"GLOBAL_FLAG"}'
+    )
+
+    assert (
+        planned.timeout_seconds
+        == 120.0
+    )
+
+    assert (
+        planned.continue_on_error
+        is True
+    )
+
+    assert (
+        planned.cache_enabled
+        is True
+    )
+
+    assert (
+        planned.cache_inputs
+        == ("source.txt",)
+    )
+
+    assert (
+        planned.cache_outputs
+        == ("out.txt",)
+    )
+
+    assert (
+        planned.cache_environment
+        == ("CC",)
+    )
+
+    resolved_environment = dict(
+        plan.execution_environment
+    )
+
+    assert (
+        resolved_environment[
+            "GLOBAL_FLAG"
+        ]
+        == "enabled"
+    )
+
+
+def test_workflow_sdk_preserves_explicit_boolean_definition_values() -> None:
+    workflow = Workflow(
+        "conditional"
+    )
+
+    step = workflow.run(
+        "disabled",
+        "echo disabled",
+        when=False,
+        cache=False,
+    )
+
+    assert step.to_dict() == {
+        "id": "disabled",
+        "run": "echo disabled",
+        "when": False,
+        "cache": False,
+    }

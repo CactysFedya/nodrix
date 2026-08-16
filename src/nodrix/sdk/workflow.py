@@ -1,6 +1,6 @@
 """Public authoring SDK for Nodrix workflow definitions.
 
-The SDK is a frontend for ``nodrix.workflow/v1``.  It does not execute
+The SDK is a frontend for ``nodrix.workflow/v1``. It does not plan or execute
 commands and deliberately does not introduce another workflow runtime.
 
 Documents produced here are consumed by the existing workflow planner and
@@ -9,8 +9,10 @@ executor exactly like hand-written YAML workflows.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 
@@ -37,6 +39,112 @@ def _required_string(
     return normalized
 
 
+def _optional_string(
+    value: object | None,
+    *,
+    field_name: str,
+) -> str | None:
+    if value is None:
+        return None
+
+    return _required_string(
+        value,
+        field_name=field_name,
+    )
+
+
+def _environment_mapping(
+    value: Mapping[str, Any] | None,
+    *,
+    field_name: str,
+) -> Mapping[str, str]:
+    if value is None:
+        return MappingProxyType({})
+
+    if not isinstance(
+        value,
+        Mapping,
+    ):
+        raise TypeError(
+            f"{field_name} must be a mapping"
+        )
+
+    return MappingProxyType(
+        {
+            str(key): str(item)
+            for key, item
+            in value.items()
+        }
+    )
+
+
+def _definition_value(
+    value: (
+        bool
+        | Mapping[str, Any]
+        | None
+    ),
+    *,
+    field_name: str,
+) -> bool | Mapping[str, Any] | None:
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        return value
+
+    if not isinstance(
+        value,
+        Mapping,
+    ):
+        raise TypeError(
+            f"{field_name} must be "
+            "a mapping, boolean or None"
+        )
+
+    return MappingProxyType(
+        deepcopy(
+            dict(value)
+        )
+    )
+
+
+def _materialize_definition_value(
+    value: (
+        bool
+        | Mapping[str, Any]
+        | None
+    ),
+) -> bool | dict[str, Any] | None:
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        return value
+
+    return deepcopy(
+        dict(value)
+    )
+
+
+def _timeout_value(
+    value: int | float | None,
+) -> float | None:
+    if value is None:
+        return None
+
+    if isinstance(value, bool) or not isinstance(
+        value,
+        (int, float),
+    ):
+        raise TypeError(
+            "timeout_seconds must be "
+            "a number or None"
+        )
+
+    return float(value)
+
+
 def _dependency_names(
     value: str | Iterable[str] | None,
 ) -> tuple[str, ...]:
@@ -55,7 +163,9 @@ def _dependency_names(
     for item in raw:
         name = _required_string(
             item,
-            field_name="workflow dependency",
+            field_name=(
+                "workflow dependency"
+            ),
         )
 
         if name in seen:
@@ -91,13 +201,43 @@ class WorkflowStep:
     id: str
     command: str
     depends_on: tuple[str, ...]
+
     _workflow: Workflow = field(
         repr=False,
         compare=False,
     )
 
+    recipe: str | None = None
+    cwd: str = "."
+
+    environment: Mapping[str, str] = field(
+        default_factory=dict,
+        repr=False,
+    )
+
+    when: (
+        bool
+        | Mapping[str, Any]
+        | None
+    ) = field(
+        default=None,
+        repr=False,
+    )
+
+    timeout_seconds: float | None = None
+    continue_on_error: bool = False
+
+    cache: (
+        bool
+        | Mapping[str, Any]
+        | None
+    ) = field(
+        default=None,
+        repr=False,
+    )
+
     def to_dict(self) -> dict[str, Any]:
-        """Return the canonical ``nodrix.workflow/v1`` step mapping."""
+        """Return the corresponding ``nodrix.workflow/v1`` step mapping."""
 
         result: dict[str, Any] = {
             "id": self.id,
@@ -109,6 +249,43 @@ class WorkflowStep:
                 self.depends_on
             )
 
+        if self.recipe is not None:
+            result["recipe"] = (
+                self.recipe
+            )
+
+        if self.cwd != ".":
+            result["cwd"] = self.cwd
+
+        if self.environment:
+            result["environment"] = dict(
+                self.environment
+            )
+
+        if self.when is not None:
+            result["when"] = (
+                _materialize_definition_value(
+                    self.when
+                )
+            )
+
+        if self.timeout_seconds is not None:
+            result["timeout_seconds"] = (
+                self.timeout_seconds
+            )
+
+        if self.continue_on_error:
+            result["continue_on_error"] = (
+                True
+            )
+
+        if self.cache is not None:
+            result["cache"] = (
+                _materialize_definition_value(
+                    self.cache
+                )
+            )
+
         return result
 
 
@@ -118,10 +295,24 @@ class Workflow:
     def __init__(
         self,
         name: str,
+        *,
+        environment: (
+            Mapping[str, Any]
+            | None
+        ) = None,
     ) -> None:
         self._name = _required_string(
             name,
             field_name="workflow name",
+        )
+
+        self._environment = (
+            _environment_mapping(
+                environment,
+                field_name=(
+                    "workflow environment"
+                ),
+            )
         )
 
         self._steps: list[
@@ -133,6 +324,12 @@ class Workflow:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def environment(
+        self,
+    ) -> Mapping[str, str]:
+        return self._environment
 
     @property
     def steps(
@@ -199,12 +396,37 @@ class Workflow:
             | Iterable[str]
             | None
         ) = None,
+        recipe: str | None = None,
+        cwd: str = ".",
+        environment: (
+            Mapping[str, Any]
+            | None
+        ) = None,
+        when: (
+            bool
+            | Mapping[str, Any]
+            | None
+        ) = None,
+        timeout_seconds: (
+            int
+            | float
+            | None
+        ) = None,
+        continue_on_error: bool = False,
+        cache: (
+            bool
+            | Mapping[str, Any]
+            | None
+        ) = None,
     ) -> WorkflowStep:
         """Declare one command step.
 
-        ``after`` is the convenient object-reference API.  ``depends_on``
-        exposes the native workflow dependency names when that is more useful.
-        Both forms may be combined.
+        ``after`` is the convenient object-reference dependency API.
+        ``depends_on`` exposes the native workflow dependency names.
+
+        Other arguments map directly to fields of ``nodrix.workflow/v1``.
+        Their runtime semantics remain owned by the existing workflow
+        planner and executor.
         """
 
         normalized_id = (
@@ -257,10 +479,65 @@ class Workflow:
                 + ", ".join(unknown)
             )
 
+        if not isinstance(
+            continue_on_error,
+            bool,
+        ):
+            raise TypeError(
+                "continue_on_error "
+                "must be a boolean"
+            )
+
         step = WorkflowStep(
             id=normalized_id,
             command=normalized_command,
             depends_on=dependencies,
+            recipe=_optional_string(
+                recipe,
+                field_name=(
+                    f"workflow step "
+                    f"{normalized_id!r} recipe"
+                ),
+            ),
+            cwd=_required_string(
+                cwd,
+                field_name=(
+                    f"workflow step "
+                    f"{normalized_id!r} cwd"
+                ),
+            ),
+            environment=(
+                _environment_mapping(
+                    environment,
+                    field_name=(
+                        f"workflow step "
+                        f"{normalized_id!r} "
+                        "environment"
+                    ),
+                )
+            ),
+            when=_definition_value(
+                when,
+                field_name=(
+                    f"workflow step "
+                    f"{normalized_id!r} when"
+                ),
+            ),
+            timeout_seconds=(
+                _timeout_value(
+                    timeout_seconds
+                )
+            ),
+            continue_on_error=(
+                continue_on_error
+            ),
+            cache=_definition_value(
+                cache,
+                field_name=(
+                    f"workflow step "
+                    f"{normalized_id!r} cache"
+                ),
+            ),
             _workflow=self,
         )
 
@@ -274,15 +551,23 @@ class Workflow:
     def to_dict(self) -> dict[str, Any]:
         """Compile this builder into a canonical workflow definition."""
 
-        return {
+        result: dict[str, Any] = {
             "schema": WORKFLOW_SCHEMA,
             "name": self.name,
-            "steps": [
-                step.to_dict()
-                for step
-                in self._steps
-            ],
         }
+
+        if self.environment:
+            result["environment"] = dict(
+                self.environment
+            )
+
+        result["steps"] = [
+            step.to_dict()
+            for step
+            in self._steps
+        ]
+
+        return result
 
 
 __all__ = [
