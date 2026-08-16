@@ -257,3 +257,128 @@ def test_same_operation_can_have_different_plans() -> None:
     assert local.subject_revision == distributed.subject_revision
     assert local.plan_id != distributed.plan_id
     assert local.payload != distributed.payload
+
+
+def test_canonical_plan_id_is_deterministic_for_parameter_order() -> None:
+    from nodrix.model import canonical_plan_id
+
+    system = mapping_system()
+    resolved = revision(system)
+
+    first = Operation(
+        kind="run",
+        subject=system,
+        parameters={
+            "b": 2,
+            "a": {
+                "enabled": True,
+                "values": [1, 2],
+            },
+        },
+    )
+
+    second = Operation(
+        kind="run",
+        subject=system,
+        parameters={
+            "a": {
+                "values": [1, 2],
+                "enabled": True,
+            },
+            "b": 2,
+        },
+    )
+
+    assert canonical_plan_id(
+        kind=SYSTEM_EXECUTION,
+        operation=first,
+        subject_revision=resolved,
+        payload_sha256="c" * 64,
+    ) == canonical_plan_id(
+        kind=SYSTEM_EXECUTION,
+        operation=second,
+        subject_revision=resolved,
+        payload_sha256="c" * 64,
+    )
+
+
+def test_canonical_plan_id_changes_with_operation_intent() -> None:
+    from nodrix.model import canonical_plan_id
+
+    system = mapping_system()
+    resolved = revision(system)
+
+    run = Operation(
+        kind="run",
+        subject=system,
+        parameters={
+            "mode": "normal",
+        },
+    )
+
+    diagnose = Operation(
+        kind="diagnose",
+        subject=system,
+        parameters={
+            "mode": "normal",
+        },
+    )
+
+    changed_parameters = Operation(
+        kind="run",
+        subject=system,
+        parameters={
+            "mode": "debug",
+        },
+    )
+
+    base = canonical_plan_id(
+        kind=SYSTEM_EXECUTION,
+        operation=run,
+        subject_revision=resolved,
+        payload_sha256="c" * 64,
+    )
+
+    assert canonical_plan_id(
+        kind=SYSTEM_EXECUTION,
+        operation=diagnose,
+        subject_revision=resolved,
+        payload_sha256="c" * 64,
+    ) != base
+
+    assert canonical_plan_id(
+        kind=SYSTEM_EXECUTION,
+        operation=changed_parameters,
+        subject_revision=resolved,
+        payload_sha256="c" * 64,
+    ) != base
+
+
+def test_canonical_plan_id_changes_with_resolved_plan_semantics() -> None:
+    from nodrix.model import canonical_plan_id
+
+    system = mapping_system()
+    resolved = revision(system)
+
+    operation = Operation(
+        kind="run",
+        subject=system,
+    )
+
+    first = canonical_plan_id(
+        kind=SYSTEM_EXECUTION,
+        operation=operation,
+        subject_revision=resolved,
+        payload_sha256="c" * 64,
+    )
+
+    second = canonical_plan_id(
+        kind=SYSTEM_EXECUTION,
+        operation=operation,
+        subject_revision=resolved,
+        payload_sha256="d" * 64,
+    )
+
+    assert first != second
+    assert first.startswith("plan-")
+    assert len(first) == len("plan-") + 64

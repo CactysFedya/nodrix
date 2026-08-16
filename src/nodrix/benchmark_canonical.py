@@ -13,6 +13,7 @@ from .model import (
     Operation,
     PlanRecord,
     RevisionRef,
+    canonical_plan_id,
 )
 
 
@@ -101,7 +102,12 @@ def benchmark_plan_record(
     digest = benchmark_plan_digest(plan)
 
     return PlanRecord(
-        plan_id=f"benchmark-{digest[:16]}",
+        plan_id=canonical_plan_id(
+            kind=BENCHMARK_PLAN,
+            operation=operation,
+            subject_revision=subject_revision,
+            payload_sha256=digest,
+        ),
         kind=BENCHMARK_PLAN,
         operation=operation,
         subject_revision=subject_revision,

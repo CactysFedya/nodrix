@@ -14,6 +14,7 @@ from .model import (
     Operation,
     PlanRecord,
     RevisionRef,
+    canonical_plan_id,
 )
 from .optimization import OptimizationPlan
 
@@ -127,8 +128,11 @@ def optimization_plan_record(
     }
 
     return PlanRecord(
-        plan_id=(
-            f"optimization-{digest[:16]}"
+        plan_id=canonical_plan_id(
+            kind=OPTIMIZATION_PLAN,
+            operation=operation,
+            subject_revision=subject_revision,
+            payload_sha256=digest,
         ),
         kind=OPTIMIZATION_PLAN,
         operation=operation,

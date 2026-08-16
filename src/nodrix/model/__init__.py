@@ -30,10 +30,12 @@ from .operations import (
 from .plans import (
     BENCHMARK_PLAN,
     OPTIMIZATION_PLAN,
+    PLAN_IDENTITY_SCHEMA,
     SYSTEM_EXECUTION,
     WORKFLOW,
     PlanKind,
     PlanRecord,
+    canonical_plan_id,
 )
 from .provenance import (
     MaterializedRef,
@@ -87,6 +89,7 @@ __all__ = [
     "Operation",
     "OperationKind",
     "PACKAGE",
+    "PLAN_IDENTITY_SCHEMA",
     "PLACED_ON",
     "PREPARE",
     "PROFILE",
@@ -108,6 +111,7 @@ __all__ = [
     "TEST",
     "VALIDATE",
     "WORKFLOW",
+    "canonical_plan_id",
     "combine_provenance",
     "execution_record_ref",
     "parse_canonical_ref",

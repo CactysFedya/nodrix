@@ -87,7 +87,12 @@ def test_workflow_plan_record_wraps_existing_domain_plan() -> None:
     assert record.operation is operation
     assert record.subject_revision == revision
     assert record.payload is plan
-    assert record.plan_id.startswith("workflow-plan-")
+    assert record.plan_id.startswith(
+        "plan-"
+    )
+    assert len(record.plan_id) == (
+        len("plan-") + 64
+    )
     assert record.metadata["workflow"] == "build"
     assert record.metadata["plan_sha256"] == workflow_plan_digest(plan)
 
@@ -168,3 +173,48 @@ def test_workflow_plan_record_preserves_extra_metadata() -> None:
     )
 
     assert record.metadata["source"] == "project-build"
+
+
+def test_workflow_plan_record_identity_includes_operation() -> None:
+    entity, revision = _subject()
+    plan = _plan()
+
+    build = workflow_plan_record(
+        plan,
+        operation=Operation(
+            kind="build",
+            subject=entity,
+            subject_revision=revision,
+            parameters={
+                "mode": "normal",
+            },
+        ),
+        subject_revision=revision,
+    )
+
+    deploy = workflow_plan_record(
+        plan,
+        operation=Operation(
+            kind="robot.deploy",
+            subject=entity,
+            subject_revision=revision,
+            parameters={
+                "mode": "normal",
+            },
+        ),
+        subject_revision=revision,
+    )
+
+    assert (
+        workflow_plan_digest(
+            build.payload
+        )
+        == workflow_plan_digest(
+            deploy.payload
+        )
+    )
+
+    assert (
+        build.plan_id
+        != deploy.plan_id
+    )

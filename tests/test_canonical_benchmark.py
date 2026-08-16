@@ -138,7 +138,10 @@ def test_benchmark_plan_record_uses_canonical_benchmark_kind(
     assert record.operation.kind_name == "benchmark"
     assert record.payload is plan
     assert record.plan_id.startswith(
-        "benchmark-"
+        "plan-"
+    )
+    assert len(record.plan_id) == (
+        len("plan-") + 64
     )
     assert len(
         record.metadata["benchmark_digest"]

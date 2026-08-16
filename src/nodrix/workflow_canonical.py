@@ -20,6 +20,7 @@ from .model import (
     Operation,
     PlanRecord,
     RevisionRef,
+    canonical_plan_id,
 )
 from .workflow_planning import WorkflowPlanResult
 
@@ -124,7 +125,12 @@ def workflow_plan_record(
         canonical_metadata.update(dict(metadata))
 
     return PlanRecord(
-        plan_id=f"workflow-plan-{digest}",
+        plan_id=canonical_plan_id(
+            kind=WORKFLOW,
+            operation=operation,
+            subject_revision=subject_revision,
+            payload_sha256=digest,
+        ),
         kind=WORKFLOW,
         operation=operation,
         subject_revision=subject_revision,

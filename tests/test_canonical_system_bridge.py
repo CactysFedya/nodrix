@@ -106,8 +106,15 @@ def test_plan_id_is_derived_from_resolved_plan() -> None:
         resolved,
     )
 
-    assert record.plan_id == (
-        f"system-plan-{digest}"
+    assert record.plan_id.startswith(
+        "plan-"
+    )
+    assert len(record.plan_id) == (
+        len("plan-") + 64
+    )
+    assert (
+        record.metadata["plan_sha256"]
+        == digest
     )
 
     assert record.metadata["plan_sha256"] == digest

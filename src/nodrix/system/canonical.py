@@ -20,6 +20,7 @@ from nodrix.model import (
     Operation,
     PlanRecord,
     RevisionRef,
+    canonical_plan_id,
 )
 
 from .catalog import DefinitionCatalog
@@ -134,7 +135,12 @@ def system_plan_record(
     digest = system_plan_digest(plan)
 
     return PlanRecord(
-        plan_id=f"system-plan-{digest}",
+        plan_id=canonical_plan_id(
+            kind=SYSTEM_EXECUTION,
+            operation=canonical_operation,
+            subject_revision=revision,
+            payload_sha256=digest,
+        ),
         kind=SYSTEM_EXECUTION,
         operation=canonical_operation,
         subject_revision=revision,
