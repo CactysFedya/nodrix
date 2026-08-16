@@ -16,6 +16,11 @@ from .definitions import (
 )
 from .namespace import PACKAGE_NAMESPACE_OVERRIDE
 from .typing import Input, Outputs, Param, Resource
+from .workflow import (
+    WORKFLOW_SCHEMA,
+    Workflow,
+    WorkflowStep,
+)
 
 __all__ = [
     "CallableDefinition",
@@ -35,6 +40,9 @@ __all__ = [
     "PortSpec",
     "Resource",
     "ResourceDefinition",
+    "WORKFLOW_SCHEMA",
+    "Workflow",
+    "WorkflowStep",
     "message",
     "node",
     "resource",
