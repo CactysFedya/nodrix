@@ -74,9 +74,25 @@ class WorkflowPlanResult:
     )
 
     # Declarative binding from the Workflow Definition to the canonical
-    # OperationKind it implements.  This is intent metadata, not execution
-    # state or executor configuration.
+    # OperationKind it implements.
     implements: str | None = None
+
+    # Exact execution controls resolved before the executor sees this plan.
+    # Operation parameters may preserve the original request for provenance,
+    # but execution must use these plan fields.
+    dry_run: bool = False
+    force: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.dry_run, bool):
+            raise TypeError(
+                "dry_run must be a boolean"
+            )
+
+        if not isinstance(self.force, bool):
+            raise TypeError(
+                "force must be a boolean"
+            )
 
     def as_dict(self) -> dict[str, Any]:
         result = {
@@ -90,6 +106,12 @@ class WorkflowPlanResult:
 
         if self.implements is not None:
             result["implements"] = self.implements
+
+        if self.dry_run:
+            result["dry_run"] = True
+
+        if self.force:
+            result["force"] = True
 
         return result
 
@@ -192,9 +214,16 @@ def plan_workflow(
     *,
     root: str | Path | None = None,
     environment_name: str | None = None,
+    dry_run: bool = False,
     force: bool = False,
 ) -> WorkflowPlanResult:
-    """Resolve execution/cache decisions without running any workflow command."""
+    """Resolve exact workflow execution semantics without running commands."""
+
+    if not isinstance(dry_run, bool):
+        raise TypeError("dry_run must be a boolean")
+
+    if not isinstance(force, bool):
+        raise TypeError("force must be a boolean")
 
     workflow, workflow_path, project_root = load_workflow(name, root=root)
 
@@ -409,6 +438,8 @@ def plan_workflow(
             sorted(env.items())
         ),
         implements=implements,
+        dry_run=dry_run,
+        force=force,
     )
 
 

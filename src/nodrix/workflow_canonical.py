@@ -30,6 +30,8 @@ def _digest_payload(plan: WorkflowPlanResult) -> dict[str, Any]:
     return {
         "name": plan.name,
         "implements": plan.implements,
+        "dry_run": plan.dry_run,
+        "force": plan.force,
         "environment": plan.environment,
         "generated": plan.generated,
         "steps": [
@@ -108,6 +110,8 @@ def workflow_plan_record(
         "project_root": plan.root,
         "environment": plan.environment,
         "generated": plan.generated,
+        "dry_run": plan.dry_run,
+        "force": plan.force,
         "plan_sha256": digest,
     }
 

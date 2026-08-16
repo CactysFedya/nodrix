@@ -212,6 +212,7 @@ def execute_workflow_operation(
         workflow,
         root=root,
         environment_name=environment_name,
+        dry_run=dry_run,
         force=force,
     )
 

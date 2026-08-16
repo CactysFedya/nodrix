@@ -74,22 +74,6 @@ def _validate_workflow_plan_record(
     return plan.payload
 
 
-def _boolean_parameter(
-    plan: PlanRecord,
-    name: str,
-    *,
-    default: bool = False,
-) -> bool:
-    value = plan.operation.parameters.get(name, default)
-
-    if not isinstance(value, bool):
-        raise TypeError(
-            f"operation parameter {name!r} must be a boolean"
-        )
-
-    return value
-
-
 class WorkflowExecutor:
     """Execute the exact workflow payload carried by a canonical plan."""
 
@@ -119,23 +103,15 @@ class WorkflowExecutor:
 
         domain_plan = _validate_workflow_plan_record(plan)
 
-        force = _boolean_parameter(
-            plan,
-            "force",
-        )
-        dry_run = _boolean_parameter(
-            plan,
-            "dry_run",
-        )
+        dry_run = domain_plan.dry_run
+        force = domain_plan.force
 
         execution_id = f"workflow-{uuid4().hex[:12]}"
         started_at = _now(self._clock)
 
         try:
             result = self._runner(
-                domain_plan,
-                dry_run=dry_run,
-                force=force,
+                domain_plan
             )
         except Exception as exc:
             finished_at = _now(self._clock)

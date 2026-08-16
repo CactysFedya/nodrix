@@ -52,11 +52,18 @@ def _subject() -> tuple[EntityRef, RevisionRef]:
     return entity, revision
 
 
-def _domain_plan() -> WorkflowPlanResult:
+def _domain_plan(
+    *,
+    dry_run: bool = False,
+    force: bool = False,
+) -> WorkflowPlanResult:
     return WorkflowPlanResult(
         name="build",
         root="/workspace/project",
-        workflow_path="/workspace/project/workflows/build.yaml",
+        workflow_path=(
+            "/workspace/project/"
+            "workflows/build.yaml"
+        ),
         environment="robot",
         generated=False,
         steps=(
@@ -67,19 +74,29 @@ def _domain_plan() -> WorkflowPlanResult:
                 recipe="cmake",
                 depends_on=(),
                 cache="miss",
-                reasons=("cache fingerprint changed",),
-                command="cmake --build build",
+                reasons=(
+                    "cache fingerprint changed",
+                ),
+                command=(
+                    "cmake --build build"
+                ),
                 cwd=".",
             ),
         ),
+        dry_run=dry_run,
+        force=force,
     )
+
 
 
 def _canonical_plan(
     *,
     parameters: dict[str, object] | None = None,
+    dry_run: bool = False,
+    force: bool = False,
 ):
     entity, revision = _subject()
+
     operation = Operation(
         kind=BUILD,
         subject=entity,
@@ -88,10 +105,14 @@ def _canonical_plan(
     )
 
     return workflow_plan_record(
-        _domain_plan(),
+        _domain_plan(
+            dry_run=dry_run,
+            force=force,
+        ),
         operation=operation,
         subject_revision=revision,
     )
+
 
 
 def _result(
@@ -128,54 +149,86 @@ def _result(
 
 def test_workflow_executor_returns_completed_execution_record() -> None:
     calls: list[
-        tuple[WorkflowPlanResult, dict[str, object]]
+        tuple[
+            WorkflowPlanResult,
+            dict[str, object],
+        ]
     ] = []
 
     def runner(
         domain_plan: WorkflowPlanResult,
         **kwargs,
     ):
-        calls.append((domain_plan, kwargs))
+        calls.append(
+            (
+                domain_plan,
+                kwargs,
+            )
+        )
         return _result()
 
-    times = iter((_time(12), _time(13)))
+    times = iter(
+        (
+            _time(12),
+            _time(13),
+        )
+    )
 
     executor = WorkflowExecutor(
         runner=runner,
         clock=lambda: next(times),
     )
 
+    # Deliberately make Operation intent disagree with the exact Plan.
+    # The executor must obey the Plan payload only.
     plan = _canonical_plan(
         parameters={
-            "force": True,
-            "dry_run": False,
-        }
+            "force": False,
+            "dry_run": True,
+        },
+        force=True,
+        dry_run=False,
     )
 
-    record = executor.execute(plan)
+    record = executor.execute(
+        plan
+    )
 
     assert record.plan is plan
     assert record.executor == WORKFLOW_EXECUTOR
-    assert record.state is ExecutionState.COMPLETED
+    assert (
+        record.state
+        is ExecutionState.COMPLETED
+    )
     assert record.successful
     assert record.terminal
     assert record.started_at == _time(12)
     assert record.finished_at == _time(13)
-    assert record.execution_id.startswith("workflow-")
+    assert record.execution_id.startswith(
+        "workflow-"
+    )
 
     assert len(calls) == 1
 
-    called_plan, called_parameters = calls[0]
+    called_plan, called_parameters = (
+        calls[0]
+    )
 
     assert called_plan is plan.payload
-    assert called_parameters == {
-        "dry_run": False,
-        "force": True,
-    }
+    assert called_parameters == {}
 
+    assert plan.payload.force is True
+    assert plan.payload.dry_run is False
+
+    assert record.details["force"] is True
+    assert record.details["dry_run"] is False
     assert record.details["workflow"] == "build"
-    assert record.details["workflow_status"] == "succeeded"
+    assert (
+        record.details["workflow_status"]
+        == "succeeded"
+    )
     assert record.details["step_count"] == 1
+
 
 
 def test_workflow_executor_maps_failed_result_to_failed_execution() -> None:
@@ -247,38 +300,62 @@ def test_workflow_executor_requires_workflow_payload() -> None:
         ("dry_run", 1),
     ],
 )
-def test_workflow_executor_rejects_non_boolean_execution_parameters(
+def test_workflow_plan_rejects_non_boolean_execution_controls(
     parameter: str,
     value: object,
 ) -> None:
-    plan = _canonical_plan(
-        parameters={parameter: value},
-    )
-
     with pytest.raises(
         TypeError,
-        match=rf"operation parameter '{parameter}' must be a boolean",
+        match=rf"{parameter} must be a boolean",
     ):
-        WorkflowExecutor().execute(plan)
+        replace(
+            _domain_plan(),
+            **{
+                parameter: value,
+            },
+        )
+
 
 
 def test_workflow_executor_defaults_execution_controls_to_false() -> None:
-    captured: dict[str, object] = {}
+    captured: list[
+        WorkflowPlanResult
+    ] = []
 
-    def runner(name: str, **kwargs):
-        captured["name"] = name
-        captured.update(kwargs)
+    def runner(
+        domain_plan: WorkflowPlanResult,
+    ):
+        captured.append(
+            domain_plan
+        )
         return _result()
 
-    times = iter((_time(12), _time(13)))
+    times = iter(
+        (
+            _time(12),
+            _time(13),
+        )
+    )
 
-    WorkflowExecutor(
+    plan = _canonical_plan()
+
+    record = WorkflowExecutor(
         runner=runner,
         clock=lambda: next(times),
-    ).execute(_canonical_plan())
+    ).execute(
+        plan
+    )
 
-    assert captured["force"] is False
-    assert captured["dry_run"] is False
+    assert captured == [
+        plan.payload
+    ]
+
+    assert plan.payload.force is False
+    assert plan.payload.dry_run is False
+
+    assert record.details["force"] is False
+    assert record.details["dry_run"] is False
+
 
 
 def test_workflow_executor_requires_timezone_aware_clock() -> None:
@@ -295,23 +372,83 @@ def test_workflow_executor_requires_timezone_aware_clock() -> None:
 
 
 def test_workflow_executor_treats_dry_run_as_completed_operation() -> None:
-    def runner(name: str, **kwargs):
-        del name
-        assert kwargs["dry_run"] is True
-        return _result(status="planned")
+    def runner(
+        domain_plan: WorkflowPlanResult,
+    ):
+        assert (
+            domain_plan.dry_run
+            is True
+        )
+        assert (
+            domain_plan.force
+            is False
+        )
 
-    times = iter((_time(12), _time(13)))
+        return _result(
+            status="planned"
+        )
+
+    times = iter(
+        (
+            _time(12),
+            _time(13),
+        )
+    )
+
+    plan = _canonical_plan(
+        # Deliberately contradictory provenance:
+        parameters={
+            "dry_run": False,
+        },
+        dry_run=True,
+    )
 
     record = WorkflowExecutor(
         runner=runner,
         clock=lambda: next(times),
     ).execute(
-        _canonical_plan(
-            parameters={"dry_run": True},
+        plan
+    )
+
+    assert (
+        record.state
+        is ExecutionState.COMPLETED
+    )
+    assert record.successful
+    assert record.details["dry_run"] is True
+    assert record.details["force"] is False
+
+def test_workflow_plan_digest_includes_execution_controls() -> None:
+    from nodrix.workflow_canonical import (
+        workflow_plan_digest,
+    )
+
+    normal = _domain_plan()
+
+    dry_run = _domain_plan(
+        dry_run=True,
+    )
+
+    forced = _domain_plan(
+        force=True,
+    )
+
+    normal_digest = (
+        workflow_plan_digest(
+            normal
         )
     )
 
-    assert record.state is ExecutionState.COMPLETED
-    assert record.successful
-    assert record.details["workflow_status"] == "planned"
-    assert record.details["dry_run"] is True
+    assert (
+        workflow_plan_digest(
+            dry_run
+        )
+        != normal_digest
+    )
+
+    assert (
+        workflow_plan_digest(
+            forced
+        )
+        != normal_digest
+    )

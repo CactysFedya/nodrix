@@ -643,9 +643,6 @@ def _write_cache_state(
 
 def execute_workflow_plan(
     plan,
-    *,
-    dry_run: bool = False,
-    force: bool = False,
 ) -> WorkflowRunResult:
     """Execute exactly one already-resolved WorkflowPlanResult.
 
@@ -661,6 +658,9 @@ def execute_workflow_plan(
         raise TypeError(
             "plan must be a WorkflowPlanResult"
         )
+
+    dry_run = plan.dry_run
+    force = plan.force
 
     project_root = Path(
         plan.root
@@ -1054,11 +1054,10 @@ def run_workflow(
         name,
         root=root,
         environment_name=environment_name,
+        dry_run=dry_run,
         force=force,
     )
 
     return execute_workflow_plan(
-        plan,
-        dry_run=dry_run,
-        force=force,
+        plan
     )
