@@ -182,3 +182,153 @@ def test_non_workflow_resource_keeps_plain_yaml(
         "name": "development",
         "variables": {},
     }
+
+
+def test_created_system_is_self_describing(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "robot"
+
+    create_progressive_project(
+        root
+    )
+
+    resource = add_project_resource(
+        "system",
+        "robot",
+        root=root,
+    )
+
+    text = resource.path.read_text(
+        encoding="utf-8"
+    )
+
+    assert "# Nodrix System" in text
+
+    assert (
+        "canonical definition of the whole "
+        "executable system"
+        in text
+    )
+
+    assert (
+        "plyctl system validate "
+        "systems/robot.yaml"
+        in text
+    )
+
+    assert (
+        "plyctl system plan "
+        "systems/robot.yaml"
+        in text
+    )
+
+    assert (
+        "plyctl system run "
+        "systems/robot.yaml"
+        in text
+    )
+
+    assert (
+        "plyctl system show "
+        "systems/robot.yaml"
+        in text
+    )
+
+
+def test_system_scaffold_preserves_canonical_document(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "robot"
+
+    create_progressive_project(
+        root
+    )
+
+    resource = add_project_resource(
+        "system",
+        "main",
+        root=root,
+    )
+
+    document = yaml.safe_load(
+        resource.path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert document == {
+        "apiVersion": "nodrix.system/v1",
+        "kind": "System",
+        "name": "main",
+    }
+
+
+def test_created_environment_is_self_describing(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "robot"
+
+    create_progressive_project(
+        root
+    )
+
+    resource = add_project_resource(
+        "environment",
+        "development",
+        root=root,
+    )
+
+    text = resource.path.read_text(
+        encoding="utf-8"
+    )
+
+    assert "# Nodrix Environment" in text
+
+    assert (
+        "shell setup files, environment "
+        "variables and checks"
+        in text
+    )
+
+    assert "plyctl env show" in text
+    assert "plyctl env check" in text
+    assert "plyctl env export" in text
+
+    assert (
+        "plyctl project add environment "
+        "development --default"
+        in text
+    )
+
+
+def test_environment_scaffold_preserves_canonical_document(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "robot"
+
+    create_progressive_project(
+        root
+    )
+
+    resource = add_project_resource(
+        "environment",
+        "development",
+        root=root,
+    )
+
+    document = yaml.safe_load(
+        resource.path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert document == {
+        "schema": "nodrix.environment/v1",
+        "name": "development",
+        "shell": {
+            "source": [],
+        },
+        "environment": {},
+        "checks": [],
+    }

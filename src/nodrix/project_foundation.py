@@ -392,6 +392,117 @@ def _workflow_scaffold(
     )
 
 
+def _system_scaffold(
+    name: str,
+    document: dict[str, Any],
+) -> str:
+    """Render a human-facing canonical System source file."""
+
+    canonical = yaml.safe_dump(
+        document,
+        sort_keys=False,
+    ).rstrip()
+
+    header = f"""# Nodrix System
+#
+# What:
+#   A System is the canonical definition of the whole executable system.
+#   It describes execution targets, resources, applications and relations.
+#
+# Validate:
+#   plyctl system validate systems/{name}.yaml
+#
+# Plan without running:
+#   plyctl system plan systems/{name}.yaml
+#
+# Run:
+#   plyctl system run systems/{name}.yaml
+#
+# Inspect:
+#   plyctl system show systems/{name}.yaml
+#
+# The YAML below is the canonical nodrix.system/v1 definition.
+#
+"""
+
+    footer = """
+#
+# Typical next sections:
+#
+# targets: []         # Where parts of the system can execute.
+# resources: []       # Shared dependencies and execution context.
+# applications: []    # Processes, launches or other applications.
+#
+# Start with the System identity and add architecture only when needed.
+"""
+
+    return (
+        header
+        + canonical
+        + "\n"
+        + footer
+    )
+
+
+def _environment_scaffold(
+    name: str,
+    document: dict[str, Any],
+) -> str:
+    """Render a human-facing project Environment source file."""
+
+    canonical = yaml.safe_dump(
+        document,
+        sort_keys=False,
+    ).rstrip()
+
+    header = f"""# Nodrix Environment
+#
+# What:
+#   An Environment describes prerequisites used by workflows and project
+#   operations: shell setup files, environment variables and checks.
+#
+# Inspect the currently selected environment:
+#   plyctl env show
+#
+# Check its prerequisites:
+#   plyctl env check
+#
+# Export its resolved values:
+#   plyctl env export
+#
+# When creating an environment, make it the project default with:
+#   plyctl project add environment {name} --default
+#
+# The YAML below is the canonical nodrix.environment/v1 definition.
+#
+"""
+
+    footer = """
+#
+# Examples:
+#
+# shell:
+#   source:
+#     - /opt/ros/jazzy/setup.bash
+#
+# environment:
+#   ROS_DOMAIN_ID: "42"
+#
+# checks:
+#   - type: command
+#     command: cmake
+#
+# Add only the prerequisites your operations actually require.
+"""
+
+    return (
+        header
+        + canonical
+        + "\n"
+        + footer
+    )
+
+
 def _render_resource_scaffold(
     kind: str,
     name: str,
@@ -405,6 +516,18 @@ def _render_resource_scaffold(
 
     if kind == "workflow":
         return _workflow_scaffold(
+            name,
+            document,
+        )
+
+    if kind == "system":
+        return _system_scaffold(
+            name,
+            document,
+        )
+
+    if kind == "environment":
+        return _environment_scaffold(
             name,
             document,
         )
