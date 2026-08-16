@@ -20,6 +20,7 @@ from .streams import StreamPublisher
 from .metrics import MetricsRecorder
 from .lifecycle import HealthStatus, LifecycleState
 from .resources import ResourceSampler
+from .storage_layout import StorageLayout
 
 try:
     from ._native_queue import BoundedQueue as _NativeBoundedQueue
@@ -63,7 +64,12 @@ class HybridPipelineRuntime(
         self.manifest = manifest
         self.manifest_path = manifest_path.resolve()
         self.base_dir = self.manifest_path.parent
-        self.run_root = (run_root or self.base_dir / ".nodrix" / "runs").resolve()
+        self.run_root = (
+            run_root
+            or StorageLayout(
+                self.base_dir
+            ).runs_root
+        ).resolve()
         self.nodes: dict[str, LoadedNode] = {}
         self.sessions: dict[str, LoadedSession] = {}
         self.resources: dict[str, LoadedResource] = {}

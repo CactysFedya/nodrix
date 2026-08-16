@@ -15,6 +15,7 @@ from .manifest import EdgeConfig, PipelineManifest, dump_manifest
 from .messages import Message
 from .node import Node, NodeContext, SourceNode
 from .registry import load_node_class
+from .storage_layout import StorageLayout
 
 
 _EOS = object()
@@ -122,7 +123,12 @@ class PipelineRuntime:
         self.manifest = manifest
         self.manifest_path = manifest_path.resolve()
         self.base_dir = self.manifest_path.parent
-        self.run_root = (run_root or self.base_dir / ".nodrix" / "runs").resolve()
+        self.run_root = (
+            run_root
+            or StorageLayout(
+                self.base_dir
+            ).runs_root
+        ).resolve()
         self.nodes: dict[str, LoadedNode] = {}
         self.edges: list[EdgeQueue] = []
 

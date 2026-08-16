@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from .workflow_schema import WORKFLOW_SCHEMA
+from .storage_layout import StorageLayout
 from .workspace import PROJECT_FILE, find_workspace
 
 
@@ -169,7 +170,9 @@ def load_workflow(
 
 def _active_context(root: Path, config: dict[str, Any]) -> dict[str, Any]:
     name: str | None = None
-    state = root / ".nodrix" / "context"
+    state = StorageLayout(
+        root
+    ).context_file
     if state.is_file():
         name = state.read_text(encoding="utf-8").strip() or None
     defaults = dict(config.get("defaults") or {})
@@ -282,7 +285,9 @@ def project_environment(
     if profile_name:
         base["NODRIX_PROFILE"] = profile_name
     context_name = None
-    state = project_root / ".nodrix" / "context"
+    state = StorageLayout(
+        project_root
+    ).context_file
     if state.is_file():
         context_name = state.read_text(encoding="utf-8").strip() or None
     if context_name is None:

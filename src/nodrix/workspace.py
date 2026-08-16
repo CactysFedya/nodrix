@@ -11,6 +11,8 @@ from typing import Any
 
 import yaml
 
+from .storage_layout import StorageLayout
+
 
 PROJECT_FILE = "nodrix.yaml"
 
@@ -64,14 +66,25 @@ def find_workspace(
 
 
 def resolve_project_root(value: str | Path | None = None) -> Path:
-    selected = Path(value or Path.cwd()).expanduser().resolve()
-    if (selected / ".nodrix" / "runs").exists():
+    selected = Path(
+        value or Path.cwd()
+    ).expanduser().resolve()
+
+    if StorageLayout(
+        selected
+    ).runs_root.exists():
         return selected
-    return find_workspace(selected) or selected
+
+    return find_workspace(
+        selected
+    ) or selected
 
 
 def _active_context(root: Path, config: dict[str, Any]) -> str | None:
-    state = root / ".nodrix" / "context"
+    state = StorageLayout(
+        root
+    ).context_file
+
     if state.is_file():
         selected = state.read_text(encoding="utf-8").strip()
         if selected:
@@ -86,8 +99,14 @@ def set_active_context(root: Path, name: str) -> Path:
     if name not in contexts:
         available = ", ".join(sorted(contexts)) or "none"
         raise KeyError(f"Unknown context {name!r}; available: {available}")
-    target = root / ".nodrix" / "context"
-    target.parent.mkdir(parents=True, exist_ok=True)
+    target = StorageLayout(
+        root
+    ).context_file
+
+    target.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
     target.write_text(name + "\n", encoding="utf-8")
     return target
 
@@ -539,7 +558,9 @@ def create_workspace(directory: Path, *, force: bool = False) -> list[Path]:
 
 
 def supervisor_state(root: Path) -> Path:
-    return root / ".nodrix" / "supervisor.json"
+    return StorageLayout(
+        root
+    ).supervisor_file
 
 
 def read_supervisor(root: Path) -> dict[str, Any]:

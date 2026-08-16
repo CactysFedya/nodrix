@@ -18,6 +18,7 @@ from .manifest import PipelineManifest, dump_manifest_redacted, dump_source_mani
 from .packages import resolve_package_node
 from .lockfile import build_lock
 from .validation import configured_security_issues
+from .storage_layout import StorageLayout
 from . import __version__
 
 
@@ -163,7 +164,12 @@ class NativePipelineRuntime:
         self.manifest = manifest
         self.manifest_path = manifest_path.resolve()
         self.base_dir = self.manifest_path.parent
-        self.run_root = (run_root or self.base_dir / ".nodrix" / "runs").resolve()
+        self.run_root = (
+            run_root
+            or StorageLayout(
+                self.base_dir
+            ).runs_root
+        ).resolve()
         self.specs: dict[str, NativeNodeSpec] = {}
         self.toolchain = NativeToolchain(_find_project_root(self.base_dir))
 

@@ -13,6 +13,7 @@ import typer
 from rich.table import Table
 
 from .cli_context import app, console
+from .storage_layout import StorageLayout
 from .workspace import (
     PROJECT_FILE,
     build_environment,
@@ -102,7 +103,10 @@ def context_list() -> None:
     ) or {}
     contexts = dict(config.get("contexts") or {})
     active = None
-    state = root / ".nodrix" / "context"
+    state = StorageLayout(
+        root
+    ).context_file
+
     if state.is_file():
         active = state.read_text(encoding="utf-8").strip()
     if not active:
@@ -311,8 +315,15 @@ def shell_command() -> None:
         console.print(f"[red]Cannot open workspace shell:[/red] {exc}")
         raise typer.Exit(1)
     shell = env.get("SHELL") or "/bin/bash"
-    rcfile = resolution.root / ".nodrix" / "shell.rc"
-    rcfile.parent.mkdir(parents=True, exist_ok=True)
+
+    rcfile = StorageLayout(
+        resolution.root
+    ).shell_rc_file
+
+    rcfile.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
     lines = [f"source {source!s}" for source in resolution.sources]
     lines.extend(
         f"export {key}={json.dumps(value)}"
@@ -348,8 +359,20 @@ def up_command(
             raise RuntimeError(
                 f"Pipeline is already running with pid {current_pid}"
             )
-        log_path = resolution.root / ".nodrix" / "logs" / "runtime.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        layout = StorageLayout(
+            resolution.root
+        )
+
+        log_path = (
+            layout.logs_root
+            / "runtime.log"
+        )
+
+        log_path.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
         command = [
             sys.executable,
             "-m",
@@ -357,7 +380,7 @@ def up_command(
             "run",
             pipeline or resolution.pipeline_name,
             "--run-root",
-            str(resolution.root / ".nodrix" / "runs"),
+            str(layout.runs_root),
         ]
         if profile:
             command.extend(["--profile", profile])
@@ -453,7 +476,12 @@ def logs_command(
     state = read_supervisor(root)
     path = Path(
         state.get("log")
-        or root / ".nodrix" / "logs" / "runtime.log"
+        or (
+            StorageLayout(
+                root
+            ).logs_root
+            / "runtime.log"
+        )
     )
     if not path.is_file():
         console.print(f"[red]Log file not found:[/red] {path}")

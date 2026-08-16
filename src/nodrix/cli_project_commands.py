@@ -24,6 +24,7 @@ from .migration import migrate_manifest
 from .project_templates import TEMPLATES, create_project
 from .presentation import render_run_active_info, render_run_summary
 from .runs import resolve_run
+from .storage_layout import StorageLayout
 from .ux import (
     render_node_details,
     render_pipeline_graph,
@@ -35,7 +36,14 @@ from .lockfile import verify_lock
 
 def _effective_run_root(value: Path | None) -> Path:
     # Run artifacts belong to the project that invoked Plyctl.
-    selected = value or (Path.cwd() / ".nodrix" / "runs")
+    selected = (
+        StorageLayout(
+            Path.cwd()
+        ).runs_root
+        if value is None
+        else value
+    )
+
     return selected.expanduser().resolve()
 
 
@@ -359,7 +367,9 @@ def run(
     pipeline = workspace.pipeline
     activate_workspace_environment(workspace)
     if run_root is None:
-        run_root = workspace.root / ".nodrix" / "runs"
+        run_root = StorageLayout(
+            workspace.root
+        ).runs_root
     if profile is None:
         profile = workspace.runtime_profile
 
