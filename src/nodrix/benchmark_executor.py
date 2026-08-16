@@ -62,6 +62,10 @@ class BenchmarkExecutor:
         self._clock = clock
         self._id_factory = id_factory
 
+    @property
+    def executor_id(self) -> str:
+        return BENCHMARK_EXECUTOR
+
     def execute(
         self,
         plan: PlanRecord,
@@ -105,7 +109,7 @@ class BenchmarkExecutor:
             return ExecutionRecord(
                 execution_id=execution_id,
                 plan=plan,
-                executor=BENCHMARK_EXECUTOR,
+                executor=self.executor_id,
                 state=ExecutionState.FAILED,
                 started_at=started_at,
                 finished_at=finished_at,
@@ -128,7 +132,7 @@ class BenchmarkExecutor:
         return ExecutionRecord(
             execution_id=execution_id,
             plan=plan,
-            executor=BENCHMARK_EXECUTOR,
+            executor=self.executor_id,
             state=ExecutionState.COMPLETED,
             started_at=started_at,
             finished_at=finished_at,
