@@ -640,60 +640,104 @@ def _write_cache_state(
     )
 
 
-def run_workflow(
-    name: str,
+
+def execute_workflow_plan(
+    plan,
     *,
-    root: str | Path | None = None,
-    environment_name: str | None = None,
     dry_run: bool = False,
     force: bool = False,
 ) -> WorkflowRunResult:
-    workflow, workflow_path, project_root = load_workflow(name, root=root)
-    env, _, selected_environment = project_environment(
-        project_root,
-        environment_name=environment_name,
+    """Execute exactly one already-resolved WorkflowPlanResult.
+
+    Plan-time cache/condition observations are advisory only.  Conditions and
+    cache eligibility are resolved again against the execution state, while
+    commands, cwd, environment overlays, timeout and failure policy come only
+    from the supplied plan.
+    """
+
+    from .workflow_planning import WorkflowPlanResult
+
+    if not isinstance(plan, WorkflowPlanResult):
+        raise TypeError(
+            "plan must be a WorkflowPlanResult"
+        )
+
+    project_root = Path(
+        plan.root
+    ).expanduser().resolve()
+
+    env = dict(
+        plan.execution_environment
     )
-    workflow_env = dict(workflow.get("environment") or {})
-    env.update({str(key): str(value) for key, value in workflow_env.items()})
-    if selected_environment:
-        env["NODRIX_ENVIRONMENT"] = selected_environment
+
+    if not env:
+        raise ValueError(
+            "workflow plan does not contain a resolved execution environment"
+        )
 
     now = datetime.now(timezone.utc)
-    stamp = now.strftime("%Y%m%dT%H%M%S.%fZ")
-    safe_name = "".join(
-        character if character.isalnum() or character in "-_" else "-"
-        for character in name
-    ).strip("-") or "workflow"
-    run_directory = project_root / ".nodrix" / "operations" / f"{stamp}-{safe_name}"
-    logs_directory = run_directory / "logs"
-    logs_directory.mkdir(parents=True, exist_ok=True)
+    stamp = now.strftime(
+        "%Y%m%dT%H%M%S.%fZ"
+    )
 
-    seen: set[str] = set()
-    step_results: list[WorkflowStepResult] = []
+    safe_name = "".join(
+        character
+        if character.isalnum()
+        or character in "-_"
+        else "-"
+        for character in plan.name
+    ).strip("-") or "workflow"
+
+    run_directory = (
+        project_root
+        / ".nodrix"
+        / "operations"
+        / f"{stamp}-{safe_name}"
+    )
+
+    logs_directory = (
+        run_directory / "logs"
+    )
+    logs_directory.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    step_results: list[
+        WorkflowStepResult
+    ] = []
+
     failed = False
-    steps = list(workflow.get("steps") or [])
-    for index, raw_step in enumerate(steps, start=1):
-        if not isinstance(raw_step, dict):
-            raise ValueError(f"Workflow step {index} must be a mapping")
-        step = dict(raw_step)
-        step_id = str(step.get("id") or f"step-{index}")
-        if step_id in seen:
-            raise ValueError(f"Duplicate workflow step id: {step_id}")
-        seen.add(step_id)
-        command = step.get("run")
-        if not isinstance(command, str) or not command.strip():
-            raise ValueError(f"Workflow step {step_id!r} must declare run")
-        log_path = logs_directory / f"{index:02d}-{step_id}.log"
+
+    for step in plan.steps:
+        command = step.command
+
+        log_path = (
+            logs_directory
+            / f"{step.index:02d}-{step.step_id}.log"
+        )
+
+        condition = (
+            None
+            if step.when_json is None
+            else json.loads(step.when_json)
+        )
+
         matches, detail = _condition_matches(
-            step.get("when"),
+            condition,
             root=project_root,
             env=env,
         )
+
         if not matches:
-            log_path.write_text(f"SKIPPED: {detail}\n", encoding="utf-8")
+            log_path.write_text(
+                f"SKIPPED: {detail}\n",
+                encoding="utf-8",
+            )
+
             step_results.append(
                 WorkflowStepResult(
-                    step_id=step_id,
+                    step_id=step.step_id,
                     status="skipped",
                     command=command,
                     returncode=None,
@@ -704,61 +748,106 @@ def run_workflow(
             )
             continue
 
-        cache_spec = _cache_spec(step)
+        cache_spec = (
+            {
+                "inputs": list(
+                    step.cache_inputs
+                ),
+                "outputs": list(
+                    step.cache_outputs
+                ),
+                "environment": list(
+                    step.cache_environment
+                ),
+            }
+            if step.cache_enabled
+            else None
+        )
+
         cache_state = None
         cache_fingerprint = None
+
         cache_env = dict(env)
         cache_env.update(
-            {
-                str(key): str(value)
-                for key, value in dict(step.get("environment") or {}).items()
-            }
-        )
-        if cache_spec is not None:
-            cache_state = _cache_state_path(project_root, name, step_id)
-            cache_fingerprint = _step_cache_fingerprint(
-                root=project_root,
-                step_id=step_id,
-                command=command,
-                step=step,
-                env=cache_env,
-                selected_environment=selected_environment,
-                spec=cache_spec,
+            dict(
+                step.environment_overrides
             )
-            raw_dependencies = step.get("depends_on") or []
-            if isinstance(raw_dependencies, str):
-                raw_dependencies = [raw_dependencies]
-            if not isinstance(raw_dependencies, list):
-                raise ValueError(
-                    f"Workflow step {step_id!r} depends_on must be a string or array"
+        )
+
+        if cache_spec is not None:
+            cache_state = _cache_state_path(
+                project_root,
+                plan.name,
+                step.step_id,
+            )
+
+            cache_fingerprint = (
+                _step_cache_fingerprint(
+                    root=project_root,
+                    step_id=step.step_id,
+                    command=command,
+                    step={
+                        "environment": dict(
+                            step.environment_overrides
+                        ),
+                    },
+                    env=cache_env,
+                    selected_environment=plan.environment,
+                    spec=cache_spec,
                 )
-            dependencies = [str(item) for item in raw_dependencies]
-            prior_statuses = {item.step_id: item.status for item in step_results}
+            )
+
+            prior_statuses = {
+                item.step_id: item.status
+                for item in step_results
+            }
+
             missing_dependencies = [
-                item for item in dependencies if item not in prior_statuses
+                item
+                for item in step.depends_on
+                if item not in prior_statuses
             ]
+
             if missing_dependencies:
-                rendered = ", ".join(missing_dependencies)
-                raise ValueError(
-                    f"Workflow step {step_id!r} depends on unknown or later step(s): {rendered}"
+                rendered = ", ".join(
+                    missing_dependencies
                 )
+                raise ValueError(
+                    f"Workflow step {step.step_id!r} depends on "
+                    f"unknown or later step(s): {rendered}"
+                )
+
             dirty_dependencies = [
                 item
-                for item in dependencies
-                if prior_statuses[item] not in {"cached", "skipped"}
+                for item in step.depends_on
+                if prior_statuses[item]
+                not in {"cached", "skipped"}
             ]
-            if not force and not dirty_dependencies and _cache_hit(
-                state_path=cache_state,
-                fingerprint=cache_fingerprint,
-                root=project_root,
-                spec=cache_spec,
-                env=cache_env,
+
+            if (
+                not force
+                and not dirty_dependencies
+                and _cache_hit(
+                    state_path=cache_state,
+                    fingerprint=cache_fingerprint,
+                    root=project_root,
+                    spec=cache_spec,
+                    env=cache_env,
+                )
             ):
-                detail = "inputs unchanged and cached outputs are present"
-                log_path.write_text(f"CACHED: {detail}\n", encoding="utf-8")
+                detail = (
+                    "inputs unchanged and cached outputs "
+                    "are present"
+                )
+
+                log_path.write_text(
+                    f"CACHED: {detail}\n",
+                    encoding="utf-8",
+                )
+
                 step_results.append(
                     WorkflowStepResult(
-                        step_id=step_id,
+                        step_id=step.step_id,
                         status="cached",
                         command=command,
                         returncode=0,
@@ -770,10 +859,14 @@ def run_workflow(
                 continue
 
         if dry_run:
-            log_path.write_text(command + "\n", encoding="utf-8")
+            log_path.write_text(
+                command + "\n",
+                encoding="utf-8",
+            )
+
             step_results.append(
                 WorkflowStepResult(
-                    step_id=step_id,
+                    step_id=step.step_id,
                     status="planned",
                     command=command,
                     returncode=None,
@@ -783,17 +876,20 @@ def run_workflow(
             )
             continue
 
-        cwd = _step_cwd(project_root, step.get("cwd"))
+        cwd = _step_cwd(
+            project_root,
+            step.cwd,
+        )
+
         step_env = dict(env)
         step_env.update(
-            {
-                str(key): str(value)
-                for key, value in dict(step.get("environment") or {}).items()
-            }
+            dict(
+                step.environment_overrides
+            )
         )
-        timeout_value = step.get("timeout_seconds")
-        timeout = float(timeout_value) if timeout_value is not None else None
+
         started = time.monotonic()
+
         try:
             completed = subprocess.run(
                 _shell_command(command),
@@ -802,51 +898,106 @@ def run_workflow(
                 check=False,
                 capture_output=True,
                 text=True,
-                timeout=timeout,
+                timeout=step.timeout_seconds,
             )
-            duration = time.monotonic() - started
+
+            duration = (
+                time.monotonic()
+                - started
+            )
+
             output = completed.stdout
+
             if completed.stderr:
-                output += ("\n" if output else "") + completed.stderr
-            log_path.write_text(output, encoding="utf-8")
-            status = "succeeded" if completed.returncode == 0 else "failed"
+                output += (
+                    "\n"
+                    if output
+                    else ""
+                ) + completed.stderr
+
+            log_path.write_text(
+                output,
+                encoding="utf-8",
+            )
+
+            status = (
+                "succeeded"
+                if completed.returncode == 0
+                else "failed"
+            )
+
             result = WorkflowStepResult(
-                step_id=step_id,
+                step_id=step.step_id,
                 status=status,
                 command=command,
                 returncode=completed.returncode,
                 duration_seconds=duration,
                 log_path=str(log_path),
             )
+
         except subprocess.TimeoutExpired as exc:
-            duration = time.monotonic() - started
+            duration = (
+                time.monotonic()
+                - started
+            )
+
             stdout = exc.stdout or ""
             stderr = exc.stderr or ""
+
             if isinstance(stdout, bytes):
-                stdout = stdout.decode(errors="replace")
+                stdout = stdout.decode(
+                    errors="replace"
+                )
+
             if isinstance(stderr, bytes):
-                stderr = stderr.decode(errors="replace")
+                stderr = stderr.decode(
+                    errors="replace"
+                )
+
             output = str(stdout)
+
             if stderr:
-                output += ("\n" if output else "") + str(stderr)
-            output += f"\nTimed out after {timeout} seconds\n"
-            log_path.write_text(output, encoding="utf-8")
+                output += (
+                    "\n"
+                    if output
+                    else ""
+                ) + str(stderr)
+
+            output += (
+                f"\nTimed out after "
+                f"{step.timeout_seconds} seconds\n"
+            )
+
+            log_path.write_text(
+                output,
+                encoding="utf-8",
+            )
+
             result = WorkflowStepResult(
-                step_id=step_id,
+                step_id=step.step_id,
                 status="failed",
                 command=command,
                 returncode=None,
                 duration_seconds=duration,
                 log_path=str(log_path),
-                detail=f"timeout after {timeout} seconds",
+                detail=(
+                    "timeout after "
+                    f"{step.timeout_seconds} seconds"
+                ),
             )
+
         step_results.append(result)
+
         if (
             result.status == "succeeded"
             and cache_spec is not None
             and cache_state is not None
             and cache_fingerprint is not None
-            and _cache_outputs_exist(project_root, cache_spec, cache_env)
+            and _cache_outputs_exist(
+                project_root,
+                cache_spec,
+                cache_env,
+            )
         ):
             _write_cache_state(
                 state_path=cache_state,
@@ -854,21 +1005,60 @@ def run_workflow(
                 command=command,
                 spec=cache_spec,
             )
+
         if result.status == "failed":
             failed = True
-            if not bool(step.get("continue_on_error", False)):
+
+            if not step.continue_on_error:
                 break
 
-    finished = datetime.now(timezone.utc)
-    status = "planned" if dry_run else "failed" if failed else "succeeded"
-    result = WorkflowRunResult(
-        name=name,
+    finished = datetime.now(
+        timezone.utc
+    )
+
+    status = (
+        "planned"
+        if dry_run
+        else "failed"
+        if failed
+        else "succeeded"
+    )
+
+    return WorkflowRunResult(
+        name=plan.name,
         status=status,
         root=str(project_root),
-        workflow_path=str(workflow_path),
-        run_directory=str(run_directory),
+        workflow_path=plan.workflow_path,
+        run_directory=str(
+            run_directory
+        ),
         started_at=now.isoformat(),
         finished_at=finished.isoformat(),
         steps=tuple(step_results),
     )
-    return result
+
+
+def run_workflow(
+    name: str,
+    *,
+    root: str | Path | None = None,
+    environment_name: str | None = None,
+    dry_run: bool = False,
+    force: bool = False,
+) -> WorkflowRunResult:
+    """Compatibility front door: plan first, then execute that exact plan."""
+
+    from .workflow_planning import plan_workflow
+
+    plan = plan_workflow(
+        name,
+        root=root,
+        environment_name=environment_name,
+        force=force,
+    )
+
+    return execute_workflow_plan(
+        plan,
+        dry_run=dry_run,
+        force=force,
+    )

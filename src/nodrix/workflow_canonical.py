@@ -35,17 +35,21 @@ def _digest_payload(plan: WorkflowPlanResult) -> dict[str, Any]:
             {
                 "index": step.index,
                 "step_id": step.step_id,
-                "status": step.status,
                 "recipe": step.recipe,
                 "depends_on": list(step.depends_on),
-                "cache": step.cache,
-                "reasons": list(step.reasons),
                 "command": step.command,
                 "cwd": step.cwd,
+                "when_json": step.when_json,
+                "environment_overrides": [
+                    list(item)
+                    for item in step.environment_overrides
+                ],
+                "timeout_seconds": step.timeout_seconds,
+                "continue_on_error": step.continue_on_error,
+                "cache_enabled": step.cache_enabled,
                 "cache_inputs": list(step.cache_inputs),
                 "cache_outputs": list(step.cache_outputs),
                 "cache_environment": list(step.cache_environment),
-                "fingerprint": step.fingerprint,
             }
             for step in plan.steps
         ],

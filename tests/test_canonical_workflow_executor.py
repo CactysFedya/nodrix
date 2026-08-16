@@ -127,10 +127,15 @@ def _result(
 
 
 def test_workflow_executor_returns_completed_execution_record() -> None:
-    calls: list[tuple[str, dict[str, object]]] = []
+    calls: list[
+        tuple[WorkflowPlanResult, dict[str, object]]
+    ] = []
 
-    def runner(name: str, **kwargs):
-        calls.append((name, kwargs))
+    def runner(
+        domain_plan: WorkflowPlanResult,
+        **kwargs,
+    ):
+        calls.append((domain_plan, kwargs))
         return _result()
 
     times = iter((_time(12), _time(13)))
@@ -158,17 +163,15 @@ def test_workflow_executor_returns_completed_execution_record() -> None:
     assert record.finished_at == _time(13)
     assert record.execution_id.startswith("workflow-")
 
-    assert calls == [
-        (
-            "build",
-            {
-                "root": "/workspace/project",
-                "environment_name": "robot",
-                "dry_run": False,
-                "force": True,
-            },
-        )
-    ]
+    assert len(calls) == 1
+
+    called_plan, called_parameters = calls[0]
+
+    assert called_plan is plan.payload
+    assert called_parameters == {
+        "dry_run": False,
+        "force": True,
+    }
 
     assert record.details["workflow"] == "build"
     assert record.details["workflow_status"] == "succeeded"

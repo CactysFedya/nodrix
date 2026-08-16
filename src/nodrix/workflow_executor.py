@@ -1,10 +1,10 @@
 """Canonical executor adapter for Nodrix workflows.
 
-The existing ``run_workflow`` function remains the workflow execution engine.
-WorkflowExecutor gives that execution domain a canonical boundary:
+WorkflowExecutor executes the exact WorkflowPlanResult carried by the
+canonical PlanRecord:
 
 PlanRecord(kind=workflow)
-    -> run_workflow(...)
+    -> execute_workflow_plan(payload)
     -> ExecutionRecord
 
 It deliberately does not create RunRecord history.  Durable history belongs
@@ -25,7 +25,7 @@ from .model import (
 )
 from .workflow_execution import (
     WorkflowRunResult,
-    run_workflow,
+    execute_workflow_plan,
 )
 from .workflow_planning import WorkflowPlanResult
 
@@ -91,12 +91,12 @@ def _boolean_parameter(
 
 
 class WorkflowExecutor:
-    """Execute canonical workflow plans through the existing workflow engine."""
+    """Execute the exact workflow payload carried by a canonical plan."""
 
     def __init__(
         self,
         *,
-        runner: WorkflowRunner = run_workflow,
+        runner: WorkflowRunner = execute_workflow_plan,
         clock: Clock = _utc_now,
     ) -> None:
         if not callable(runner):
@@ -133,9 +133,7 @@ class WorkflowExecutor:
 
         try:
             result = self._runner(
-                domain_plan.name,
-                root=domain_plan.root,
-                environment_name=domain_plan.environment,
+                domain_plan,
                 dry_run=dry_run,
                 force=force,
             )

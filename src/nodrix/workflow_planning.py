@@ -7,7 +7,7 @@ operation run directory.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import json
 from pathlib import Path
 import platform
@@ -42,6 +42,14 @@ class WorkflowStepPlan:
     fingerprint: str | None = None
     state_path: str | None = None
 
+    # Immutable executable semantics.  The fields above such as status,
+    # cache, reasons and fingerprint are planning observations only.
+    when_json: str | None = None
+    environment_overrides: tuple[tuple[str, str], ...] = ()
+    timeout_seconds: float | None = None
+    continue_on_error: bool = False
+    cache_enabled: bool = False
+
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
 
@@ -54,6 +62,15 @@ class WorkflowPlanResult:
     environment: str | None
     generated: bool
     steps: tuple[WorkflowStepPlan, ...]
+
+    # Resolved execution environment is intentionally kept in-memory only.
+    # as_dict() does not expose it, which avoids leaking sourced environment
+    # values through normal planning output or canonical metadata.
+    execution_environment: tuple[tuple[str, str], ...] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -71,6 +88,20 @@ class WorkflowPlanResult:
                 return item
         available = ", ".join(item.step_id for item in self.steps) or "none"
         raise LookupError(f"Unknown workflow step {step_id!r}; available: {available}")
+
+
+def _condition_snapshot(value: Any) -> str | None:
+    """Store a stable immutable representation of one runtime condition."""
+
+    if value is None:
+        return None
+
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _string_list(value: Any, field: str) -> tuple[str, ...]:
@@ -204,13 +235,23 @@ def plan_workflow(
             env=env,
         )
 
+        environment_overrides = tuple(
+            sorted(
+                (
+                    str(key),
+                    str(value),
+                )
+                for key, value in dict(
+                    step.get("environment") or {}
+                ).items()
+            )
+        )
+
         cache_env = dict(env)
         cache_env.update(
-            {
-                str(key): str(value)
-                for key, value in dict(step.get("environment") or {}).items()
-            }
+            dict(environment_overrides)
         )
+
         spec = _cache_spec(step)
         inputs = tuple(spec["inputs"]) if spec is not None else ()
         outputs = tuple(spec["outputs"]) if spec is not None else ()
@@ -296,6 +337,13 @@ def plan_workflow(
                 )
             reasons = tuple(reasons_list)
 
+        timeout_value = step.get("timeout_seconds")
+        timeout_seconds = (
+            float(timeout_value)
+            if timeout_value is not None
+            else None
+        )
+
         statuses[step_id] = status
         planned.append(
             WorkflowStepPlan(
@@ -313,6 +361,15 @@ def plan_workflow(
                 cache_environment=cache_environment,
                 fingerprint=fingerprint,
                 state_path=str(state_path) if state_path is not None else None,
+                when_json=_condition_snapshot(
+                    step.get("when")
+                ),
+                environment_overrides=environment_overrides,
+                timeout_seconds=timeout_seconds,
+                continue_on_error=bool(
+                    step.get("continue_on_error", False)
+                ),
+                cache_enabled=spec is not None,
             )
         )
 
@@ -323,6 +380,9 @@ def plan_workflow(
         environment=selected_environment,
         generated=isinstance(workflow.get("generated"), dict),
         steps=tuple(planned),
+        execution_environment=tuple(
+            sorted(env.items())
+        ),
     )
 
 
