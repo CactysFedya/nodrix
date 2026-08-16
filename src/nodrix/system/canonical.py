@@ -24,32 +24,12 @@ from nodrix.model import (
 )
 
 from .catalog import DefinitionCatalog
+from .definition import (
+    DEFAULT_SYSTEM_NAMESPACE,
+    system_entity_ref,
+)
 from .model import SystemModel
 from .planning import SystemExecutionPlan, plan_system
-
-
-DEFAULT_SYSTEM_NAMESPACE = "project"
-
-
-def system_entity_ref(
-    name: str,
-    *,
-    namespace: str = DEFAULT_SYSTEM_NAMESPACE,
-) -> EntityRef:
-    """Return the canonical logical identity of one System.
-
-    System Model v1 itself remains unchanged.  The bridge derives a canonical
-    identity from the existing system name and an explicit namespace.
-
-    Callers that need a different identity policy may pass an explicit
-    EntityRef to ``system_plan_record`` or ``plan_canonical_system``.
-    """
-
-    return EntityRef(
-        kind="system",
-        namespace=namespace,
-        name=name,
-    )
 
 
 def system_plan_digest(

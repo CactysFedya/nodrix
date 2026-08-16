@@ -8,16 +8,14 @@ backend-specific lowering is a later layer.
 from __future__ import annotations
 
 from collections import defaultdict, deque
-import hashlib
-import json
 from typing import Any, Literal, Mapping
 
 from pydantic import Field
 
 from ._base import SystemBaseModel
 from .catalog import DefinitionCatalog
+from .definition import system_definition_digest
 from .graph import split_local_endpoint, split_system_endpoint
-from .io import system_to_canonical
 from .model import SystemModel
 from .validation import SystemValidationReport, validate_system
 
@@ -208,16 +206,6 @@ class _EndpointResolution:
         self.target = target
         self.backend = backend
         self.type_id = type_id
-
-
-def _system_sha256(system: SystemModel) -> str:
-    encoded = json.dumps(
-        system_to_canonical(system),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _target_backend(properties: Mapping[str, Any], *, path: str) -> str:
@@ -697,7 +685,7 @@ def plan_system(
     artifacts_tuple = tuple(planned_artifacts)
     return SystemExecutionPlan(
         system=system.name,
-        system_sha256=_system_sha256(system),
+        system_sha256=system_definition_digest(system),
         targets=planned_targets,
         resources=planned_resources,
         resource_order=resource_order,
