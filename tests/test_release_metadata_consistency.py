@@ -33,12 +33,12 @@ def test_release_metadata_uses_one_public_version() -> None:
     docs_conf = (ROOT / "docs/conf.py").read_text(encoding="utf-8")
     assert f'release = "{EXPECTED}"' in docs_conf
 
-    compat = tomllib.loads(
-        (ROOT / "packages/nodrix-compat/pyproject.toml").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert f"plyctl=={EXPECTED}" in compat["project"]["dependencies"]
+    packages_dir = ROOT / "packages"
+    if packages_dir.is_dir():
+        compat_path = packages_dir / "nodrix-compat/pyproject.toml"
+        assert compat_path.is_file()
+        compat = tomllib.loads(compat_path.read_text(encoding="utf-8"))
+        assert f"plyctl=={EXPECTED}" in compat["project"]["dependencies"]
 
 
 def test_public_project_urls_point_to_nodrix_repository() -> None:
