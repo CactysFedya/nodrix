@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-import json
 import os
 from pathlib import Path
 from typing import Any, Mapping
 
-import yaml
 
 from .execution_plan import compile_execution_plan
 from .manifest import ManifestLoadResult, PipelineManifest, canonical_config_path
@@ -525,25 +523,22 @@ def write_optimization_bundle(
     objectives: Mapping[str, Any] | None = None,
     constraints: Mapping[str, Any] | None = None,
 ) -> tuple[Path, Path, dict[str, Any]]:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    result = optimization_spec(
+    """Compatibility adapter around the authoritative optimization planner."""
+
+    from .optimization import (
+        build_optimization_plan,
+        write_optimization_plan,
+    )
+
+    plan = build_optimization_plan(
+        pipeline,
         manifest,
         max_variants=max_variants,
         objectives=objectives,
         constraints=constraints,
     )
-    spec = {
-        "version": 1,
-        "pipeline": str(pipeline.resolve()),
-        "warmup": 1,
-        "repeat": 3,
-        "variants": result["variants"],
-    }
-    spec_path = output_dir / "benchmark-variants.yaml"
-    report_path = output_dir / "optimization-plan.json"
-    spec_path.write_text(yaml.safe_dump(spec, sort_keys=False), encoding="utf-8")
-    report_path.write_text(
-        json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-        encoding="utf-8",
+
+    return write_optimization_plan(
+        plan,
+        output_dir,
     )
-    return spec_path, report_path, result

@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
+
+import yaml
 
 from .benchmarking import (
     BenchmarkPlan,
@@ -222,8 +225,161 @@ def build_optimization_plan(
     )
 
 
+
+def optimization_benchmark_spec(
+    plan: OptimizationPlan,
+) -> dict[str, Any]:
+    """Materialize the benchmark specification represented by an exact plan."""
+
+    if not isinstance(
+        plan,
+        OptimizationPlan,
+    ):
+        raise TypeError(
+            "plan must be an OptimizationPlan"
+        )
+
+    rendered = plan.as_dict()
+
+    return {
+        "version": 1,
+        "pipeline": str(
+            plan.pipeline
+        ),
+        "warmup": (
+            plan.benchmark_plan.warmup
+        ),
+        "repeat": (
+            plan.benchmark_plan.repeat
+        ),
+        "variants": dict(
+            rendered["variants"]
+        ),
+    }
+
+
+def optimization_result(
+    plan: OptimizationPlan,
+    *,
+    benchmark: Mapping[str, Any] | None = None,
+    recommendation: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the legacy/public optimization result from one exact plan."""
+
+    if not isinstance(
+        plan,
+        OptimizationPlan,
+    ):
+        raise TypeError(
+            "plan must be an OptimizationPlan"
+        )
+
+    result = plan.as_dict()
+
+    if benchmark is not None:
+        if not isinstance(
+            benchmark,
+            Mapping,
+        ):
+            raise TypeError(
+                "benchmark must be a mapping or None"
+            )
+
+        result["benchmark"] = dict(
+            benchmark
+        )
+
+    if recommendation is not None:
+        if not isinstance(
+            recommendation,
+            Mapping,
+        ):
+            raise TypeError(
+                "recommendation must be a mapping or None"
+            )
+
+        result["recommendation"] = dict(
+            recommendation
+        )
+
+    return result
+
+
+def write_optimization_plan(
+    plan: OptimizationPlan,
+    output_dir: str | Path,
+    *,
+    benchmark: Mapping[str, Any] | None = None,
+    recommendation: Mapping[str, Any] | None = None,
+) -> tuple[Path, Path, dict[str, Any]]:
+    """Write artifacts from an already resolved OptimizationPlan."""
+
+    if not isinstance(
+        plan,
+        OptimizationPlan,
+    ):
+        raise TypeError(
+            "plan must be an OptimizationPlan"
+        )
+
+    root = Path(
+        output_dir
+    ).expanduser().resolve()
+
+    root.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    spec_path = (
+        root / "benchmark-variants.yaml"
+    )
+
+    report_path = (
+        root / "optimization-plan.json"
+    )
+
+    spec = optimization_benchmark_spec(
+        plan
+    )
+
+    result = optimization_result(
+        plan,
+        benchmark=benchmark,
+        recommendation=recommendation,
+    )
+
+    spec_path.write_text(
+        yaml.safe_dump(
+            spec,
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    report_path.write_text(
+        json.dumps(
+            result,
+            indent=2,
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    return (
+        spec_path,
+        report_path,
+        result,
+    )
+
+
 __all__ = [
     "OPTIMIZATION_NOTE",
     "OptimizationPlan",
     "build_optimization_plan",
+    "optimization_benchmark_spec",
+    "optimization_result",
+    "write_optimization_plan",
 ]

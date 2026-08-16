@@ -415,6 +415,9 @@ class OptimizationExecutor:
             details={
                 **details,
                 **nested,
+                "benchmark": dict(
+                    suite
+                ),
                 "recommendation": (
                     recommendation
                 ),

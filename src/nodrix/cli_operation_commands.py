@@ -12,7 +12,6 @@ import yaml
 from .benchmarking import (
     direct_benchmark_plan,
     load_benchmark_plan,
-    run_benchmark_suite,
 )
 from .benchmark_operation import (
     execute_benchmark_operation,
@@ -29,12 +28,16 @@ from .cli_context import (
 )
 from .hybrid_runtime import HybridPipelineRuntime
 from .manifest import load_manifest_details
+from .optimization import (
+    build_optimization_plan,
+)
+from .optimization_operation import (
+    execute_optimization_operation,
+)
 from .planning import (
     build_static_plan,
     diagnose_report,
     explain_target,
-    select_optimization_variant,
-    write_optimization_bundle,
 )
 
 
@@ -451,29 +454,37 @@ def optimize_command(
             }.items()
             if value is not None
         }
-        spec_path, report_path, result = write_optimization_bundle(
+        plan = build_optimization_plan(
             pipeline,
             details.manifest,
-            output_dir.expanduser().resolve(),
             max_variants=max_variants,
             constraints=constraints,
         )
-        if run_benchmarks:
-            benchmark_plan = load_benchmark_plan(spec_path)
-            benchmark_result = run_benchmark_suite(
-                benchmark_plan,
-                _execute_benchmark_run,
-                output_root=output_dir.expanduser().resolve() / "benchmarks",
+
+        outcome = execute_optimization_operation(
+            plan,
+            run_benchmarks=run_benchmarks,
+            run_callable=_execute_benchmark_run,
+            output_dir=output_dir,
+        )
+
+        if not outcome.successful:
+            message = (
+                outcome.execution.details.get(
+                    "benchmark_error"
+                )
+                or outcome.execution.details.get(
+                    "message"
+                )
+                or "optimization execution failed"
             )
-            result = {**result, "benchmark": benchmark_result}
-            result["recommendation"] = select_optimization_variant(
-                benchmark_result,
-                constraints=constraints,
+            raise RuntimeError(
+                str(message)
             )
-            report_path.write_text(
-                json.dumps(result, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
-                encoding="utf-8",
-            )
+
+        result = outcome.summary()
+        spec_path = outcome.spec_path
+        report_path = outcome.report_path
     except Exception as exc:
         console.print(f"[red]Optimization planning failed:[/red] {exc}")
         raise typer.Exit(1)
