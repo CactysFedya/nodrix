@@ -393,3 +393,34 @@ def test_explicit_operation_kind_overrides_builtin_binding() -> None:
     )
 
     assert resolved.value == "vendor.cross-build"
+
+
+def test_optimize_workflow_resolves_to_builtin_operation_kind() -> None:
+    from nodrix.model import OPTIMIZE
+    from nodrix.workflow_operation import (
+        resolve_workflow_operation_kind,
+    )
+
+    assert (
+        resolve_workflow_operation_kind("optimize")
+        == OPTIMIZE
+    )
+
+
+def test_custom_workflow_remains_extensible() -> None:
+    from nodrix.model import OperationKind
+    from nodrix.workflow_operation import (
+        resolve_workflow_operation_kind,
+    )
+
+    custom = OperationKind(
+        "robot.flash"
+    )
+
+    assert (
+        resolve_workflow_operation_kind(
+            "flash",
+            requested=custom,
+        )
+        == custom
+    )

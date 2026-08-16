@@ -26,6 +26,7 @@ from .model import (
     CLEANUP,
     DIAGNOSE,
     EXPORT,
+    OPTIMIZE,
     PACKAGE,
     PREPARE,
     PROFILE,
@@ -61,6 +62,7 @@ WORKFLOW_OPERATION_KINDS = {
     "validate": VALIDATE,
     "profile": PROFILE,
     "benchmark": BENCHMARK,
+    "optimize": OPTIMIZE,
     "diagnose": DIAGNOSE,
     "calibrate": CALIBRATE,
     "export": EXPORT,
@@ -276,4 +278,5 @@ __all__ = [
     "WORKFLOW_RUN_OPERATION",
     "WorkflowOperationResult",
     "execute_workflow_operation",
+    "resolve_workflow_operation_kind",
 ]
