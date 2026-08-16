@@ -14,15 +14,19 @@ No domain-specific PlanKind or executor identity is required here.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
 from .model import (
     ExecutionRecord,
+    MaterializedRef,
     RelationGraph,
     RunRecord,
+    combine_provenance,
     record_run,
+    run_io_relations,
     run_lifecycle_relations,
 )
 from .run_document import write_run_document
@@ -42,6 +46,8 @@ def persist_execution(
     *,
     project: str | Path = ".",
     run_id: str | None = None,
+    inputs: Iterable[MaterializedRef] = (),
+    outputs: Iterable[MaterializedRef] = (),
     summary: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
 ) -> PersistedRun:
@@ -80,7 +86,14 @@ def persist_execution(
         metadata=metadata,
     )
 
-    provenance = run_lifecycle_relations(run)
+    provenance = combine_provenance(
+        run_lifecycle_relations(run),
+        run_io_relations(
+            run,
+            inputs=inputs,
+            outputs=outputs,
+        ),
+    )
 
     path = write_run_document(
         run,
