@@ -56,3 +56,6 @@ Makefile.native
 /sources/
 /workspaces/
 /artifacts/
+
+# Canonical Nodrix materialized datasets
+/datasets/
