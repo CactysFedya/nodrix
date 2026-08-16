@@ -486,3 +486,60 @@ def test_optimize_cli_routes_through_canonical_operation(
         document["plan"]["kind"]
         == "optimization"
     )
+
+
+def test_optimization_service_resolves_benchmark_policy_into_exact_plan(
+    tmp_path: Path,
+) -> None:
+    plan = _plan(
+        tmp_path
+    )
+
+    outcome = execute_optimization_operation(
+        plan,
+        run_benchmarks=False,
+        output_dir=(
+            tmp_path / "optimization"
+        ),
+    )
+
+    assert (
+        outcome.plan.payload.run_benchmarks
+        is False
+    )
+
+    assert (
+        outcome.execution.details[
+            "run_benchmarks"
+        ]
+        is False
+    )
+
+
+def test_measured_optimization_carries_benchmark_policy_in_exact_plan(
+    tmp_path: Path,
+) -> None:
+    plan = _plan(
+        tmp_path
+    )
+
+    outcome = execute_optimization_operation(
+        plan,
+        run_benchmarks=True,
+        run_callable=_runner,
+        output_dir=(
+            tmp_path / "optimization"
+        ),
+    )
+
+    assert (
+        outcome.plan.payload.run_benchmarks
+        is True
+    )
+
+    assert (
+        outcome.execution.details[
+            "run_benchmarks"
+        ]
+        is True
+    )

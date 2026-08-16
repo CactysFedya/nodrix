@@ -99,29 +99,6 @@ def _validate_plan(
     return plan.payload
 
 
-def _boolean_parameter(
-    plan: PlanRecord,
-    name: str,
-    *,
-    default: bool = False,
-) -> bool:
-    value = plan.operation.parameters.get(
-        name,
-        default,
-    )
-
-    if not isinstance(
-        value,
-        bool,
-    ):
-        raise TypeError(
-            f"operation parameter {name!r} "
-            "must be a boolean"
-        )
-
-    return value
-
-
 def _base_details(
     plan: OptimizationPlan,
     *,
@@ -212,10 +189,7 @@ class OptimizationExecutor:
         )
 
         run_benchmarks = (
-            _boolean_parameter(
-                plan,
-                "run_benchmarks",
-            )
+            domain_plan.run_benchmarks
         )
 
         execution_id = (
@@ -269,7 +243,7 @@ class OptimizationExecutor:
 
         benchmark_operation = Operation(
             kind=BENCHMARK,
-            subject=plan.operation.subject,
+            subject=plan.subject,
             subject_revision=(
                 plan.subject_revision
             ),

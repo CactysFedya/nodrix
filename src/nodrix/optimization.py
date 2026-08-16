@@ -36,6 +36,7 @@ class OptimizationPlan:
     objectives: Mapping[str, Any]
     constraints: Mapping[str, Any]
     benchmark_plan: BenchmarkPlan
+    run_benchmarks: bool = False
 
     def __post_init__(self) -> None:
         pipeline = Path(
@@ -67,6 +68,14 @@ class OptimizationPlan:
         ):
             raise TypeError(
                 "benchmark_plan must be a BenchmarkPlan"
+            )
+
+        if not isinstance(
+            self.run_benchmarks,
+            bool,
+        ):
+            raise TypeError(
+                "run_benchmarks must be a boolean"
             )
 
         benchmark_pipeline = (

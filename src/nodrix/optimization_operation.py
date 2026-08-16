@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -144,6 +144,13 @@ def execute_optimization_operation(
             "run_benchmarks must be a boolean"
         )
 
+    # Resolve the requested execution policy into the exact domain Plan
+    # before canonical planning and execution.
+    plan = replace(
+        plan,
+        run_benchmarks=run_benchmarks,
+    )
+
     artifact_root = (
         Path(output_dir)
         .expanduser()
@@ -167,7 +174,7 @@ def execute_optimization_operation(
 
     operation = optimization_operation(
         plan,
-        run_benchmarks=run_benchmarks,
+        run_benchmarks=plan.run_benchmarks,
     )
 
     revision = (
@@ -200,7 +207,7 @@ def execute_optimization_operation(
     else:
         benchmark_executor = None
 
-        if run_benchmarks:
+        if plan.run_benchmarks:
             if run_callable is None:
                 raise ValueError(
                     "run_benchmarks requires "
@@ -225,7 +232,7 @@ def execute_optimization_operation(
         canonical_plan,
         output_root=(
             artifact_root / "benchmarks"
-            if run_benchmarks
+            if plan.run_benchmarks
             else None
         ),
     )
@@ -306,7 +313,7 @@ def execute_optimization_operation(
                 plan.variants
             ),
             "run_benchmarks": (
-                run_benchmarks
+                plan.run_benchmarks
             ),
             "benchmark_suite_dir": (
                 execution.details.get(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import (
     datetime,
     timezone,
@@ -51,6 +52,8 @@ def _time(
 
 def _domain_plan(
     root: Path,
+    *,
+    run_benchmarks: bool = False,
 ):
     pipeline = (
         root / "pipeline.yaml"
@@ -68,12 +71,17 @@ def _domain_plan(
         nodes={},
     )
 
-    return build_optimization_plan(
+    plan = build_optimization_plan(
         pipeline,
         manifest,
         constraints={
             "latency_p95_ms": 20.0,
         },
+    )
+
+    return replace(
+        plan,
+        run_benchmarks=run_benchmarks,
     )
 
 
@@ -112,7 +120,8 @@ def _canonical_plan(
     run_benchmarks: bool,
 ) -> tuple[object, PlanRecord]:
     domain = _domain_plan(
-        root
+        root,
+        run_benchmarks=run_benchmarks,
     )
 
     operation = _operation(
@@ -524,3 +533,115 @@ def test_optimization_executor_rejects_wrong_plan_kind(
             OptimizationExecutor()
             .execute(wrong)
         )
+
+
+def test_optimization_plan_rejects_non_boolean_execution_control(
+    tmp_path: Path,
+) -> None:
+    plan = _domain_plan(
+        tmp_path
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="run_benchmarks must be a boolean",
+    ):
+        replace(
+            plan,
+            run_benchmarks="yes",
+        )
+
+
+def test_optimization_plan_digest_includes_execution_control(
+    tmp_path: Path,
+) -> None:
+    plan = _domain_plan(
+        tmp_path
+    )
+
+    measured = replace(
+        plan,
+        run_benchmarks=True,
+    )
+
+    assert (
+        optimization_plan_digest(
+            plan
+        )
+        != optimization_plan_digest(
+            measured
+        )
+    )
+
+
+def test_optimization_executor_uses_plan_control_not_operation_intent(
+    tmp_path: Path,
+) -> None:
+    domain = _domain_plan(
+        tmp_path,
+        run_benchmarks=True,
+    )
+
+    original = _operation(
+        run_benchmarks=False,
+    )
+
+    record = optimization_plan_record(
+        domain,
+        operation=original,
+        subject_revision=(
+            original.subject_revision
+        ),
+    )
+
+    benchmark_executor = (
+        FakeBenchmarkExecutor()
+    )
+
+    times = iter(
+        (
+            _time(12),
+            _time(13),
+        )
+    )
+
+    execution = OptimizationExecutor(
+        benchmark_executor=(
+            benchmark_executor
+        ),
+        clock=lambda: next(times),
+        id_factory=lambda: (
+            "optimization-plan-wins"
+        ),
+    ).execute(
+        record,
+        output_root=(
+            tmp_path / "benchmarks"
+        ),
+    )
+
+    # Operation provenance says False, but the exact Plan says True.
+    assert (
+        record.operation.parameters[
+            "run_benchmarks"
+        ]
+        is False
+    )
+
+    assert (
+        record.payload.run_benchmarks
+        is True
+    )
+
+    assert len(
+        benchmark_executor.calls
+    ) == 1
+
+    assert execution.successful
+
+    assert (
+        execution.details[
+            "run_benchmarks"
+        ]
+        is True
+    )

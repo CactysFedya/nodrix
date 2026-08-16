@@ -36,6 +36,9 @@ def optimization_plan_digest(
         "pipeline_name": (
             plan.pipeline_name
         ),
+        "run_benchmarks": (
+            plan.run_benchmarks
+        ),
         "objectives": dict(
             plan.objectives
         ),
@@ -121,6 +124,9 @@ def optimization_plan_record(
         ),
         "pipeline": (
             plan.pipeline_name
+        ),
+        "run_benchmarks": (
+            plan.run_benchmarks
         ),
         "variant_count": len(
             plan.variants
