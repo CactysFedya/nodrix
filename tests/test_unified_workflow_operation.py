@@ -424,3 +424,108 @@ def test_custom_workflow_remains_extensible() -> None:
         )
         == custom
     )
+
+
+def test_declared_workflow_operation_binding_reaches_canonical_operation(
+    tmp_path: Path,
+) -> None:
+    from nodrix.project_foundation import (
+        add_project_resource,
+        create_progressive_project,
+    )
+    from nodrix.workflow_operation import (
+        execute_workflow_operation,
+    )
+
+    create_progressive_project(
+        tmp_path
+    )
+
+    resource = add_project_resource(
+        "workflow",
+        "flash",
+        root=tmp_path,
+    )
+
+    resource.path.write_text(
+        "schema: nodrix.workflow/v1\n"
+        "name: flash\n"
+        "implements: robot.flash\n"
+        "steps:\n"
+        "  - id: write\n"
+        "    run: echo flash\n",
+        encoding="utf-8",
+    )
+
+    outcome = execute_workflow_operation(
+        "flash",
+        root=tmp_path,
+        dry_run=True,
+    )
+
+    assert (
+        outcome.plan.operation.kind_name
+        == "robot.flash"
+    )
+
+    assert (
+        outcome.plan.payload.implements
+        == "robot.flash"
+    )
+
+
+def test_explicit_operation_kind_overrides_declared_workflow_binding(
+    tmp_path: Path,
+) -> None:
+    from nodrix.project_foundation import (
+        add_project_resource,
+        create_progressive_project,
+    )
+    from nodrix.workflow_operation import (
+        execute_workflow_operation,
+    )
+
+    create_progressive_project(
+        tmp_path
+    )
+
+    resource = add_project_resource(
+        "workflow",
+        "build",
+        root=tmp_path,
+    )
+
+    resource.path.write_text(
+        "schema: nodrix.workflow/v1\n"
+        "name: build\n"
+        "implements: vendor.cross-build\n"
+        "steps:\n"
+        "  - id: build\n"
+        "    run: echo build\n",
+        encoding="utf-8",
+    )
+
+    outcome = execute_workflow_operation(
+        "build",
+        root=tmp_path,
+        dry_run=True,
+        operation_kind="debug.cross-build",
+    )
+
+    assert (
+        outcome.plan.operation.kind_name
+        == "debug.cross-build"
+    )
+
+
+def test_declared_operation_binding_overrides_workflow_name_convention() -> None:
+    from nodrix.workflow_operation import (
+        resolve_workflow_operation_kind,
+    )
+
+    resolved = resolve_workflow_operation_kind(
+        "build",
+        declared="vendor.cross-build",
+    )
+
+    assert resolved.value == "vendor.cross-build"

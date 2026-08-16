@@ -159,6 +159,7 @@ class WorkflowOperationResult:
 def resolve_workflow_operation_kind(
     workflow: str,
     *,
+    declared: OperationKind | str | None = None,
     requested: OperationKind | str | None = None,
 ) -> OperationKind:
     """Resolve the canonical OperationKind implemented by one workflow.
@@ -167,8 +168,13 @@ def resolve_workflow_operation_kind(
     operation kinds.  Unknown workflow names remain valid and use the generic
     ``workflow.run`` kind.
 
-    Callers may explicitly bind any workflow to another built-in or
-    user-defined OperationKind through ``requested``.
+    A Workflow Definition may bind itself through ``implements``.  Callers
+    may still explicitly override that binding through ``requested``.
+
+    Precedence is:
+
+    explicit request -> declared binding -> conventional workflow name
+    -> generic ``workflow.run``.
     """
 
     if not isinstance(workflow, str):
@@ -180,6 +186,9 @@ def resolve_workflow_operation_kind(
 
     if requested is not None:
         return OperationKind.parse(requested)
+
+    if declared is not None:
+        return OperationKind.parse(declared)
 
     return WORKFLOW_OPERATION_KINDS.get(
         normalized,
@@ -225,6 +234,7 @@ def execute_workflow_operation(
     operation = Operation(
         kind=resolve_workflow_operation_kind(
             workflow,
+            declared=domain_plan.implements,
             requested=operation_kind,
         ),
         subject=entity,

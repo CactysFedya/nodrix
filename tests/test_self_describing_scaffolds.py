@@ -61,6 +61,16 @@ def test_created_workflow_is_self_describing(
     )
 
     assert (
+        "# Optional workflow binding:"
+        in text
+    )
+
+    assert (
+        "# implements: robot.flash"
+        in text
+    )
+
+    assert (
         "# Optional step fields:"
         in text
     )

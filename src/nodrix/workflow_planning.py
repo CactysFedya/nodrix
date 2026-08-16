@@ -13,6 +13,7 @@ from pathlib import Path
 import platform
 from typing import Any
 
+from .model import OperationKind
 from .workflow_execution import (
     _cache_hit,
     _cache_spec,
@@ -72,8 +73,13 @@ class WorkflowPlanResult:
         compare=False,
     )
 
+    # Declarative binding from the Workflow Definition to the canonical
+    # OperationKind it implements.  This is intent metadata, not execution
+    # state or executor configuration.
+    implements: str | None = None
+
     def as_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "name": self.name,
             "root": self.root,
             "workflow_path": self.workflow_path,
@@ -81,6 +87,11 @@ class WorkflowPlanResult:
             "generated": self.generated,
             "steps": [step.as_dict() for step in self.steps],
         }
+
+        if self.implements is not None:
+            result["implements"] = self.implements
+
+        return result
 
     def step(self, step_id: str) -> WorkflowStepPlan:
         for item in self.steps:
@@ -186,6 +197,20 @@ def plan_workflow(
     """Resolve execution/cache decisions without running any workflow command."""
 
     workflow, workflow_path, project_root = load_workflow(name, root=root)
+
+    raw_implements = workflow.get("implements")
+    implements: str | None = None
+
+    if raw_implements is not None:
+        if not isinstance(raw_implements, str):
+            raise ValueError(
+                "workflow.implements must be an operation kind string"
+            )
+
+        implements = OperationKind.parse(
+            raw_implements
+        ).value
+
     raw_steps = list(workflow.get("steps") or [])
     source_shell = any(
         not isinstance(step, dict)
@@ -383,6 +408,7 @@ def plan_workflow(
         execution_environment=tuple(
             sorted(env.items())
         ),
+        implements=implements,
     )
 
 

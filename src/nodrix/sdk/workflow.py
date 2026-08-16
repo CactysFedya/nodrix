@@ -296,6 +296,7 @@ class Workflow:
         self,
         name: str,
         *,
+        implements: str | None = None,
         environment: (
             Mapping[str, Any]
             | None
@@ -304,6 +305,11 @@ class Workflow:
         self._name = _required_string(
             name,
             field_name="workflow name",
+        )
+
+        self._implements = _optional_string(
+            implements,
+            field_name="workflow implements",
         )
 
         self._environment = (
@@ -324,6 +330,10 @@ class Workflow:
     @property
     def name(self) -> str:
         return self._name
+
+    @property
+    def implements(self) -> str | None:
+        return self._implements
 
     @property
     def environment(
@@ -555,6 +565,9 @@ class Workflow:
             "schema": WORKFLOW_SCHEMA,
             "name": self.name,
         }
+
+        if self.implements is not None:
+            result["implements"] = self.implements
 
         if self.environment:
             result["environment"] = dict(

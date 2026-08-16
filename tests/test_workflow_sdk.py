@@ -505,3 +505,116 @@ def test_workflow_sdk_preserves_explicit_boolean_definition_values() -> None:
         "when": False,
         "cache": False,
     }
+
+
+def test_workflow_sdk_operation_binding_has_yaml_parity() -> None:
+    source = """
+schema: nodrix.workflow/v1
+name: flash
+implements: robot.flash
+steps:
+  - id: write
+    run: tool flash firmware.bin
+"""
+
+    expected = yaml.safe_load(
+        source
+    )
+
+    workflow = Workflow(
+        "flash",
+        implements="robot.flash",
+    )
+
+    workflow.run(
+        "write",
+        "tool flash firmware.bin",
+    )
+
+    assert workflow.to_dict() == expected
+
+
+def test_workflow_operation_binding_reaches_plan_and_digest(
+    tmp_path: Path,
+) -> None:
+    create_progressive_project(
+        tmp_path
+    )
+
+    resource = add_project_resource(
+        "workflow",
+        "flash",
+        root=tmp_path,
+    )
+
+    workflow = Workflow(
+        "flash",
+        implements="robot.flash",
+    )
+
+    workflow.run(
+        "write",
+        "echo flash",
+    )
+
+    resource.path.write_text(
+        yaml.safe_dump(
+            workflow.to_dict(),
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    first = plan_workflow(
+        "flash",
+        root=tmp_path,
+    )
+
+    assert first.implements == "robot.flash"
+
+    from nodrix.workflow_canonical import (
+        workflow_plan_digest,
+    )
+
+    first_digest = workflow_plan_digest(
+        first
+    )
+
+    replacement = Workflow(
+        "flash",
+        implements="robot.deploy",
+    )
+
+    replacement.run(
+        "write",
+        "echo flash",
+    )
+
+    resource.path.write_text(
+        yaml.safe_dump(
+            replacement.to_dict(),
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    second = plan_workflow(
+        "flash",
+        root=tmp_path,
+    )
+
+    assert second.implements == "robot.deploy"
+
+    second_digest = workflow_plan_digest(
+        second
+    )
+
+    assert first_digest != second_digest
+
+    assert [
+        item.command
+        for item in first.steps
+    ] == [
+        item.command
+        for item in second.steps
+    ]

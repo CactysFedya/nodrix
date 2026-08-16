@@ -29,6 +29,7 @@ def _digest_payload(plan: WorkflowPlanResult) -> dict[str, Any]:
 
     return {
         "name": plan.name,
+        "implements": plan.implements,
         "environment": plan.environment,
         "generated": plan.generated,
         "steps": [
@@ -109,6 +110,9 @@ def workflow_plan_record(
         "generated": plan.generated,
         "plan_sha256": digest,
     }
+
+    if plan.implements is not None:
+        canonical_metadata["implements"] = plan.implements
 
     if metadata is not None:
         if not isinstance(metadata, Mapping):

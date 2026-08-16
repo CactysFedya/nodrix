@@ -362,6 +362,13 @@ def _workflow_scaffold(
 
     footer = """
 #
+# Optional workflow binding:
+#
+# implements: robot.flash       # This Workflow implements this Operation kind.
+#
+# Use namespaced kinds such as robot.flash or model.quantize for
+# project/package-specific operations.
+#
 # Optional step fields:
 #
 #   depends_on: [prepare]       # Run after earlier steps.
