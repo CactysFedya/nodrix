@@ -31,6 +31,7 @@ import shutil
 import stat
 import tempfile
 from typing import Any, Literal, Mapping
+from uuid import uuid4
 
 from .model import (
     ArtifactRecord,
@@ -46,6 +47,8 @@ _TREE_DIGEST_SCHEMA = b"nodrix.materialized-tree/v1\n"
 _PAYLOAD_NAME = "payload"
 _DESCRIPTOR_NAME = "materialization.json"
 _MATERIALIZATION_SCHEMA = "nodrix.materialization/v1"
+_LIFECYCLE_NAME = "lifecycle.json"
+_LIFECYCLE_SCHEMA = "nodrix.materialized-lifecycle/v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,12 +66,72 @@ class MaterializedLocation:
     size_bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class MaterializedLifecycle:
+    """Mutable retention policy attached to one local materialization.
+
+    Lifecycle state never participates in EntityRef or RevisionRef identity.
+    ``pinned`` here means storage-retention protection; it is distinct from an
+    Operation pinning its subject_revision during planning.
+    """
+
+    scope: Literal["dataset", "artifact"]
+    revision: RevisionRef
+    retention: Literal[
+        "retained",
+        "ephemeral",
+    ] = "retained"
+    pinned: bool = False
+
+    def __post_init__(self) -> None:
+        if self.scope not in {
+            "dataset",
+            "artifact",
+        }:
+            raise ValueError(
+                "lifecycle scope must be 'dataset' or 'artifact'"
+            )
+
+        if not isinstance(
+            self.revision,
+            RevisionRef,
+        ):
+            raise TypeError(
+                "lifecycle revision must be a RevisionRef"
+            )
+
+        if self.retention not in {
+            "retained",
+            "ephemeral",
+        }:
+            raise ValueError(
+                "lifecycle retention must be "
+                "'retained' or 'ephemeral'"
+            )
+
+        if not isinstance(
+            self.pinned,
+            bool,
+        ):
+            raise TypeError(
+                "lifecycle pinned must be a boolean"
+            )
+
+
 class MaterializationError(RuntimeError):
     """Base error for canonical local materialization."""
 
 
 class MaterializationConflictError(MaterializationError):
     """Existing immutable storage disagrees with its canonical revision."""
+
+
+class MaterializationNotFoundError(MaterializationError):
+    """Requested canonical local materialization does not exist."""
+
+
+class MaterializationPinnedError(MaterializationError):
+    """A retention-pinned materialization cannot be removed."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,17 +493,15 @@ def _descriptor_document(
     }
 
 
-def _write_descriptor(
+def _write_json_document(
     path: Path,
-    location: MaterializedLocation,
+    document: Mapping[str, Any],
     *,
     atomic: bool,
 ) -> None:
     rendered = (
         json.dumps(
-            _descriptor_document(
-                location
-            ),
+            dict(document),
             ensure_ascii=False,
             indent=2,
             sort_keys=True,
@@ -459,7 +520,8 @@ def _write_descriptor(
         path.parent
         / (
             f".{path.name}"
-            f".{os.getpid()}.tmp"
+            f".{os.getpid()}"
+            f".{uuid4().hex}.tmp"
         )
     )
 
@@ -478,6 +540,45 @@ def _write_descriptor(
         if temporary.exists():
             temporary.unlink()
 
+
+def _write_descriptor(
+    path: Path,
+    location: MaterializedLocation,
+    *,
+    atomic: bool,
+) -> None:
+    _write_json_document(
+        path,
+        _descriptor_document(
+            location
+        ),
+        atomic=atomic,
+    )
+
+
+def _lifecycle_document(
+    lifecycle: MaterializedLifecycle,
+) -> dict[str, Any]:
+    return {
+        "schema": _LIFECYCLE_SCHEMA,
+        "scope": lifecycle.scope,
+        "revision": lifecycle.revision.canonical,
+        "retention": lifecycle.retention,
+        "pinned": lifecycle.pinned,
+    }
+
+
+def _write_lifecycle(
+    path: Path,
+    lifecycle: MaterializedLifecycle,
+) -> None:
+    _write_json_document(
+        path,
+        _lifecycle_document(
+            lifecycle
+        ),
+        atomic=True,
+    )
 
 def _parse_descriptor(
     path: Path,
@@ -594,6 +695,95 @@ def _parse_descriptor(
         uri=uri,
         payload_type=payload_type,
         size_bytes=size_bytes,
+    )
+
+
+def _parse_lifecycle(
+    path: Path,
+) -> MaterializedLifecycle:
+    try:
+        raw = json.loads(
+            path.read_text(
+                encoding="utf-8",
+            )
+        )
+    except (
+        OSError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise MaterializationConflictError(
+            f"invalid materialized lifecycle document: {path}"
+        ) from exc
+
+    if not isinstance(
+        raw,
+        dict,
+    ):
+        raise MaterializationConflictError(
+            "materialized lifecycle document must "
+            f"be a mapping: {path}"
+        )
+
+    if raw.get("schema") != _LIFECYCLE_SCHEMA:
+        raise MaterializationConflictError(
+            "unsupported materialized lifecycle "
+            f"schema: {path}"
+        )
+
+    scope = raw.get(
+        "scope"
+    )
+
+    if scope not in {
+        "dataset",
+        "artifact",
+    }:
+        raise MaterializationConflictError(
+            f"invalid materialized lifecycle scope: {path}"
+        )
+
+    try:
+        revision = RevisionRef.parse(
+            raw["revision"]
+        )
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise MaterializationConflictError(
+            f"invalid materialized lifecycle revision: {path}"
+        ) from exc
+
+    retention = raw.get(
+        "retention"
+    )
+
+    if retention not in {
+        "retained",
+        "ephemeral",
+    }:
+        raise MaterializationConflictError(
+            f"invalid materialized lifecycle retention: {path}"
+        )
+
+    pinned = raw.get(
+        "pinned"
+    )
+
+    if not isinstance(
+        pinned,
+        bool,
+    ):
+        raise MaterializationConflictError(
+            f"invalid materialized lifecycle pin state: {path}"
+        )
+
+    return MaterializedLifecycle(
+        scope=scope,
+        revision=revision,
+        retention=retention,
+        pinned=pinned,
     )
 
 
@@ -1393,17 +1583,441 @@ def list_artifact_revisions(
     )
 
 
+def _revision_directory_for_location(
+    project: str | Path,
+    location: MaterializedLocation,
+) -> Path:
+    if location.scope == "dataset":
+        return dataset_revision_directory(
+            project,
+            location.revision,
+        )
+
+    return artifact_revision_directory(
+        project,
+        location.revision,
+    )
+
+
+def _default_lifecycle(
+    location: MaterializedLocation,
+) -> MaterializedLifecycle:
+    return MaterializedLifecycle(
+        scope=location.scope,
+        revision=location.revision,
+        retention="retained",
+        pinned=False,
+    )
+
+
+def _read_lifecycle(
+    project: str | Path,
+    location: MaterializedLocation,
+) -> MaterializedLifecycle:
+    revision_directory = (
+        _revision_directory_for_location(
+            project,
+            location,
+        )
+    )
+
+    path = (
+        revision_directory
+        / _LIFECYCLE_NAME
+    )
+
+    if not path.is_file():
+        return _default_lifecycle(
+            location
+        )
+
+    lifecycle = _parse_lifecycle(
+        path
+    )
+
+    if (
+        lifecycle.scope
+        != location.scope
+        or lifecycle.revision
+        != location.revision
+    ):
+        raise MaterializationConflictError(
+            "materialized lifecycle does not match "
+            f"its revision directory: {path}"
+        )
+
+    return lifecycle
+
+
+def _find_lifecycle_location(
+    *,
+    project: str | Path,
+    revision: RevisionRef,
+    dataset: bool,
+) -> MaterializedLocation | None:
+    if dataset:
+        return find_dataset_revision(
+            project,
+            revision,
+        )
+
+    return find_artifact_revision(
+        project,
+        revision,
+    )
+
+
+def _get_lifecycle(
+    *,
+    project: str | Path,
+    revision: RevisionRef,
+    dataset: bool,
+) -> MaterializedLifecycle | None:
+    location = _find_lifecycle_location(
+        project=project,
+        revision=revision,
+        dataset=dataset,
+    )
+
+    if location is None:
+        return None
+
+    return _read_lifecycle(
+        project,
+        location,
+    )
+
+
+def get_dataset_lifecycle(
+    project: str | Path,
+    revision: RevisionRef,
+) -> MaterializedLifecycle | None:
+    """Return Dataset retention state, or None when not materialized."""
+
+    return _get_lifecycle(
+        project=project,
+        revision=revision,
+        dataset=True,
+    )
+
+
+def get_artifact_lifecycle(
+    project: str | Path,
+    revision: RevisionRef,
+) -> MaterializedLifecycle | None:
+    """Return Artifact retention state, or None when not materialized."""
+
+    return _get_lifecycle(
+        project=project,
+        revision=revision,
+        dataset=False,
+    )
+
+
+def _set_lifecycle(
+    *,
+    project: str | Path,
+    revision: RevisionRef,
+    dataset: bool,
+    retention: Literal[
+        "retained",
+        "ephemeral",
+    ] | None,
+    pinned: bool | None,
+) -> MaterializedLifecycle:
+    location = _find_lifecycle_location(
+        project=project,
+        revision=revision,
+        dataset=dataset,
+    )
+
+    if location is None:
+        raise MaterializationNotFoundError(
+            "cannot configure lifecycle for an "
+            f"unmaterialized revision: {revision}"
+        )
+
+    current = _read_lifecycle(
+        project,
+        location,
+    )
+
+    selected_retention = (
+        current.retention
+        if retention is None
+        else retention
+    )
+
+    if selected_retention not in {
+        "retained",
+        "ephemeral",
+    }:
+        raise ValueError(
+            "retention must be 'retained' or 'ephemeral'"
+        )
+
+    if (
+        pinned is not None
+        and not isinstance(
+            pinned,
+            bool,
+        )
+    ):
+        raise TypeError(
+            "pinned must be a boolean or None"
+        )
+
+    selected_pinned = (
+        current.pinned
+        if pinned is None
+        else pinned
+    )
+
+    updated = MaterializedLifecycle(
+        scope=location.scope,
+        revision=location.revision,
+        retention=selected_retention,
+        pinned=selected_pinned,
+    )
+
+    revision_directory = (
+        _revision_directory_for_location(
+            project,
+            location,
+        )
+    )
+
+    _write_lifecycle(
+        revision_directory
+        / _LIFECYCLE_NAME,
+        updated,
+    )
+
+    return updated
+
+
+def set_dataset_lifecycle(
+    project: str | Path,
+    revision: RevisionRef,
+    *,
+    retention: Literal[
+        "retained",
+        "ephemeral",
+    ] | None = None,
+    pinned: bool | None = None,
+) -> MaterializedLifecycle:
+    """Explicitly update Dataset retention state."""
+
+    return _set_lifecycle(
+        project=project,
+        revision=revision,
+        dataset=True,
+        retention=retention,
+        pinned=pinned,
+    )
+
+
+def set_artifact_lifecycle(
+    project: str | Path,
+    revision: RevisionRef,
+    *,
+    retention: Literal[
+        "retained",
+        "ephemeral",
+    ] | None = None,
+    pinned: bool | None = None,
+) -> MaterializedLifecycle:
+    """Explicitly update Artifact retention state."""
+
+    return _set_lifecycle(
+        project=project,
+        revision=revision,
+        dataset=False,
+        retention=retention,
+        pinned=pinned,
+    )
+
+
+def _delete_revision(
+    *,
+    project: str | Path,
+    revision: RevisionRef,
+    dataset: bool,
+) -> bool:
+    location = _find_lifecycle_location(
+        project=project,
+        revision=revision,
+        dataset=dataset,
+    )
+
+    if location is None:
+        return False
+
+    lifecycle = _read_lifecycle(
+        project,
+        location,
+    )
+
+    if lifecycle.pinned:
+        raise MaterializationPinnedError(
+            "materialized revision is retention-pinned; "
+            "explicitly unpin it before deletion: "
+            f"{revision}"
+        )
+
+    revision_directory = (
+        _revision_directory_for_location(
+            project,
+            location,
+        )
+    )
+
+    tombstone = (
+        revision_directory.parent
+        / (
+            f".{revision_directory.name}"
+            f".delete-{uuid4().hex}"
+        )
+    )
+
+    try:
+        os.replace(
+            revision_directory,
+            tombstone,
+        )
+    except FileNotFoundError:
+        return False
+
+    shutil.rmtree(
+        tombstone
+    )
+
+    return True
+
+
+def delete_dataset_revision(
+    project: str | Path,
+    revision: RevisionRef,
+) -> bool:
+    """Explicitly delete one unpinned Dataset materialization."""
+
+    return _delete_revision(
+        project=project,
+        revision=revision,
+        dataset=True,
+    )
+
+
+def delete_artifact_revision(
+    project: str | Path,
+    revision: RevisionRef,
+) -> bool:
+    """Explicitly delete one unpinned Artifact materialization."""
+
+    return _delete_revision(
+        project=project,
+        revision=revision,
+        dataset=False,
+    )
+
+
+def _prune_ephemeral_revisions(
+    *,
+    project: str | Path,
+    entity: EntityRef,
+    dataset: bool,
+) -> tuple[RevisionRef, ...]:
+    locations = (
+        list_dataset_revisions(
+            project,
+            entity,
+        )
+        if dataset
+        else list_artifact_revisions(
+            project,
+            entity,
+        )
+    )
+
+    deleted: list[
+        RevisionRef
+    ] = []
+
+    for location in locations:
+        lifecycle = _read_lifecycle(
+            project,
+            location,
+        )
+
+        if (
+            lifecycle.retention
+            != "ephemeral"
+            or lifecycle.pinned
+        ):
+            continue
+
+        if _delete_revision(
+            project=project,
+            revision=location.revision,
+            dataset=dataset,
+        ):
+            deleted.append(
+                location.revision
+            )
+
+    return tuple(
+        deleted
+    )
+
+
+def prune_ephemeral_dataset_revisions(
+    project: str | Path,
+    entity: EntityRef,
+) -> tuple[RevisionRef, ...]:
+    """Explicitly prune unpinned ephemeral Dataset revisions."""
+
+    return _prune_ephemeral_revisions(
+        project=project,
+        entity=entity,
+        dataset=True,
+    )
+
+
+def prune_ephemeral_artifact_revisions(
+    project: str | Path,
+    entity: EntityRef,
+) -> tuple[RevisionRef, ...]:
+    """Explicitly prune unpinned ephemeral Artifact revisions."""
+
+    return _prune_ephemeral_revisions(
+        project=project,
+        entity=entity,
+        dataset=False,
+    )
+
+
 __all__ = [
     "MaterializationConflictError",
     "MaterializationError",
+    "MaterializationNotFoundError",
+    "MaterializationPinnedError",
+    "MaterializedLifecycle",
     "MaterializedLocation",
     "artifact_revision_directory",
     "dataset_revision_directory",
+    "delete_artifact_revision",
+    "delete_dataset_revision",
     "find_artifact_revision",
     "find_dataset_revision",
+    "get_artifact_lifecycle",
+    "get_dataset_lifecycle",
     "list_artifact_revisions",
     "list_dataset_revisions",
     "materialize_artifact",
     "materialize_dataset",
+    "prune_ephemeral_artifact_revisions",
+    "prune_ephemeral_dataset_revisions",
+    "set_artifact_lifecycle",
+    "set_dataset_lifecycle",
     "verify_materialized_record",
 ]
