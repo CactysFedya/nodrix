@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .benchmarking import aggregate_reports
+from .storage_layout import StorageLayout
 
 
 _ACTIVE_RUN_STATUSES = {
@@ -61,7 +62,9 @@ def _canonical_operation(
 
 
 def run_root(project: str | Path = ".") -> Path:
-    return Path(project).expanduser().resolve() / ".nodrix" / "runs"
+    return StorageLayout(
+        project
+    ).runs_root
 
 
 def list_runs(project: str | Path = ".") -> list[dict[str, Any]]:

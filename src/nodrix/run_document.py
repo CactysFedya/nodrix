@@ -35,6 +35,9 @@ from .model import (
 )
 
 
+from .storage_layout import StorageLayout
+
+
 RUN_DOCUMENT_SCHEMA = "nodrix.run/v1"
 RUN_DOCUMENT_KIND = "Run"
 
@@ -256,13 +259,9 @@ def canonical_run_root(
 ) -> Path:
     """Return the canonical local Run storage root."""
 
-    return (
-        Path(project)
-        .expanduser()
-        .resolve()
-        / ".nodrix"
-        / "runs"
-    )
+    return StorageLayout(
+        project
+    ).runs_root
 
 
 def canonical_run_directory(
