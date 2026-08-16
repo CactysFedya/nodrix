@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -19,45 +18,27 @@ from .model import (
     PlanRecord,
     RevisionRef,
 )
-
-
-def _pipeline_digest(path: Path) -> str:
-    digest = hashlib.sha256()
-
-    with path.open("rb") as handle:
-        for chunk in iter(
-            lambda: handle.read(1024 * 1024),
-            b"",
-        ):
-            digest.update(chunk)
-
-    return digest.hexdigest()
+from .pipeline_definition import (
+    pipeline_source_identity,
+)
 
 
 def benchmark_subject(
     plan: BenchmarkPlan,
 ) -> tuple[EntityRef, RevisionRef]:
-    """Return the canonical identity of the benchmarked pipeline definition."""
+    """Return the canonical source identity of the benchmarked Pipeline."""
 
-    if not isinstance(plan, BenchmarkPlan):
+    if not isinstance(
+        plan,
+        BenchmarkPlan,
+    ):
         raise TypeError(
             "plan must be a BenchmarkPlan"
         )
 
-    pipeline = plan.pipeline.resolve()
-
-    entity = EntityRef(
-        kind="pipeline",
-        namespace="workspace",
-        name=pipeline.stem,
+    return pipeline_source_identity(
+        plan.pipeline
     )
-
-    revision = RevisionRef.from_sha256(
-        entity,
-        _pipeline_digest(pipeline),
-    )
-
-    return entity, revision
 
 
 def benchmark_operation(

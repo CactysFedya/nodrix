@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 from typing import Any, Mapping
 
 from .benchmarking import BenchmarkPlan
@@ -15,19 +14,9 @@ from .model import (
     RevisionRef,
     canonical_plan_id,
 )
-
-
-def _file_sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-
-    with path.open("rb") as handle:
-        for chunk in iter(
-            lambda: handle.read(1024 * 1024),
-            b"",
-        ):
-            digest.update(chunk)
-
-    return digest.hexdigest()
+from .pipeline_definition import (
+    pipeline_source_digest,
+)
 
 
 def benchmark_plan_digest(
@@ -46,7 +35,7 @@ def benchmark_plan_digest(
         )
 
     document = {
-        "pipeline_sha256": _file_sha256(
+        "pipeline_sha256": pipeline_source_digest(
             plan.pipeline
         ),
         "repeat": plan.repeat,
