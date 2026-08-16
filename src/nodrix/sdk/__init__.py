@@ -1,5 +1,6 @@
 """Canonical public SDK frontend and backend-neutral definition layer."""
 
+from ..model import DefinitionRecord, EntityRef, RevisionRef
 from .decorators import Context, message, node, resource
 from .definitions import (
     CallableDefinition,
@@ -28,6 +29,8 @@ __all__ = [
     "Context",
     "DependencyDefinition",
     "DependencySpec",
+    "DefinitionRecord",
+    "EntityRef",
     "Input",
     "MessageDefinition",
     "NodeDefinition",
@@ -40,6 +43,7 @@ __all__ = [
     "PortSpec",
     "Resource",
     "ResourceDefinition",
+    "RevisionRef",
     "WORKFLOW_SCHEMA",
     "Workflow",
     "WorkflowStep",

@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+from ..model import DefinitionRecord, EntityRef
 from ..workflow_schema import WORKFLOW_SCHEMA
 
 
@@ -556,6 +557,35 @@ class Workflow:
         )
 
         return step
+
+    def definition_record(
+        self,
+        *,
+        project: EntityRef,
+        metadata: (
+            Mapping[str, Any]
+            | None
+        ) = None,
+    ) -> DefinitionRecord:
+        """Compile this Workflow into its canonical Definition identity.
+
+        The caller supplies the canonical Project identity explicitly.  The
+        SDK does not infer project identity from the current directory or own
+        any storage/runtime behavior.
+
+        Identity and revision semantics remain owned by the canonical Workflow
+        definition bridge.
+        """
+
+        from ..workflow_definition import (
+            workflow_definition_record,
+        )
+
+        return workflow_definition_record(
+            self.to_dict(),
+            project=project,
+            metadata=metadata,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Compile this builder into a canonical workflow definition."""
