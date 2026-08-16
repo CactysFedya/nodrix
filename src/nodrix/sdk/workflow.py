@@ -15,8 +15,7 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
-
-WORKFLOW_SCHEMA = "nodrix.workflow/v1"
+from ..workflow_schema import WORKFLOW_SCHEMA
 
 
 def _required_string(

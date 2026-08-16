@@ -15,6 +15,7 @@ from typing import Any
 
 import yaml
 
+from .workflow_schema import WORKFLOW_SCHEMA
 from .workspace import PROJECT_FILE, find_workspace
 
 
@@ -155,10 +156,10 @@ def load_workflow(
             name,
         )
     schema = str(workflow.get("schema") or "")
-    if schema != "nodrix.workflow/v1":
+    if schema != WORKFLOW_SCHEMA:
         raise ValueError(
             f"{path} uses unsupported workflow schema {schema!r}; "
-            "expected 'nodrix.workflow/v1'"
+            f"expected {WORKFLOW_SCHEMA!r}"
         )
     steps = workflow.get("steps")
     if not isinstance(steps, list) or not steps:
