@@ -65,6 +65,7 @@ VALIDATE = OperationKind("validate")
 RUN = OperationKind("run")
 PROFILE = OperationKind("profile")
 BENCHMARK = OperationKind("benchmark")
+OPTIMIZE = OperationKind("optimize")
 DIAGNOSE = OperationKind("diagnose")
 CALIBRATE = OperationKind("calibrate")
 EXPORT = OperationKind("export")
@@ -132,7 +133,9 @@ __all__ = [
     "EXPORT",
     "Operation",
     "OperationKind",
+    "OPTIMIZE",
     "PACKAGE",
+    "PREPARE",
     "PROFILE",
     "RUN",
     "TEST",

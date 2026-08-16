@@ -57,6 +57,7 @@ class PlanKind:
 SYSTEM_EXECUTION = PlanKind("system-execution")
 WORKFLOW = PlanKind("workflow")
 BENCHMARK_PLAN = PlanKind("benchmark")
+OPTIMIZATION_PLAN = PlanKind("optimization")
 
 
 def _plan_id(value: str) -> str:
@@ -143,6 +144,8 @@ class PlanRecord:
 
 
 __all__ = [
+    "BENCHMARK_PLAN",
+    "OPTIMIZATION_PLAN",
     "PlanKind",
     "PlanRecord",
     "SYSTEM_EXECUTION",

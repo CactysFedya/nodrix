@@ -12,6 +12,7 @@ from .history import (
 from .identity import EntityRef, RevisionRef
 from .operations import (
     BENCHMARK,
+    OPTIMIZE,
     BUILD,
     CALIBRATE,
     CLEANUP,
@@ -28,6 +29,7 @@ from .operations import (
 )
 from .plans import (
     BENCHMARK_PLAN,
+    OPTIMIZATION_PLAN,
     SYSTEM_EXECUTION,
     WORKFLOW,
     PlanKind,
@@ -64,7 +66,9 @@ from .runs import RunRecord
 __all__ = [
     "ArtifactRecord",
     "BENCHMARK",
+    "OPTIMIZE",
     "BENCHMARK_PLAN",
+    "OPTIMIZATION_PLAN",
     "BUILD",
     "CALIBRATE",
     "CLEANUP",
