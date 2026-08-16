@@ -15,7 +15,8 @@ from .project_foundation import (
     create_progressive_project,
     list_project_resources,
 )
-from .workflow_execution import list_workflows, load_workflow, run_workflow
+from .workflow_execution import list_workflows, load_workflow
+from .workflow_operation import execute_workflow_operation
 from .workflow_planning import WorkflowPlanResult, plan_workflow
 
 
@@ -190,38 +191,80 @@ def _execute_workflow(
     rebuild: bool = False,
 ) -> None:
     try:
-        result = run_workflow(
+        outcome = execute_workflow_operation(
             name,
             environment_name=environment,
             dry_run=dry_run,
             force=rebuild,
         )
     except Exception as exc:
-        console.print(f"[red]Workflow failed before execution:[/red] {exc}")
+        console.print(
+            f"[red]Workflow failed before execution:[/red] {exc}"
+        )
         raise typer.Exit(1)
+
+    result = outcome.legacy_result()
+
     if json_output:
-        console.print_json(json.dumps(result.as_dict(), ensure_ascii=False))
+        console.print_json(
+            json.dumps(
+                result,
+                ensure_ascii=False,
+            )
+        )
     else:
-        table = Table(box=None, show_edge=False, pad_edge=False)
+        table = Table(
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
         table.add_column("STATUS")
         table.add_column("STEP")
-        table.add_column("SECONDS", justify="right")
-        table.add_column("LOG")
-        for step in result.steps:
-            table.add_row(
-                step.status.upper(),
-                step.step_id,
-                f"{step.duration_seconds:.3f}",
-                step.log_path,
-                style="red" if step.status == "failed" else None,
-            )
-        console.print(table)
-        color = "green" if result.succeeded or dry_run else "red"
-        console.print(
-            f"[{color}]{result.status.upper()}[/{color}] {result.name}"
+        table.add_column(
+            "SECONDS",
+            justify="right",
         )
-        console.print(f"Artifacts: {result.run_directory}")
-    if not result.succeeded and not dry_run:
+        table.add_column("LOG")
+
+        for step in result["steps"]:
+            status = str(step.get("status", ""))
+            table.add_row(
+                status.upper(),
+                str(step.get("step_id", "-")),
+                f"{float(step.get('duration_seconds', 0.0)):.3f}",
+                str(step.get("log_path", "-")),
+                style=(
+                    "red"
+                    if status == "failed"
+                    else None
+                ),
+            )
+
+        console.print(table)
+
+        status = str(result["status"])
+        color = (
+            "green"
+            if outcome.successful
+            else "red"
+        )
+
+        console.print(
+            f"[{color}]{status.upper()}[/{color}] "
+            f"{result['name']}"
+        )
+
+        run_directory = str(
+            result.get("run_directory") or "-"
+        )
+        console.print(
+            f"Artifacts: {run_directory}"
+        )
+        console.print(
+            f"History: {outcome.history.path}"
+        )
+
+    if not outcome.successful:
         raise typer.Exit(1)
 
 

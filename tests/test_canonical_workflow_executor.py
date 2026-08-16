@@ -289,3 +289,26 @@ def test_workflow_executor_requires_timezone_aware_clock() -> None:
         match="clock result must be timezone-aware",
     ):
         executor.execute(_canonical_plan())
+
+
+def test_workflow_executor_treats_dry_run_as_completed_operation() -> None:
+    def runner(name: str, **kwargs):
+        del name
+        assert kwargs["dry_run"] is True
+        return _result(status="planned")
+
+    times = iter((_time(12), _time(13)))
+
+    record = WorkflowExecutor(
+        runner=runner,
+        clock=lambda: next(times),
+    ).execute(
+        _canonical_plan(
+            parameters={"dry_run": True},
+        )
+    )
+
+    assert record.state is ExecutionState.COMPLETED
+    assert record.successful
+    assert record.details["workflow_status"] == "planned"
+    assert record.details["dry_run"] is True

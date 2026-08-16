@@ -165,7 +165,7 @@ class WorkflowExecutor:
 
         state = (
             ExecutionState.COMPLETED
-            if result.succeeded
+            if result.succeeded or dry_run
             else ExecutionState.FAILED
         )
 
@@ -179,6 +179,8 @@ class WorkflowExecutor:
             details={
                 "workflow": result.name,
                 "workflow_status": result.status,
+                "dry_run": dry_run,
+                "force": force,
                 "root": result.root,
                 "workflow_path": result.workflow_path,
                 "run_directory": result.run_directory,
