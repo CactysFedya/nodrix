@@ -14,6 +14,9 @@ from .benchmarking import (
     load_benchmark_plan,
     run_benchmark_suite,
 )
+from .benchmark_operation import (
+    execute_benchmark_operation,
+)
 from .cli_context import (
     _format_bytes,
     _runtime,
@@ -207,7 +210,21 @@ def benchmark(
             )
         legacy_json = output if output is not None and output.suffix.lower() == ".json" else None
         root = output.parent if legacy_json is not None else output
-        summary = run_benchmark_suite(plan, _execute_benchmark_run, output_root=root)
+        outcome = execute_benchmark_operation(
+            plan,
+            run_callable=_execute_benchmark_run,
+            output_root=root,
+        )
+
+        if not outcome.successful:
+            message = outcome.execution.details.get(
+                "error",
+                "benchmark execution failed",
+            )
+            raise RuntimeError(str(message))
+
+        summary = outcome.summary()
+
         if legacy_json is not None:
             legacy_json.parent.mkdir(parents=True, exist_ok=True)
             legacy_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
