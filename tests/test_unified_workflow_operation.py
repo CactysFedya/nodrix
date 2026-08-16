@@ -271,7 +271,7 @@ def test_workflow_operation_keeps_logs_without_legacy_summary(
     assert outcome.history.path.is_file()
 
 
-def test_prepare_cli_uses_canonical_workflow_history(
+def test_prepare_cli_uses_canonical_execution_history(
     tmp_path: Path,
     monkeypatch,
 ) -> None:

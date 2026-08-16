@@ -42,9 +42,9 @@ from .project_canonical import (
 )
 from .workflow_canonical import workflow_plan_record
 from .workflow_executor import WorkflowExecutor
-from .workflow_history import (
-    PersistedWorkflowRun,
-    persist_workflow_execution,
+from .execution_history import (
+    PersistedRun,
+    persist_execution,
 )
 from .workflow_planning import (
     WorkflowPlanResult,
@@ -75,7 +75,7 @@ class WorkflowOperationResult:
 
     plan: PlanRecord
     execution: ExecutionRecord
-    history: PersistedWorkflowRun
+    history: PersistedRun
 
     @property
     def successful(self) -> bool:
@@ -249,7 +249,7 @@ def execute_workflow_operation(
         canonical_plan
     )
 
-    history = persist_workflow_execution(
+    history = persist_execution(
         execution,
         project=domain_plan.root,
         summary={
