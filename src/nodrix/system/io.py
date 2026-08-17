@@ -5,14 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, Iterable
 
 from pydantic import ValidationError
 import yaml
 
 from ..errors import NodrixError
 from .model import SYSTEM_MODEL_API_VERSION, SystemModel
-from .source import resolve_system_source_document
+from .source import (
+    SystemConfigOverlay,
+    resolve_system_source_document,
+)
 
 
 SYSTEM_MODEL_KIND = "System"
@@ -59,6 +62,7 @@ class SystemResolutionDetails:
     sources: tuple[Path, ...] = ()
     module_sources: tuple[Path, ...] = ()
     config_sources: tuple[Path, ...] = ()
+    config_overlay_sources: tuple[Path, ...] = ()
     config_provenance: dict[str, Path] = field(
         default_factory=dict
     )
@@ -228,12 +232,16 @@ def loads_system(
     text: str,
     *,
     format: str = "yaml",
+    config_overlays: Iterable[SystemConfigOverlay] = (),
 ) -> SystemModel:
     """Load a SystemModel from YAML or JSON text."""
 
     resolved_format = _normalize_format(format)
     raw = _decode_document(text, resolved_format)
-    resolved = resolve_system_source_document(raw)
+    resolved = resolve_system_source_document(
+        raw,
+        config_overlays=config_overlays,
+    )
     return _validate_document(resolved.document)
 
 
@@ -241,6 +249,7 @@ def load_system_details(
     path: str | Path,
     *,
     format: str | None = None,
+    config_overlays: Iterable[SystemConfigOverlay] = (),
 ) -> SystemLoadResult:
     """Load a System document and return its normalized representation."""
 
@@ -272,6 +281,7 @@ def load_system_details(
     resolved = resolve_system_source_document(
         raw,
         source=system_path,
+        config_overlays=config_overlays,
     )
     system = _validate_document(resolved.document)
     return SystemLoadResult(
@@ -283,6 +293,9 @@ def load_system_details(
             sources=resolved.sources,
             module_sources=resolved.module_sources,
             config_sources=resolved.config_sources,
+            config_overlay_sources=(
+                resolved.config_overlay_sources
+            ),
             config_provenance=dict(
                 resolved.config_provenance
             ),
@@ -294,10 +307,15 @@ def load_system(
     path: str | Path,
     *,
     format: str | None = None,
+    config_overlays: Iterable[SystemConfigOverlay] = (),
 ) -> SystemModel:
     """Load a SystemModel from a .yaml/.yml/.json document."""
 
-    return load_system_details(path, format=format).system
+    return load_system_details(
+        path,
+        format=format,
+        config_overlays=config_overlays,
+    ).system
 
 
 def dumps_system(
