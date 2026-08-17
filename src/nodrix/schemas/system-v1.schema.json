@@ -423,6 +423,55 @@
       "title": "SystemLink",
       "type": "object"
     },
+    "SystemPort": {
+      "additionalProperties": false,
+      "description": "One externally visible typed port of a System Definition.\n\nSystemPort describes the logical contract exposed by a System. It does not\ndescribe transport realization, ROS topics, queues, processes, or backend\nrouting. Those concerns belong to composition/planning/integration layers.\n\n``type_id`` uses the same backend-neutral contract identity language as\nNodrix MessageDefinition/PortDefinition without making the canonical\nSystem Model depend on the SDK authoring frontend.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "type_id": {
+          "minLength": 1,
+          "title": "Type Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type_id"
+      ],
+      "title": "SystemPort",
+      "type": "object"
+    },
     "Target": {
       "additionalProperties": false,
       "description": "Declarative execution/deployment target.\n\nVersion 2.5 models targets only. Target resolution and deployment belong to\nthe 2.6 planner/backend layer.",
@@ -506,6 +555,14 @@
       "title": "Graphs",
       "type": "array"
     },
+    "inputs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SystemPort"
+      },
+      "title": "Inputs",
+      "type": "array"
+    },
     "kind": {
       "const": "System",
       "default": "System",
@@ -529,6 +586,14 @@
       "minLength": 1,
       "title": "Name",
       "type": "string"
+    },
+    "outputs": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SystemPort"
+      },
+      "title": "Outputs",
+      "type": "array"
     },
     "policies": {
       "additionalProperties": true,

@@ -29,6 +29,8 @@ _TOP_LEVEL_ORDER = (
     "kind",
     "name",
     "description",
+    "inputs",
+    "outputs",
     "systems",
     "resources",
     "applications",

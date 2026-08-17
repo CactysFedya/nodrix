@@ -7,6 +7,7 @@ from typing import Any, Literal, Mapping
 from pydantic import Field
 
 from ._base import Metadata, SystemBaseModel
+from .contracts import SystemPort
 from .graph import Graph, SystemLink
 from .instances import (
     ApplicationInstance,
@@ -36,6 +37,8 @@ class SystemModel(SystemBaseModel):
     name: str = Field(min_length=1)
     description: str | None = None
 
+    inputs: tuple[SystemPort, ...] = ()
+    outputs: tuple[SystemPort, ...] = ()
     systems: tuple[SystemInstance, ...] = ()
     resources: tuple[ResourceInstance, ...] = ()
     applications: tuple[ApplicationInstance, ...] = ()
@@ -47,6 +50,18 @@ class SystemModel(SystemBaseModel):
     policies: Mapping[str, Any] = Field(default_factory=dict)
     metadata: Metadata = Field(default_factory=dict)
     extensions: Mapping[str, Any] = Field(default_factory=dict)
+
+    def input(self, name: str) -> SystemPort:
+        for item in self.inputs:
+            if item.name == name:
+                return item
+        raise KeyError(name)
+
+    def output(self, name: str) -> SystemPort:
+        for item in self.outputs:
+            if item.name == name:
+                return item
+        raise KeyError(name)
 
     def system(self, name: str) -> SystemInstance:
         for item in self.systems:

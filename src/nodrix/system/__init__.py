@@ -25,6 +25,7 @@ from .compatibility import (
     compatibility_report_from_system,
     restore_pipeline_manifest,
 )
+from .contracts import SystemPort
 from .graph import (
     Connection,
     Graph,
@@ -164,6 +165,7 @@ __all__ = [
     "SystemDiagnostic",
     "SystemLink",
     "SystemInstance",
+    "SystemPort",
     "SystemModel",
     "SYSTEM_EXECUTION_PLAN_SCHEMA",
     "PlannedApplication",
