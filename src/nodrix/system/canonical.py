@@ -42,11 +42,22 @@ def system_plan_digest(
             "plan must be a SystemExecutionPlan"
         )
 
+    document = plan.model_dump(
+        mode="json",
+        by_alias=True,
+    )
+
+    # Preserve pre-2.18 Plan identity when no execution context is bound.
+    if document.get(
+        "execution_context_sha256"
+    ) is None:
+        document.pop(
+            "execution_context_sha256",
+            None,
+        )
+
     encoded = json.dumps(
-        plan.model_dump(
-            mode="json",
-            by_alias=True,
-        ),
+        document,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),

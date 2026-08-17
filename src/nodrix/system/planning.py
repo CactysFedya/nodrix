@@ -18,6 +18,10 @@ from .definition import system_definition_digest
 from .graph import split_local_endpoint, split_system_endpoint
 from .model import SystemModel
 from .validation import SystemValidationReport, validate_system
+from .execution_context import (
+    SystemExecutionContext,
+    system_execution_context_digest,
+)
 
 
 SYSTEM_EXECUTION_PLAN_SCHEMA = "nodrix.system-execution-plan/v1"
@@ -165,6 +169,7 @@ class SystemExecutionPlan(SystemBaseModel):
     )
     system: str
     system_sha256: str
+    execution_context_sha256: str | None = None
     targets: tuple[PlannedTarget, ...] = ()
     resources: tuple[PlannedResource, ...] = ()
     resource_order: tuple[str, ...] = ()
@@ -323,6 +328,7 @@ def plan_system(
     system: SystemModel,
     *,
     catalog: DefinitionCatalog | None = None,
+    execution_context: SystemExecutionContext | None = None,
 ) -> SystemExecutionPlan:
     """Resolve a validated SystemModel into a deterministic system plan.
 
@@ -686,6 +692,13 @@ def plan_system(
     return SystemExecutionPlan(
         system=system.name,
         system_sha256=system_definition_digest(system),
+        execution_context_sha256=(
+            system_execution_context_digest(
+                execution_context
+            )
+            if execution_context is not None
+            else None
+        ),
         targets=planned_targets,
         resources=planned_resources,
         resource_order=resource_order,
