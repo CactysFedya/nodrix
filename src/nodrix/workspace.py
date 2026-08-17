@@ -6,11 +6,13 @@ import os
 from pathlib import Path
 import shlex
 import shutil
-import subprocess
 from typing import Any
 
 import yaml
 
+from .environment_materialization import (
+    materialize_environment,
+)
 from .storage_layout import StorageLayout
 
 
@@ -551,53 +553,34 @@ def resolve_pipeline_reference(
 def build_environment(
     resolution: WorkspaceResolution,
 ) -> dict[str, str]:
-    env = dict(os.environ)
-    env.update(resolution.variables)
-    env["NODRIX_PROJECT_ROOT"] = str(resolution.root)
-    env["NODRIX_PIPELINE"] = str(resolution.pipeline)
+    explicit = dict(
+        resolution.variables
+    )
+
+    explicit[
+        "NODRIX_PROJECT_ROOT"
+    ] = str(
+        resolution.root
+    )
+
+    explicit[
+        "NODRIX_PIPELINE"
+    ] = str(
+        resolution.pipeline
+    )
+
     if resolution.context_name:
-        env["NODRIX_CONTEXT"] = resolution.context_name
+        explicit[
+            "NODRIX_CONTEXT"
+        ] = resolution.context_name
 
-    missing = [path for path in resolution.sources if not path.is_file()]
-    if missing:
-        rendered = ", ".join(str(item) for item in missing)
-        raise FileNotFoundError(f"Environment source files not found: {rendered}")
-
-    if resolution.sources:
-        commands = ["set -a"]
-        commands.extend(
-            f"source {shlex.quote(str(path))}"
-            for path in resolution.sources
-        )
-        commands.append("env -0")
-        completed = subprocess.run(
-            ["/bin/bash", "--noprofile", "--norc", "-c", "; ".join(commands)],
-            cwd=resolution.root,
-            env=env,
-            check=False,
-            capture_output=True,
-        )
-        if completed.returncode:
-            error = completed.stderr.decode(errors="replace").strip()
-            raise RuntimeError(
-                f"Cannot activate workspace environment: {error}"
-            )
-        captured: dict[str, str] = {}
-        for item in completed.stdout.split(b"\0"):
-            if not item or b"=" not in item:
-                continue
-            key, value = item.split(b"=", 1)
-            captured[key.decode(errors="replace")] = value.decode(
-                errors="replace"
-            )
-        env.update(captured)
-
-    env.update(resolution.variables)
-    env["NODRIX_PROJECT_ROOT"] = str(resolution.root)
-    env["NODRIX_PIPELINE"] = str(resolution.pipeline)
-    if resolution.context_name:
-        env["NODRIX_CONTEXT"] = resolution.context_name
-    return env
+    return materialize_environment(
+        base=os.environ,
+        variables=explicit,
+        sources=resolution.sources,
+        cwd=resolution.root,
+        activation_label="workspace environment",
+    )
 
 
 def activate_workspace_environment(

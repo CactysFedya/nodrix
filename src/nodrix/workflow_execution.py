@@ -16,6 +16,9 @@ from typing import Any
 import yaml
 
 from .workflow_schema import WORKFLOW_SCHEMA
+from .environment_materialization import (
+    source_environment,
+)
 from .storage_layout import StorageLayout
 from .workspace import PROJECT_FILE, find_workspace
 
@@ -189,32 +192,12 @@ def _source_environment(
     base: dict[str, str],
     paths: list[Path],
 ) -> dict[str, str]:
-    if not paths:
-        return base
-    missing = [path for path in paths if not path.is_file()]
-    if missing:
-        rendered = ", ".join(str(path) for path in missing)
-        raise FileNotFoundError(f"Environment source files not found: {rendered}")
-    commands = ["set -a"]
-    commands.extend(f"source {shlex.quote(str(path))}" for path in paths)
-    commands.append("env -0")
-    completed = subprocess.run(
-        ["/bin/bash", "--noprofile", "--norc", "-c", "; ".join(commands)],
+    return source_environment(
+        base=base,
+        sources=paths,
         cwd=root,
-        env=base,
-        check=False,
-        capture_output=True,
+        activation_label="project environment",
     )
-    if completed.returncode:
-        detail = completed.stderr.decode(errors="replace").strip()
-        raise RuntimeError(f"Cannot activate project environment: {detail}")
-    result = dict(base)
-    for item in completed.stdout.split(b"\0"):
-        if not item or b"=" not in item:
-            continue
-        key, value = item.split(b"=", 1)
-        result[key.decode(errors="replace")] = value.decode(errors="replace")
-    return result
 
 
 def project_environment(
