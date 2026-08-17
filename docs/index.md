@@ -1,11 +1,14 @@
 # Plyctl 2.3 documentation
 
 <div class="plyctl-hero">
-<strong>Plyctl is a pipeline runtime and operations layer for modular real-time systems.</strong><br>
-Version 2.3 adds workspace contexts, reproducible environments, background operations, operational views, managed ROS 2 processes, and qualified reference integrations.
+<strong>Nodrix is an executable system architecture platform for heterogeneous real-time and engineering systems.</strong><br>
+`plyctl` is the command-line interface for authoring, validating, planning, executing, and operating those systems.
 </div>
 
-Plyctl lets you describe a graph once, validate it before launch, run Python or native nodes, supervise external applications, and inspect the resulting system from one CLI.
+The canonical `System` model represents targets, resources, applications,
+computation graphs, relations, and execution context as one executable
+architecture. The original 2.x Pipeline model remains available as a
+specialized dataflow and compatibility surface.
 
 ```bash
 plyctl workspace init robot-project
@@ -27,7 +30,8 @@ plyctl run
 ## Start here
 
 - New user: follow [Installation](getting-started/installation.md), then [Your first workspace](getting-started/first-workspace.md).
-- Pipeline author: read [Manifest API v2](reference/manifest.md) and [Python SDK](reference/python-sdk.md).
+- System author: start with the canonical System model and project resources.
+- 2.x Pipeline author: read [Manifest API v2](reference/manifest.md) and [Python SDK](reference/python-sdk.md).
 - Integration author: follow [Build a provider](tutorials/provider.md) and [Provider SDK reference](reference/provider-sdk.md).
 - Robot developer: use [ROS 2 integration](integrations/ros2.md), [FAST-LIO2](integrations/fast-lio2.md), and the [FAST-LIVO2 semantic-mapping qualification page](integrations/fast-livo2-semantic-mapping.md).
 - Operator: learn [Workspace operations](tutorials/workspace-operations.md), [Production operation](how-to/production.md), and [Portable deployment](how-to/portable-deployment.md).

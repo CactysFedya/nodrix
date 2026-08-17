@@ -13,6 +13,47 @@ from .workspace import PROJECT_FILE, find_workspace
 
 
 _RESOURCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+_AUTHORING_LANGUAGES = frozenset({
+    "en",
+    "ru",
+})
+
+
+def _normalize_authoring_language(
+    value: str | None,
+) -> str:
+    language = (
+        str(value or "en")
+        .strip()
+        .lower()
+    )
+
+    if language not in _AUTHORING_LANGUAGES:
+        available = ", ".join(
+            sorted(
+                _AUTHORING_LANGUAGES
+            )
+        )
+        raise ValueError(
+            f"Unknown project language {language!r}; "
+            f"choose: {available}"
+        )
+
+    return language
+
+
+def _project_authoring_language(
+    config: dict[str, Any],
+) -> str:
+    defaults = dict(
+        config.get("defaults")
+        or {}
+    )
+
+    return _normalize_authoring_language(
+        defaults.get("language")
+    )
 _RESOURCE_SECTIONS = {
     "system": ("systems", "systems"),
     "pipeline": ("pipelines", "pipelines"),
@@ -138,6 +179,7 @@ def create_progressive_project(
     directory: str | Path,
     *,
     force: bool = False,
+    language: str = "en",
 ) -> list[Path]:
     """Create only the project manifest and local ignore rules.
 
@@ -145,6 +187,12 @@ def create_progressive_project(
     Existing source repositories are supported: only an existing project
     manifest is considered a conflict.
     """
+
+    authoring_language = (
+        _normalize_authoring_language(
+            language
+        )
+    )
 
     root = Path(directory).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -155,7 +203,10 @@ def create_progressive_project(
     project = {
         "schema": "nodrix.project/v1",
         "name": root.name.replace(" ", "-").lower(),
-        "defaults": {"view": "compact"},
+        "defaults": {
+            "view": "compact",
+            "language": authoring_language,
+        },
         "build": {},
         "systems": {},
         "workflows": {},
@@ -319,21 +370,27 @@ def _resource_document(
 def _workflow_scaffold(
     name: str,
     document: dict[str, Any],
+    *,
+    language: str = "en",
 ) -> str:
-    """Render a human-facing workflow source file.
+    """Render a localized human-facing Workflow source file."""
 
-    Comments teach the public model but are intentionally not part of the
-    canonical workflow definition.
-    """
+    language = _normalize_authoring_language(
+        language
+    )
 
     steps = list(
-        document.get("steps") or []
+        document.get("steps")
+        or []
     )
 
     first = (
         dict(steps[0])
         if steps
-        and isinstance(steps[0], dict)
+        and isinstance(
+            steps[0],
+            dict,
+        )
         else {}
     )
 
@@ -352,7 +409,57 @@ def _workflow_scaffold(
         sort_keys=False,
     ).rstrip()
 
-    header = f"""# Nodrix Workflow
+    if language == "ru":
+        header = f"""# Nodrix Workflow
+#
+# Что это:
+#   Workflow — конечная инженерная операция, состоящая из шагов-команд.
+#   Она завершается успехом или ошибкой.
+#
+# Запуск:
+#   plyctl workflow run {name}
+#
+# Python SDK:
+#   from nodrix.sdk import Workflow
+#   workflow = Workflow({name!r})
+#   workflow.run({step_id!r}, {command!r})
+#
+# Ниже находится каноническое определение nodrix.workflow/v1.
+#
+"""
+
+        footer = """
+#
+# Необязательная привязка Workflow:
+#
+# implements: robot.flash       # Этот Workflow реализует Operation kind.
+#
+# Для проектных и пакетных операций используйте namespaced kinds,
+# например robot.flash или model.quantize.
+#
+# Необязательные поля шага:
+#
+#   depends_on: [prepare]       # Выполнить после указанных шагов.
+#   cwd: .                      # Рабочий каталог внутри проекта.
+#   timeout_seconds: 60         # Ограничение времени выполнения.
+#   continue_on_error: true     # Продолжить после ошибки шага.
+#
+#   environment:
+#     MODE: debug               # Переменные окружения шага.
+#
+#   when:
+#     system: Linux             # Выполнять только при совпадении условия.
+#
+#   cache:
+#     inputs: [src]
+#     outputs: [build/app]      # Переиспользовать неизменившийся результат.
+#
+#   recipe: example.recipe      # Необязательная authoring/source подсказка.
+#
+# Начинайте с id + run. Добавляйте остальное только при необходимости.
+"""
+    else:
+        header = f"""# Nodrix Workflow
 #
 # What:
 #   A Workflow is a finite engineering operation made of command steps.
@@ -370,7 +477,7 @@ def _workflow_scaffold(
 #
 """
 
-    footer = """
+        footer = """
 #
 # Optional workflow binding:
 #
@@ -386,15 +493,15 @@ def _workflow_scaffold(
 #   timeout_seconds: 60         # Stop a step that runs too long.
 #   continue_on_error: true     # Continue after this step fails.
 #
-#   environment:                # Environment values for this step.
-#     MODE: debug
+#   environment:
+#     MODE: debug               # Environment values for this step.
 #
-#   when:                       # Run only when conditions match.
-#     system: Linux
+#   when:
+#     system: Linux             # Run only when conditions match.
 #
-#   cache:                      # Reuse unchanged successful work.
+#   cache:
 #     inputs: [src]
-#     outputs: [build/app]
+#     outputs: [build/app]      # Reuse unchanged successful work.
 #
 #   recipe: example.recipe      # Optional authoring/source hint.
 #
@@ -412,19 +519,59 @@ def _workflow_scaffold(
 def _system_scaffold(
     name: str,
     document: dict[str, Any],
+    *,
+    language: str = "en",
 ) -> str:
-    """Render a human-facing canonical System source file."""
+    """Render a localized human-facing canonical System source file."""
+
+    language = _normalize_authoring_language(
+        language
+    )
 
     canonical = yaml.safe_dump(
         document,
         sort_keys=False,
     ).rstrip()
 
-    header = f"""# Nodrix System
+    if language == "ru":
+        header = f"""# Nodrix System
+#
+# Что это:
+#   System — каноническое определение всей исполняемой системы.
+#   Оно описывает targets, resources, applications, графы и связи.
+#
+# Проверить:
+#   plyctl system validate systems/{name}.yaml
+#
+# Построить Plan без запуска:
+#   plyctl system plan systems/{name}.yaml
+#
+# Запустить:
+#   plyctl system run systems/{name}.yaml
+#
+# Просмотреть:
+#   plyctl system show systems/{name}.yaml
+#
+# Ниже находится каноническое Definition nodrix.system/v1.
+#
+"""
+
+        footer = """
+#
+# Типичные следующие разделы:
+#
+# targets: []         # Где могут исполняться части системы.
+# resources: []       # Общие зависимости и execution context.
+# applications: []    # Процессы, launch-файлы и другие applications.
+#
+# Начинайте с identity System и добавляйте архитектуру только по необходимости.
+"""
+    else:
+        header = f"""# Nodrix System
 #
 # What:
 #   A System is the canonical definition of the whole executable system.
-#   It describes execution targets, resources, applications and relations.
+#   It describes targets, resources, applications, graphs and relations.
 #
 # Validate:
 #   plyctl system validate systems/{name}.yaml
@@ -438,11 +585,11 @@ def _system_scaffold(
 # Inspect:
 #   plyctl system show systems/{name}.yaml
 #
-# The YAML below is the canonical nodrix.system/v1 definition.
+# The YAML below is the canonical nodrix.system/v1 Definition.
 #
 """
 
-    footer = """
+        footer = """
 #
 # Typical next sections:
 #
@@ -464,21 +611,85 @@ def _system_scaffold(
 def _environment_scaffold(
     name: str,
     document: dict[str, Any],
+    *,
+    language: str = "en",
 ) -> str:
-    """Render a human-facing project Environment source file."""
+    """Render a localized human-facing project Environment source file."""
+
+    language = _normalize_authoring_language(
+        language
+    )
 
     canonical = yaml.safe_dump(
         document,
         sort_keys=False,
     ).rstrip()
 
-    header = f"""# Nodrix Environment
+    if language == "ru":
+        header = f"""# Nodrix Environment
+#
+# Что это:
+#   Environment описывает требования к host/process окружению.
+#   Это не описание исполняемой архитектуры System.
+#
+# Используйте для:
+#   shell setup, переменных окружения, platform constraints и checks.
+#
+# Связь понятий:
+#   System      = что исполняется.
+#   Environment = что требуется от host/process.
+#   Profile     = проектный configuration overlay.
+#
+# Просмотреть выбранный Environment:
+#   plyctl env show
+#
+# Проверить требования:
+#   plyctl env check
+#
+# Экспортировать разрешённые значения:
+#   plyctl env export
+#
+# Сделать Environment значением по умолчанию:
+#   plyctl project add environment {name} --default
+#
+# Ниже находится configuration document nodrix.environment/v1.
+#
+"""
+
+        footer = """
+#
+# Примеры:
+#
+# shell:
+#   source:
+#     - /opt/ros/jazzy/setup.bash
+#
+# environment:
+#   ROS_DOMAIN_ID: "42"
+#
+# checks:
+#   - type: command
+#     command: cmake
+#
+# Добавляйте только те требования, которые действительно нужны операциям.
+"""
+    else:
+        header = f"""# Nodrix Environment
 #
 # What:
-#   An Environment describes prerequisites used by workflows and project
-#   operations: shell setup files, environment variables and checks.
+#   An Environment describes host/process prerequisites.
+#   It does not describe the executable System architecture.
 #
-# Inspect the currently selected environment:
+# Use it for:
+#   shell setup files, environment variables and checks.
+#   Platform constraints may describe the expected host architecture.
+#
+# Relationship:
+#   System      = what executes.
+#   Environment = what the host/process requires.
+#   Profile     = project configuration overlay.
+#
+# Inspect the currently selected Environment:
 #   plyctl env show
 #
 # Check its prerequisites:
@@ -487,14 +698,14 @@ def _environment_scaffold(
 # Export its resolved values:
 #   plyctl env export
 #
-# When creating an environment, make it the project default with:
+# Make the Environment the project default:
 #   plyctl project add environment {name} --default
 #
-# The YAML below is the canonical nodrix.environment/v1 definition.
+# The YAML below is the nodrix.environment/v1 configuration document.
 #
 """
 
-    footer = """
+        footer = """
 #
 # Examples:
 #
@@ -520,10 +731,104 @@ def _environment_scaffold(
     )
 
 
+def _profile_scaffold(
+    name: str,
+    document: dict[str, Any],
+    *,
+    language: str = "en",
+) -> str:
+    """Render a localized human-facing project Profile source file."""
+
+    language = _normalize_authoring_language(
+        language
+    )
+
+    canonical = yaml.safe_dump(
+        document,
+        sort_keys=False,
+    ).rstrip()
+
+    if language == "ru":
+        header = f"""# Nodrix Profile
+#
+# Что это:
+#   Profile — именованный configuration overlay проекта.
+#   Это не исполняемый Definition и не RuntimePreset.
+#
+# Используйте для:
+#   проектных вариантов, аппаратной настройки, variables и выбора RuntimePreset.
+#
+# Связь понятий:
+#   Profile       = project configuration overlay.
+#   RuntimePreset = execution/performance defaults.
+#   Environment   = host/process prerequisites.
+#
+# Сделать Profile значением по умолчанию:
+#   plyctl project add profile {name} --default
+#
+# Ниже находится configuration document nodrix.profile/v1.
+#
+"""
+
+        footer = """
+#
+# Необязательные поля:
+#
+# runtime_profile: realtime-low-latency
+#
+# variables:
+#   MAP_VOXEL_SIZE: "0.1"
+#
+# Начинайте с пустого Profile и добавляйте значения только для варианта проекта.
+"""
+    else:
+        header = f"""# Nodrix Profile
+#
+# What:
+#   A Profile is a named project configuration overlay.
+#   It is not an executable Definition and it is not a RuntimePreset.
+#
+# Use it for:
+#   Project variants, hardware tuning, variables and RuntimePreset selection.
+#
+# Relationship:
+#   Profile       = project configuration overlay.
+#   RuntimePreset = execution/performance defaults.
+#   Environment   = host/process prerequisites.
+#
+# Make the Profile the project default:
+#   plyctl project add profile {name} --default
+#
+# The YAML below is the nodrix.profile/v1 configuration document.
+#
+"""
+
+        footer = """
+#
+# Optional fields:
+#
+# runtime_profile: realtime-low-latency
+#
+# variables:
+#   MAP_VOXEL_SIZE: "0.1"
+#
+# Start with an empty Profile and add values only for a project variant.
+"""
+
+    return (
+        header
+        + canonical
+        + "\n"
+        + footer
+    )
+
+
 def _render_resource_scaffold(
     kind: str,
     name: str,
     document: dict[str, Any],
+    *,
+    language: str = "en",
 ) -> str:
     """Render a resource created for direct user editing.
 
@@ -535,18 +840,28 @@ def _render_resource_scaffold(
         return _workflow_scaffold(
             name,
             document,
+            language=language,
         )
 
     if kind == "system":
         return _system_scaffold(
             name,
             document,
+            language=language,
         )
 
     if kind == "environment":
         return _environment_scaffold(
             name,
             document,
+            language=language,
+        )
+
+    if kind == "profile":
+        return _profile_scaffold(
+            name,
+            document,
+            language=language,
         )
 
     return yaml.safe_dump(
@@ -587,6 +902,12 @@ def add_project_resource(
     project_root = _project_root(root)
     project_file = project_root / PROJECT_FILE
     config = _load_yaml(project_file)
+    authoring_language = (
+        _project_authoring_language(
+            config
+        )
+    )
+
     section, directory_name = _RESOURCE_SECTIONS[normalized_kind]
     entries = dict(config.get(section) or {})
     relative = Path(directory_name) / f"{normalized_name}.yaml"
@@ -619,6 +940,7 @@ def add_project_resource(
         normalized_kind,
         normalized_name,
         document,
+        language=authoring_language,
     )
 
     _atomic_text(

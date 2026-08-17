@@ -38,11 +38,23 @@ app.add_typer(workflow_app, name="workflow")
 def project_init(
     directory: Annotated[Path, typer.Argument()] = Path.cwd(),
     force: Annotated[bool, typer.Option("--force")] = False,
+    language: Annotated[
+        str,
+        typer.Option(
+            "--language",
+            "-l",
+            help="Language for generated YAML comments: en or ru",
+        ),
+    ] = "en",
 ) -> None:
     """Create a minimal system-first nodrix.yaml project manifest."""
 
     try:
-        created = create_progressive_project(directory, force=force)
+        created = create_progressive_project(
+            directory,
+            force=force,
+            language=language,
+        )
     except Exception as exc:
         console.print(f"[red]Project init failed:[/red] {exc}")
         raise typer.Exit(1)

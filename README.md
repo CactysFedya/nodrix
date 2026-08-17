@@ -14,10 +14,17 @@
 > [the product principles](docs/PRINCIPLES.md).
 
 
-Plyctl is the Pipeline OS for real-time systems. It composes Python, C++, ROS 2,
-processes, devices, and transports in one typed YAML graph, preserves zero-copy
-paths where the memory domain permits, and makes every copy, drop, restart,
-queue, and network export observable.
+Nodrix is an executable system architecture platform for heterogeneous
+real-time and engineering systems. `plyctl` is its command-line interface.
+
+The canonical `System` model describes targets, resources, applications,
+computation graphs, relations, and execution context as one executable
+architecture. Python, C++, ROS 2, processes, devices, and transports can
+participate in the same system model.
+
+The original 2.x Pipeline model remains supported as a specialized dataflow and
+compatibility surface. Existing Pipeline manifests continue to load, run, and
+migrate to the canonical System model.
 
 
 ## Plyctl 2.3 beta stabilization highlights
