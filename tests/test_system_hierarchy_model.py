@@ -308,7 +308,7 @@ def test_checked_system_schema_matches_generated_schema() -> None:
     assert checked == system_json_schema()
 
 
-def test_planner_refuses_to_ignore_child_systems() -> None:
+def test_planner_requires_exact_child_system_definition() -> None:
     system = SystemModel(
         name="robot",
         systems=(
@@ -323,10 +323,13 @@ def test_planner_refuses_to_ignore_child_systems() -> None:
             system
         )
 
-    assert captured.value.code == "PLAN401"
-    assert captured.value.path == "systems"
+    assert captured.value.code == "PLAN404"
     assert (
-        "cannot be silently ignored"
+        captured.value.path
+        == "systems[0].uses"
+    )
+    assert (
+        "SystemDefinitionResolver"
         in captured.value.message
     )
 

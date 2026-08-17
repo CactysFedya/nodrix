@@ -8,9 +8,11 @@ backend-specific lowering is a later layer.
 from __future__ import annotations
 
 from collections import defaultdict, deque
-from typing import Any, Literal, Mapping
+from typing import Any, Callable, Literal, Mapping
 
 from pydantic import Field
+
+from ..model import RevisionRef
 
 from ._base import SystemBaseModel
 from .catalog import DefinitionCatalog
@@ -25,6 +27,12 @@ from .execution_context import (
 
 
 SYSTEM_EXECUTION_PLAN_SCHEMA = "nodrix.system-execution-plan/v1"
+
+
+SystemDefinitionResolver = Callable[
+    [RevisionRef],
+    SystemModel | None,
+]
 
 
 class SystemPlanningError(ValueError):
@@ -160,6 +168,15 @@ class PlannedArtifact(SystemBaseModel):
     extensions: Mapping[str, Any] = Field(default_factory=dict)
 
 
+class PlannedSystemInstance(SystemBaseModel):
+    """One child System instance with its exact recursively resolved plan."""
+
+    ordinal: int
+    name: str
+    revision: str
+    plan: "SystemExecutionPlan"
+
+
 class SystemExecutionPlan(SystemBaseModel):
     """Resolved system topology consumed by future execution backends."""
 
@@ -170,6 +187,7 @@ class SystemExecutionPlan(SystemBaseModel):
     system: str
     system_sha256: str
     execution_context_sha256: str | None = None
+    systems: tuple[PlannedSystemInstance, ...] = ()
     targets: tuple[PlannedTarget, ...] = ()
     resources: tuple[PlannedResource, ...] = ()
     resource_order: tuple[str, ...] = ()
@@ -194,6 +212,15 @@ class SystemExecutionPlan(SystemBaseModel):
             if item.name == name:
                 return item
         raise KeyError(name)
+
+    def child(self, name: str) -> PlannedSystemInstance:
+        for item in self.systems:
+            if item.name == name:
+                return item
+        raise KeyError(name)
+
+
+PlannedSystemInstance.model_rebuild()
 
 
 class _EndpointResolution:
@@ -329,6 +356,7 @@ def plan_system(
     *,
     catalog: DefinitionCatalog | None = None,
     execution_context: SystemExecutionContext | None = None,
+    system_resolver: SystemDefinitionResolver | None = None,
 ) -> SystemExecutionPlan:
     """Resolve a validated SystemModel into a deterministic system plan.
 
@@ -340,15 +368,103 @@ def plan_system(
     validation = validate_system(system, catalog=catalog)
     _raise_validation_errors(validation)
 
-    if system.systems:
-        raise SystemPlanningError(
-            "PLAN401",
-            "systems",
-            "hierarchical System planning is not implemented yet; "
-            "canonical child System instances cannot be silently ignored",
+    diagnostics = _validation_diagnostics(validation)
+
+    planned_systems_list: list[
+        PlannedSystemInstance
+    ] = []
+
+    for index, instance in enumerate(
+        system.systems
+    ):
+        path = f"systems[{index}]"
+
+        if system_resolver is None:
+            raise SystemPlanningError(
+                "PLAN404",
+                f"{path}.uses",
+                "child System Definition is required for hierarchical "
+                "planning, but no SystemDefinitionResolver was provided",
+            )
+
+        child = system_resolver(
+            instance.revision
         )
 
-    diagnostics = _validation_diagnostics(validation)
+        if child is None:
+            raise SystemPlanningError(
+                "PLAN404",
+                f"{path}.uses",
+                "cannot resolve exact child System Definition "
+                f"{instance.revision.canonical!r}",
+            )
+
+        if not isinstance(
+            child,
+            SystemModel,
+        ):
+            raise SystemPlanningError(
+                "PLAN405",
+                f"{path}.uses",
+                "SystemDefinitionResolver returned a value that is not "
+                "a SystemModel",
+            )
+
+        actual_revision = RevisionRef.from_sha256(
+            instance.revision.entity,
+            system_definition_digest(
+                child
+            ),
+        )
+
+        if (
+            child.name
+            != instance.revision.entity.name
+            or actual_revision.canonical
+            != instance.revision.canonical
+        ):
+            raise SystemPlanningError(
+                "PLAN405",
+                f"{path}.uses",
+                "resolved child System Definition does not match the "
+                "exact pinned RevisionRef",
+            )
+
+        try:
+            child_plan = plan_system(
+                child,
+                catalog=catalog,
+                execution_context=execution_context,
+                system_resolver=system_resolver,
+            )
+        except SystemPlanningError as exc:
+            nested_path = (
+                f"{path}.{exc.path}"
+                if exc.path
+                else path
+            )
+
+            raise SystemPlanningError(
+                exc.code,
+                nested_path,
+                f"child System {instance.name!r}: "
+                f"{exc.message}",
+            ) from exc
+
+        planned_systems_list.append(
+            PlannedSystemInstance(
+                ordinal=index,
+                name=instance.name,
+                revision=(
+                    instance.revision.canonical
+                ),
+                plan=child_plan,
+            )
+        )
+
+    planned_systems = tuple(
+        planned_systems_list
+    )
 
     if system.targets:
         planned_targets = tuple(
@@ -708,6 +824,7 @@ def plan_system(
             if execution_context is not None
             else None
         ),
+        systems=planned_systems,
         targets=planned_targets,
         resources=planned_resources,
         resource_order=resource_order,
@@ -720,6 +837,7 @@ def plan_system(
         metadata=dict(system.metadata),
         extensions=dict(system.extensions),
         summary={
+            "systems": len(planned_systems),
             "targets": len(planned_targets),
             "resources": len(planned_resources),
             "applications": len(planned_applications),
@@ -742,8 +860,10 @@ __all__ = [
     "PlannedLink",
     "PlannedNode",
     "PlannedResource",
+    "PlannedSystemInstance",
     "PlannedTarget",
     "PlanningDiagnostic",
+    "SystemDefinitionResolver",
     "SystemExecutionPlan",
     "SystemPlanningError",
     "plan_system",
