@@ -37,6 +37,7 @@ from .instances import (
     Artifact,
     NodeInstance,
     ResourceInstance,
+    SystemInstance,
     Target,
 )
 from .io import (
@@ -162,6 +163,7 @@ __all__ = [
     "plan_execution_scopes",
     "SystemDiagnostic",
     "SystemLink",
+    "SystemInstance",
     "SystemModel",
     "SYSTEM_EXECUTION_PLAN_SCHEMA",
     "PlannedApplication",

@@ -332,6 +332,38 @@
       "title": "ResourceInstance",
       "type": "object"
     },
+    "SystemInstance": {
+      "additionalProperties": false,
+      "description": "One exact child System Definition instantiated by a parent System.\n\n``uses`` is the canonical immutable RevisionRef of the child System\nDefinition. Filesystem paths, project aliases, source filenames, and\nunpinned EntityRefs are authoring concerns and must be resolved before\nconstructing the canonical SystemModel.\n\nA SystemInstance is part of the canonical architecture. It is not a\nSystem Module and does not disappear during source resolution.",
+      "properties": {
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "uses"
+      ],
+      "title": "SystemInstance",
+      "type": "object"
+    },
     "SystemLink": {
       "additionalProperties": false,
       "description": "Explicit boundary outside one local Graph.\n\nA link can connect an Application to a Graph node, or two Graphs. It is a\nmodel-level contract only; transport/backend realization is intentionally a\nlater planner concern.",
@@ -509,6 +541,14 @@
         "$ref": "#/$defs/ResourceInstance"
       },
       "title": "Resources",
+      "type": "array"
+    },
+    "systems": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SystemInstance"
+      },
+      "title": "Systems",
       "type": "array"
     },
     "targets": {

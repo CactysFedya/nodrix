@@ -8,7 +8,13 @@ from pydantic import Field
 
 from ._base import Metadata, SystemBaseModel
 from .graph import Graph, SystemLink
-from .instances import ApplicationInstance, Artifact, ResourceInstance, Target
+from .instances import (
+    ApplicationInstance,
+    Artifact,
+    ResourceInstance,
+    SystemInstance,
+    Target,
+)
 
 
 SYSTEM_MODEL_API_VERSION = "nodrix.system/v1"
@@ -30,6 +36,7 @@ class SystemModel(SystemBaseModel):
     name: str = Field(min_length=1)
     description: str | None = None
 
+    systems: tuple[SystemInstance, ...] = ()
     resources: tuple[ResourceInstance, ...] = ()
     applications: tuple[ApplicationInstance, ...] = ()
     graphs: tuple[Graph, ...] = ()
@@ -40,6 +47,12 @@ class SystemModel(SystemBaseModel):
     policies: Mapping[str, Any] = Field(default_factory=dict)
     metadata: Metadata = Field(default_factory=dict)
     extensions: Mapping[str, Any] = Field(default_factory=dict)
+
+    def system(self, name: str) -> SystemInstance:
+        for item in self.systems:
+            if item.name == name:
+                return item
+        raise KeyError(name)
 
     def graph(self, name: str) -> Graph:
         for item in self.graphs:

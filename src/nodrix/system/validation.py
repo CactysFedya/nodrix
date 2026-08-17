@@ -303,6 +303,7 @@ def validate_system(
     diagnostics: list[SystemDiagnostic] = []
 
     categories = {
+        "systems": system.systems,
         "resources": system.resources,
         "applications": system.applications,
         "graphs": system.graphs,

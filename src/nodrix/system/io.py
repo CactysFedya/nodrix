@@ -27,6 +27,7 @@ _TOP_LEVEL_ORDER = (
     "kind",
     "name",
     "description",
+    "systems",
     "resources",
     "applications",
     "graphs",

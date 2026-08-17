@@ -339,6 +339,15 @@ def plan_system(
 
     validation = validate_system(system, catalog=catalog)
     _raise_validation_errors(validation)
+
+    if system.systems:
+        raise SystemPlanningError(
+            "PLAN401",
+            "systems",
+            "hierarchical System planning is not implemented yet; "
+            "canonical child System instances cannot be silently ignored",
+        )
+
     diagnostics = _validation_diagnostics(validation)
 
     if system.targets:

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
+from ..model import EntityRef, RevisionRef
 from ._base import Metadata, NamedSystemModel
 
 
@@ -41,6 +42,60 @@ class ApplicationInstance(NamedSystemModel):
     target: str | None = None
     metadata: Metadata = Field(default_factory=dict)
     extensions: Mapping[str, Any] = Field(default_factory=dict)
+
+
+class SystemInstance(NamedSystemModel):
+    """One exact child System Definition instantiated by a parent System.
+
+    ``uses`` is the canonical immutable RevisionRef of the child System
+    Definition. Filesystem paths, project aliases, source filenames, and
+    unpinned EntityRefs are authoring concerns and must be resolved before
+    constructing the canonical SystemModel.
+
+    A SystemInstance is part of the canonical architecture. It is not a
+    System Module and does not disappear during source resolution.
+    """
+
+    uses: str = Field(min_length=1)
+    metadata: Metadata = Field(default_factory=dict)
+    extensions: Mapping[str, Any] = Field(default_factory=dict)
+
+    @field_validator("uses")
+    @classmethod
+    def validate_uses(cls, value: str) -> str:
+        normalized = value.strip()
+
+        try:
+            revision = RevisionRef.parse(
+                normalized
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "SystemInstance.uses must be a canonical "
+                "immutable System RevisionRef"
+            ) from exc
+
+        if revision.entity.kind != "system":
+            raise ValueError(
+                "SystemInstance.uses must reference "
+                "an entity of kind 'system'"
+            )
+
+        return revision.canonical
+
+    @property
+    def revision(self) -> RevisionRef:
+        """Return the pinned child System revision."""
+
+        return RevisionRef.parse(
+            self.uses
+        )
+
+    @property
+    def entity(self) -> EntityRef:
+        """Return the logical child System identity."""
+
+        return self.revision.entity
 
 
 class Target(NamedSystemModel):
