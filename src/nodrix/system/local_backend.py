@@ -8,6 +8,7 @@ PipelineManifest, then delegates execution to the proven runtime.
 from __future__ import annotations
 
 from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
 import json
@@ -29,6 +30,7 @@ from .backend import (
     ExecutionBackend,
     PreparedExecution,
 )
+from .execution_context import SystemExecutionContext
 from .graph import split_system_endpoint
 
 
@@ -210,6 +212,159 @@ def _scope_file_token(value: str) -> str:
     return token or "scope"
 
 
+def _deep_merge_defaults(
+    defaults: Mapping[str, Any],
+    explicit: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Merge execution defaults under explicit resolved semantics."""
+
+    result = deepcopy(
+        dict(defaults)
+    )
+
+    for key, value in explicit.items():
+        current = result.get(key)
+
+        if (
+            isinstance(current, Mapping)
+            and isinstance(value, Mapping)
+        ):
+            result[key] = _deep_merge_defaults(
+                current,
+                value,
+            )
+        else:
+            result[key] = deepcopy(
+                value
+            )
+
+    return result
+
+
+def _apply_execution_defaults(
+    document: Mapping[str, Any],
+    execution_context: SystemExecutionContext | None,
+) -> dict[str, Any]:
+    """Apply verified execution defaults to a raw local manifest document."""
+
+    result = deepcopy(
+        dict(document)
+    )
+
+    if execution_context is None:
+        return result
+
+    # RuntimePreset values are defaults. Explicit runtime values win.
+    result["runtime"] = _deep_merge_defaults(
+        execution_context.runtime,
+        _legacy_mapping(
+            result.get("runtime")
+        ),
+    )
+
+    # Node defaults are selected by node provider/use identifier.
+    nodes = _legacy_mapping(
+        result.get("nodes")
+    )
+
+    for name, raw_node in tuple(
+        nodes.items()
+    ):
+        if not isinstance(
+            raw_node,
+            Mapping,
+        ):
+            continue
+
+        uses = str(
+            raw_node.get("uses")
+            or ""
+        )
+
+        defaults = (
+            execution_context
+            .node_defaults
+            .get(uses)
+        )
+
+        if isinstance(
+            defaults,
+            Mapping,
+        ):
+            nodes[name] = _deep_merge_defaults(
+                defaults,
+                raw_node,
+            )
+
+    result["nodes"] = nodes
+
+    # Edge defaults apply below every explicit edge declaration.
+    result["edges"] = [
+        (
+            _deep_merge_defaults(
+                execution_context.edge_defaults,
+                edge,
+            )
+            if isinstance(
+                edge,
+                Mapping,
+            )
+            else deepcopy(edge)
+        )
+        for edge in list(
+            result.get("edges")
+            or ()
+        )
+    ]
+
+    # Stream defaults apply to the stream container. Legacy RuntimePreset
+    # queue semantics apply separately to every exported stream.
+    stream_defaults = deepcopy(
+        dict(
+            execution_context.stream_defaults
+        )
+    )
+
+    export_queue = stream_defaults.pop(
+        "queue",
+        None,
+    )
+
+    streams = _deep_merge_defaults(
+        stream_defaults,
+        _legacy_mapping(
+            result.get("streams")
+        ),
+    )
+
+    if export_queue is not None:
+        exports = list(
+            streams.get("exports")
+            or ()
+        )
+
+        streams["exports"] = [
+            (
+                _deep_merge_defaults(
+                    {
+                        "queue": export_queue,
+                    },
+                    export,
+                )
+                if isinstance(
+                    export,
+                    Mapping,
+                )
+                else deepcopy(export)
+            )
+            for export in exports
+        ]
+
+    result["streams"] = streams
+
+    return result
+
+
 def lower_local_context(context: BackendContext) -> LocalLoweringResult:
     """Lower one local BackendContext to the existing 2.x PipelineManifest.
 
@@ -357,8 +512,7 @@ def lower_local_context(context: BackendContext) -> LocalLoweringResult:
         else "local"
     )
 
-    manifest = PipelineManifest.model_validate(
-        {
+    document: dict[str, Any] = {
             "metadata": {
                 "name": context.plan.system,
                 "description": (
@@ -380,6 +534,14 @@ def lower_local_context(context: BackendContext) -> LocalLoweringResult:
                 "nodes": placement_nodes,
             },
         }
+
+    document = _apply_execution_defaults(
+        document,
+        context.execution_context,
+    )
+
+    manifest = PipelineManifest.model_validate(
+        document
     )
 
     return LocalLoweringResult(
