@@ -13,8 +13,10 @@ from nodrix.project_foundation import (
 )
 from nodrix.project_system import (
     load_project_system_details,
+    system_execution_context_from_project,
 )
 from nodrix.system import plan_system
+from nodrix.workspace import resolve_project_execution_context
 
 
 runner = CliRunner()
@@ -251,8 +253,22 @@ def test_system_plan_profile_uses_resolved_system(
         .system
     )
 
+    project_context = (
+        resolve_project_execution_context(
+            tmp_path,
+            profile="rpi5",
+        )
+    )
+
+    execution_context = (
+        system_execution_context_from_project(
+            project_context
+        )
+    )
+
     expected = plan_system(
-        expected_system
+        expected_system,
+        execution_context=execution_context,
     ).model_dump(
         by_alias=True,
         exclude_none=True,
@@ -260,6 +276,13 @@ def test_system_plan_profile_uses_resolved_system(
     )
 
     assert payload == expected
+
+    # Execution values participate through their digest only.
+    serialized = json.dumps(
+        payload
+    )
+
+    assert "ROBOT_MODEL" not in serialized
 
 
 def test_system_profile_requires_project_context(
@@ -308,3 +331,116 @@ def test_system_profile_help_uses_project_profile_semantics() -> None:
         assert "--profile" in result.output
         assert "Project Profile" in result.output
         assert "RuntimePreset" in result.output
+
+
+def test_system_plan_profile_execution_values_change_plan_not_system_identity(
+    tmp_path: Path,
+) -> None:
+    system, _, _ = _project(
+        tmp_path
+    )
+
+    first_resource = add_project_resource(
+        "profile",
+        "first",
+        root=tmp_path,
+    )
+    second_resource = add_project_resource(
+        "profile",
+        "second",
+        root=tmp_path,
+    )
+
+    first_profile = first_resource.path
+    second_profile = second_resource.path
+
+    first_profile.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "nodrix.profile/v1",
+                "name": "first",
+                "variables": {
+                    "ROBOT_MODEL": "first",
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    second_profile.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "nodrix.profile/v1",
+                "name": "second",
+                "variables": {
+                    "ROBOT_MODEL": "second",
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    first = runner.invoke(
+        app,
+        [
+            "system",
+            "plan",
+            str(system),
+            "--profile",
+            "first",
+            "--json",
+        ],
+    )
+
+    second = runner.invoke(
+        app,
+        [
+            "system",
+            "plan",
+            str(system),
+            "--profile",
+            "second",
+            "--json",
+        ],
+    )
+
+    assert first.exit_code == 0, first.output
+    assert second.exit_code == 0, second.output
+
+    first_plan = json.loads(
+        first.stdout
+    )
+    second_plan = json.loads(
+        second.stdout
+    )
+
+    assert (
+        first_plan["system_sha256"]
+        == second_plan["system_sha256"]
+    )
+
+    assert (
+        first_plan[
+            "execution_context_sha256"
+        ]
+        != second_plan[
+            "execution_context_sha256"
+        ]
+    )
+
+    assert first_plan != second_plan
+
+    serialized = json.dumps(
+        [
+            first_plan,
+            second_plan,
+        ]
+    )
+
+    # Neither raw execution variables nor the selected Profile names/values
+    # are serialized into the canonical Plan. Only their effective digest is.
+    assert '"ROBOT_MODEL"' not in serialized
+    assert '"first"' not in serialized
+    assert '"second"' not in serialized

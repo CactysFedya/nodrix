@@ -17,8 +17,14 @@ from .local_dev import compile_local_project, reset_local_development_modules
 from .manifest import load_manifest
 from .presentation import render_system_plan as render_system_plan_view, render_validation
 from .project_foundation import resolve_project_resource
-from .project_system import load_project_system_details
-from .workspace import find_workspace
+from .project_system import (
+    load_project_system_details,
+    system_execution_context_from_project,
+)
+from .workspace import (
+    find_workspace,
+    resolve_project_execution_context,
+)
 from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefinition
 from .system import (
     BackendExecutionState,
@@ -109,6 +115,46 @@ def _load_system_cli_details(
         path,
         profile=profile,
         root=project_root,
+    )
+
+
+def _load_system_cli_planning_inputs(
+    path: Path,
+    *,
+    profile: str | None = None,
+):
+    """Resolve System semantics and an optional explicit execution context."""
+
+    details = _load_system_cli_details(
+        path,
+        profile=profile,
+    )
+
+    if profile is None:
+        return details, None
+
+    project_root = find_workspace(
+        path.parent
+    )
+
+    if project_root is None:
+        raise LookupError(
+            "--profile requires the System to belong to "
+            "a Nodrix project containing nodrix.yaml"
+        )
+
+    project_context = (
+        resolve_project_execution_context(
+            project_root,
+            profile=profile,
+        )
+    )
+
+    return (
+        details,
+        system_execution_context_from_project(
+            project_context
+        ),
     )
 
 
@@ -462,9 +508,11 @@ def system_plan(
             path,
             project,
         )
-        details = _load_system_cli_details(
-            resolved_path,
-            profile=profile,
+        details, execution_context = (
+            _load_system_cli_planning_inputs(
+                resolved_path,
+                profile=profile,
+            )
         )
         system = details.system
         catalog = (
@@ -472,7 +520,11 @@ def system_plan(
             if effective_project is not None
             else None
         )
-        plan = plan_system(system, catalog=catalog)
+        plan = plan_system(
+            system,
+            catalog=catalog,
+            execution_context=execution_context,
+        )
     except Exception as exc:
         if json_output:
             console.print_json(
