@@ -12,6 +12,7 @@ import yaml
 
 from ..errors import NodrixError
 from .model import SYSTEM_MODEL_API_VERSION, SystemModel
+from .source import resolve_system_source_document
 
 
 SYSTEM_MODEL_KIND = "System"
@@ -207,7 +208,8 @@ def loads_system(
 
     resolved_format = _normalize_format(format)
     raw = _decode_document(text, resolved_format)
-    return _validate_document(raw)
+    resolved = resolve_system_source_document(raw)
+    return _validate_document(resolved.document)
 
 
 def load_system_details(
@@ -242,7 +244,11 @@ def load_system_details(
         ) from exc
 
     raw = _decode_document(text, resolved_format)
-    system = _validate_document(raw)
+    resolved = resolve_system_source_document(
+        raw,
+        source=system_path,
+    )
+    system = _validate_document(resolved.document)
     return SystemLoadResult(
         system=system,
         canonical=system_to_canonical(system),
