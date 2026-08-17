@@ -37,7 +37,7 @@ from .storage_layout import StorageLayout
 def optimization_subject(
     plan: OptimizationPlan,
 ) -> tuple[EntityRef, RevisionRef]:
-    """Return the canonical pipeline identity targeted by optimization."""
+    """Return the canonical identity of the targeted 2.x Pipeline Definition."""
 
     if not isinstance(
         plan,

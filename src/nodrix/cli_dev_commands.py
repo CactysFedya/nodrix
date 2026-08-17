@@ -137,7 +137,7 @@ def run_local_command(
     ] = False,
     profile: Annotated[
         str | None,
-        typer.Option("--profile", help="Override the manifest performance profile"),
+        typer.Option("--profile", help="Override the 2.x Pipeline RuntimePreset (compatibility option --profile)"),
     ] = None,
     set_values: Annotated[
         list[str] | None,

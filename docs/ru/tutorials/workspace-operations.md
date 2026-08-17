@@ -80,7 +80,7 @@ checks:
 ```yaml
 schema: nodrix.profile/v1
 name: default
-runtime_profile: balanced
+runtime_profile: realtime-balanced
 variables:
   DEVICE_KIND: laptop
 ```
