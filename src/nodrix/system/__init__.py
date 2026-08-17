@@ -25,7 +25,11 @@ from .compatibility import (
     compatibility_report_from_system,
     restore_pipeline_manifest,
 )
-from .contracts import SystemPort
+from .contracts import (
+    SystemBoundaryBindings,
+    SystemPort,
+    SystemPortBinding,
+)
 from .graph import (
     Connection,
     Graph,
@@ -165,7 +169,9 @@ __all__ = [
     "SystemDiagnostic",
     "SystemLink",
     "SystemInstance",
+    "SystemBoundaryBindings",
     "SystemPort",
+    "SystemPortBinding",
     "SystemModel",
     "SYSTEM_EXECUTION_PLAN_SCHEMA",
     "PlannedApplication",

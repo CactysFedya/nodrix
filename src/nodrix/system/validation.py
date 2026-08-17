@@ -328,6 +328,22 @@ def validate_system(
     resource_map = {item.name: item for item in system.resources}
     application_names = {item.name for item in system.applications}
     graph_names = {item.name for item in system.graphs}
+    input_ports = {
+        item.name: item
+        for item in system.inputs
+    }
+    output_ports = {
+        item.name: item
+        for item in system.outputs
+    }
+    input_ports = {
+        item.name: item
+        for item in system.inputs
+    }
+    output_ports = {
+        item.name: item
+        for item in system.outputs
+    }
 
     def validate_target(path: str, target: str | None) -> None:
         if target is not None and target not in target_names:
@@ -599,6 +615,90 @@ def validate_system(
             return "graph", None
 
         return "graph", port.type_id
+
+    seen_input_bindings: set[str] = set()
+
+    for index, binding in enumerate(
+        system.bindings.inputs
+    ):
+        path = f"bindings.inputs[{index}]"
+
+        if binding.port in seen_input_bindings:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS051",
+                    f"{path}.port",
+                    f"duplicate binding for System input "
+                    f"{binding.port!r}",
+                )
+            )
+
+        seen_input_bindings.add(
+            binding.port
+        )
+
+        if binding.port not in input_ports:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS053",
+                    f"{path}.port",
+                    f"unknown System input port "
+                    f"{binding.port!r}",
+                )
+            )
+
+        # External System input feeds an internal consumer, therefore the
+        # internal endpoint must resolve as a target/input endpoint.
+        resolve_system_endpoint(
+            f"{path}.endpoint",
+            binding.endpoint,
+            direction="target",
+            missing_port_code="SYS151",
+        )
+
+    seen_output_bindings: set[str] = set()
+
+    for index, binding in enumerate(
+        system.bindings.outputs
+    ):
+        path = f"bindings.outputs[{index}]"
+
+        if binding.port in seen_output_bindings:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS052",
+                    f"{path}.port",
+                    f"duplicate binding for System output "
+                    f"{binding.port!r}",
+                )
+            )
+
+        seen_output_bindings.add(
+            binding.port
+        )
+
+        if binding.port not in output_ports:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS054",
+                    f"{path}.port",
+                    f"unknown System output port "
+                    f"{binding.port!r}",
+                )
+            )
+
+        # Internal producer feeds the external System output, therefore the
+        # internal endpoint must resolve as a source/output endpoint.
+        resolve_system_endpoint(
+            f"{path}.endpoint",
+            binding.endpoint,
+            direction="source",
+            missing_port_code="SYS152",
+        )
 
     for index, link in enumerate(system.links):
         path = f"links[{index}]"

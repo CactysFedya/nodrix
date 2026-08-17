@@ -31,6 +31,7 @@ _TOP_LEVEL_ORDER = (
     "description",
     "inputs",
     "outputs",
+    "bindings",
     "systems",
     "resources",
     "applications",

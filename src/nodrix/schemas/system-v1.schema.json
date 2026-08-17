@@ -332,6 +332,30 @@
       "title": "ResourceInstance",
       "type": "object"
     },
+    "SystemBoundaryBindings": {
+      "additionalProperties": false,
+      "description": "External-to-internal realization of a System contract.",
+      "properties": {
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SystemPortBinding"
+          },
+          "title": "Inputs",
+          "type": "array"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SystemPortBinding"
+          },
+          "title": "Outputs",
+          "type": "array"
+        }
+      },
+      "title": "SystemBoundaryBindings",
+      "type": "object"
+    },
     "SystemInstance": {
       "additionalProperties": false,
       "description": "One exact child System Definition instantiated by a parent System.\n\n``uses`` is the canonical immutable RevisionRef of the child System\nDefinition. Filesystem paths, project aliases, source filenames, and\nunpinned EntityRefs are authoring concerns and must be resolved before\nconstructing the canonical SystemModel.\n\nA SystemInstance is part of the canonical architecture. It is not a\nSystem Module and does not disappear during source resolution.",
@@ -472,6 +496,38 @@
       "title": "SystemPort",
       "type": "object"
     },
+    "SystemPortBinding": {
+      "additionalProperties": false,
+      "description": "Bind one external System port to one internal endpoint.\n\nThe endpoint uses the existing canonical System endpoint vocabulary:\n\n- ``application.port``\n- ``graph/node.port``\n\nA binding contains no transport or backend realization. It only identifies\nwhere an external System contract is implemented internally.",
+      "properties": {
+        "endpoint": {
+          "minLength": 1,
+          "title": "Endpoint",
+          "type": "string"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "port": {
+          "minLength": 1,
+          "title": "Port",
+          "type": "string"
+        }
+      },
+      "required": [
+        "port",
+        "endpoint"
+      ],
+      "title": "SystemPortBinding",
+      "type": "object"
+    },
     "Target": {
       "additionalProperties": false,
       "description": "Declarative execution/deployment target.\n\nVersion 2.5 models targets only. Target resolution and deployment belong to\nthe 2.6 planner/backend layer.",
@@ -529,6 +585,9 @@
       },
       "title": "Artifacts",
       "type": "array"
+    },
+    "bindings": {
+      "$ref": "#/$defs/SystemBoundaryBindings"
     },
     "description": {
       "anyOf": [
