@@ -11,6 +11,7 @@ import yaml
 from .build_recipes import available_build_recipes
 from .cli_context import app, console
 from .project_foundation import (
+    add_project_authoring_asset,
     add_project_resource,
     create_progressive_project,
     list_project_resources,
@@ -70,7 +71,7 @@ def project_add(
         str,
         typer.Argument(
             help=(
-                "system, workflow, environment, profile, "
+                "system, workflow, environment, profile, module, config, "
                 "or pipeline (2.x compatibility)"
             )
         ),
@@ -92,9 +93,46 @@ def project_add(
     ] = False,
     force: Annotated[bool, typer.Option("--force")] = False,
 ) -> None:
-    """Create one project resource; Pipeline authoring is 2.x compatibility."""
+    """Create a project resource or authoring asset only when needed."""
 
     try:
+        normalized_kind = (
+            kind.strip()
+            .lower()
+            .replace("_", "-")
+        )
+
+        if normalized_kind in {
+            "module",
+            "config",
+        }:
+            if template not in {
+                None,
+                "empty",
+            }:
+                raise ValueError(
+                    "Module and Config currently support only "
+                    "the empty self-describing scaffold"
+                )
+
+            if make_default:
+                raise ValueError(
+                    "--default is not valid for Module or Config "
+                    "authoring assets"
+                )
+
+            asset = add_project_authoring_asset(
+                normalized_kind,
+                name,
+                force=force,
+            )
+
+            console.print(
+                f"[green]Added[/green] "
+                f"{asset.kind} authoring asset: {asset.path}"
+            )
+            return
+
         result = add_project_resource(
             kind,
             name,

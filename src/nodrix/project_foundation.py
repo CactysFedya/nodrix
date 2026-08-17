@@ -83,8 +83,24 @@ _CREATABLE_RESOURCE_KINDS = (
 )
 
 
+_AUTHORING_ASSET_DIRECTORIES = {
+    "module": "modules",
+    "config": "config",
+}
+
+
 @dataclass(frozen=True)
 class ProjectResource:
+    kind: str
+    name: str
+    path: Path
+    project_file: Path
+
+
+@dataclass(frozen=True)
+class ProjectAuthoringAsset:
+    """Project-local authoring input that is not a canonical project resource."""
+
     kind: str
     name: str
     path: Path
@@ -183,9 +199,9 @@ def create_progressive_project(
 ) -> list[Path]:
     """Create only the project manifest and local ignore rules.
 
-    Resource directories are created later by :func:`add_project_resource`.
-    Existing source repositories are supported: only an existing project
-    manifest is considered a conflict.
+    Resource and authoring directories appear only when the user explicitly
+    adds the corresponding capability. Existing source repositories are
+    supported: only an existing project manifest is considered a conflict.
     """
 
     authoring_language = (
@@ -552,7 +568,7 @@ def _system_scaffold(
 # Просмотреть:
 #   plyctl system show systems/{name}.yaml
 #
-# Ниже находится каноническое Definition nodrix.system/v1.
+# Ниже находится минимальный System Source. Пока imports/config не используются,\n# он одновременно является каноническим nodrix.system/v1 Definition.
 #
 """
 
@@ -585,7 +601,7 @@ def _system_scaffold(
 # Inspect:
 #   plyctl system show systems/{name}.yaml
 #
-# The YAML below is the canonical nodrix.system/v1 Definition.
+# The YAML below starts as a minimal System Source. Until imports/config\n# are used, it is also the canonical nodrix.system/v1 Definition.
 #
 """
 
@@ -867,6 +883,230 @@ def _render_resource_scaffold(
     return yaml.safe_dump(
         document,
         sort_keys=False,
+    )
+
+
+def _system_module_scaffold(
+    name: str,
+    *,
+    language: str = "en",
+) -> str:
+    """Render one reusable structural System authoring module."""
+
+    language = _normalize_authoring_language(language)
+
+    if language == "ru":
+        return f"""# Nodrix System Module
+#
+# Что это:
+#   System Module — переиспользуемая структурная часть System Source.
+#   Module существует только на authoring-уровне.
+#
+# Это НЕ:
+#   - отдельный Definition;
+#   - Entity;
+#   - runtime object;
+#   - Python module.
+#
+# Подключение из System:
+#
+#   imports:
+#     - ../modules/{name}.yaml
+#
+# После resolution Module исчезает, а в SystemModel остаётся только
+# результирующая архитектура.
+#
+schema: nodrix.system-module/v1
+
+# Добавляйте только необходимые структурные разделы:
+#
+# targets: []
+# resources: []
+# applications: []
+# graphs: []
+# links: []
+# artifacts: []
+"""
+
+    return f"""# Nodrix System Module
+#
+# What:
+#   A System Module is a reusable structural part of a System Source.
+#   It exists only at the authoring layer.
+#
+# It is NOT:
+#   - a separate Definition;
+#   - an Entity;
+#   - a runtime object;
+#   - a Python module.
+#
+# Import it from a System:
+#
+#   imports:
+#     - ../modules/{name}.yaml
+#
+# After resolution the Module disappears and only the resulting architecture
+# remains in SystemModel.
+#
+schema: nodrix.system-module/v1
+
+# Add only the structural sections you need:
+#
+# targets: []
+# resources: []
+# applications: []
+# graphs: []
+# links: []
+# artifacts: []
+"""
+
+
+def _system_config_scaffold(
+    name: str,
+    *,
+    language: str = "en",
+) -> str:
+    """Render one semantic System Config authoring document."""
+
+    language = _normalize_authoring_language(language)
+
+    if language == "ru":
+        return f"""# Nodrix System Config
+#
+# Что это:
+#   Config содержит semantic values, используемые при resolution System.
+#   Это не Definition, не Profile и не Environment.
+#
+# Подключение из System:
+#
+#   config:
+#     - ../config/{name}.yaml
+#
+# Одно typed-значение:
+#
+#   voxel_size_m: "${{config.mapping.voxel_size_m}}"
+#
+# Целая группа:
+#
+#   parameters: "${{config.mapping}}"
+#
+# Значения из более поздних Config-файлов перекрывают более ранние.
+#
+# Пример:
+#
+# mapping:
+#   voxel_size_m: 0.1
+#   point_stride: 1
+#
+# Добавляйте реальные значения только когда они нужны.
+{{}}
+"""
+
+    return f"""# Nodrix System Config
+#
+# What:
+#   Config contains semantic values used while resolving a System.
+#   It is not a Definition, Profile, or Environment.
+#
+# Attach it to a System:
+#
+#   config:
+#     - ../config/{name}.yaml
+#
+# One typed value:
+#
+#   voxel_size_m: "${{config.mapping.voxel_size_m}}"
+#
+# A whole group:
+#
+#   parameters: "${{config.mapping}}"
+#
+# Values from later Config files override earlier files.
+#
+# Example:
+#
+# mapping:
+#   voxel_size_m: 0.1
+#   point_stride: 1
+#
+# Add real values only when the System needs them.
+{{}}
+"""
+
+
+def add_project_authoring_asset(
+    kind: str,
+    name: str,
+    *,
+    root: str | Path | None = None,
+    force: bool = False,
+) -> ProjectAuthoringAsset:
+    """Create a project-local authoring asset without registering an Entity."""
+
+    normalized_kind = (
+        kind.strip()
+        .lower()
+        .replace("_", "-")
+    )
+    normalized_name = name.strip()
+
+    if normalized_kind not in _AUTHORING_ASSET_DIRECTORIES:
+        available = ", ".join(
+            sorted(_AUTHORING_ASSET_DIRECTORIES)
+        )
+        raise ValueError(
+            f"Unknown authoring asset kind {normalized_kind!r}; "
+            f"choose: {available}"
+        )
+
+    if not _RESOURCE_NAME.fullmatch(normalized_name):
+        raise ValueError(
+            "Asset name must start with an alphanumeric character and "
+            "contain only letters, digits, '.', '_' or '-'"
+        )
+
+    project_root = _project_root(root)
+    project_file = project_root / PROJECT_FILE
+
+    project = _load_yaml(project_file)
+    language = _project_authoring_language(project)
+
+    directory = _AUTHORING_ASSET_DIRECTORIES[
+        normalized_kind
+    ]
+
+    target = (
+        project_root
+        / directory
+        / f"{normalized_name}.yaml"
+    )
+
+    if target.exists() and not force:
+        raise FileExistsError(
+            f"{target} already exists"
+        )
+
+    if normalized_kind == "module":
+        rendered = _system_module_scaffold(
+            normalized_name,
+            language=language,
+        )
+    else:
+        rendered = _system_config_scaffold(
+            normalized_name,
+            language=language,
+        )
+
+    _atomic_text(
+        target,
+        rendered,
+    )
+
+    return ProjectAuthoringAsset(
+        kind=normalized_kind,
+        name=normalized_name,
+        path=target,
+        project_file=project_file,
     )
 
 
