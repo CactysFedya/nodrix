@@ -317,6 +317,7 @@ def test_system_profile_help_uses_project_profile_semantics() -> None:
     for command in (
         "show",
         "plan",
+        "run",
     ):
         result = runner.invoke(
             app,

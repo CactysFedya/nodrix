@@ -154,6 +154,16 @@ def system_run_orchestrated(
             ),
         ),
     ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help=(
+                "Project Profile (nodrix.profile/v1) used for System Config "
+                "and execution context; not a RuntimePreset"
+            ),
+        ),
+    ] = None,
     run_root: Annotated[
         Path | None,
         typer.Option(
@@ -184,13 +194,23 @@ def system_run_orchestrated(
             path,
             project,
         )
-        system = system_cli.load_system(resolved_path)
+        details, execution_context = (
+            system_cli._load_system_cli_planning_inputs(
+                resolved_path,
+                profile=profile,
+            )
+        )
+        system = details.system
         catalog = (
             system_cli._catalog_for_project(effective_project)
             if effective_project is not None
             else None
         )
-        plan = system_cli.plan_system(system, catalog=catalog)
+        plan = system_cli.plan_system(
+            system,
+            catalog=catalog,
+            execution_context=execution_context,
+        )
     except Exception as exc:
         console.print(f"[red]System run failed:[/red] {exc}")
         raise typer.Exit(1)
@@ -221,7 +241,10 @@ def system_run_orchestrated(
         stop_timeout=stop_timeout,
     )
 
-    report = orchestrator.validate_plan(plan)
+    report = orchestrator.validate_plan(
+        plan,
+        execution_context=execution_context,
+    )
     if report.diagnostics:
         _render_orchestration_validation(report)
     if not report.valid:
@@ -232,7 +255,10 @@ def system_run_orchestrated(
         raise typer.Exit(1)
 
     try:
-        prepared = orchestrator.prepare_plan(plan)
+        prepared = orchestrator.prepare_plan(
+            plan,
+            execution_context=execution_context,
+        )
     except Exception as exc:
         console.print(f"[red]System prepare failed:[/red] {exc}")
         raise typer.Exit(1)

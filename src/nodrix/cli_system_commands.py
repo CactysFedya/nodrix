@@ -484,8 +484,8 @@ def system_plan(
         typer.Option(
             "--profile",
             help=(
-                "Project Profile (nodrix.profile/v1) applied as a "
-                "System Config overlay; not a RuntimePreset"
+                "Project Profile (nodrix.profile/v1) used for System Config "
+                "and execution context; not a RuntimePreset"
             ),
         ),
     ] = None,

@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import re
+
+import yaml
 
 from typer.testing import CliRunner
 
 import nodrix.cli_system_commands as system_cli
 from nodrix.cli import app
+from nodrix.project_foundation import (
+    add_project_resource,
+    create_progressive_project,
+)
 from nodrix.system import (
     BackendCapabilities,
     BackendDiagnostic,
@@ -144,6 +151,9 @@ def test_system_run_help_exposes_execution_options() -> None:
     assert result.exit_code == 0, result.output
     output = _plain(result.output)
     assert "--project" in output
+    assert "--profile" in output
+    assert "Project Profile" in output
+    assert "RuntimePreset" in output
     assert "--run-root" in output
     assert "--stop-timeout" in output
     assert "--warnings-as-errors" in output
@@ -471,3 +481,132 @@ def test_system_run_warnings_as_errors_refuses_cycle(
     assert "RUN102" in result.output
     assert "PLAN101" in result.output
     assert FakeLocalBackend.instances == []
+
+
+def test_system_run_profile_uses_exact_profile_bound_plan(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    project = tmp_path / "project"
+
+    create_progressive_project(
+        project
+    )
+
+    profile = add_project_resource(
+        "profile",
+        "field",
+        root=project,
+    )
+
+    profile.path.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "nodrix.profile/v1",
+                "name": "field",
+                "variables": {
+                    "RUN_MARKER": "profile-value",
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    system_path = (
+        project
+        / "systems"
+        / "run.yaml"
+    )
+    system_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    _write_local_system(
+        system_path,
+        name="profile-run",
+    )
+
+    planned = runner.invoke(
+        app,
+        [
+            "system",
+            "plan",
+            str(system_path),
+            "--profile",
+            "field",
+            "--json",
+        ],
+    )
+
+    assert planned.exit_code == 0, planned.output
+
+    expected_plan = json.loads(
+        planned.stdout
+    )
+
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.COMPLETED
+        ),
+    ]
+
+    monkeypatch.setattr(
+        system_cli,
+        "LocalBackend",
+        FakeLocalBackend,
+    )
+    monkeypatch.setattr(
+        system_cli.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    executed = runner.invoke(
+        app,
+        [
+            "system",
+            "run",
+            str(system_path),
+            "--profile",
+            "field",
+        ],
+    )
+
+    assert executed.exit_code == 0, executed.output
+
+    backend = FakeLocalBackend.instances[-1]
+    context = backend.prepared_context
+
+    assert context is not None
+    assert (
+        context.plan.model_dump(
+            by_alias=True,
+            exclude_none=True,
+            mode="json",
+        )
+        == expected_plan
+    )
+
+    assert (
+        context.execution_context
+        is not None
+    )
+
+    assert (
+        context.execution_context.variables[
+            "RUN_MARKER"
+        ]
+        == "profile-value"
+    )
+
+    # Selection metadata/raw execution values remain outside the Plan.
+    serialized = json.dumps(
+        expected_plan
+    )
+
+    assert "RUN_MARKER" not in serialized
+    assert "profile-value" not in serialized
+    assert '"field"' not in serialized
