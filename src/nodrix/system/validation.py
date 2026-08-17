@@ -651,12 +651,47 @@ def validate_system(
 
         # External System input feeds an internal consumer, therefore the
         # internal endpoint must resolve as a target/input endpoint.
-        resolve_system_endpoint(
+        endpoint_kind, endpoint_type = resolve_system_endpoint(
             f"{path}.endpoint",
             binding.endpoint,
             direction="target",
             missing_port_code="SYS151",
         )
+
+        system_port = input_ports.get(
+            binding.port
+        )
+
+        if system_port is not None:
+            if (
+                endpoint_type is not None
+                and not _message_contracts_compatible(
+                    system_port.type_id,
+                    endpoint_type,
+                    catalog=catalog,
+                )
+            ):
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS153",
+                        path,
+                        "System input contract is not accepted by the "
+                        "bound internal input: "
+                        f"{system_port.type_id!r} -> {endpoint_type!r}",
+                    )
+                )
+            elif endpoint_kind == "application":
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "warning",
+                        "SYS155",
+                        f"{path}.endpoint",
+                        "System input is bound to an ApplicationInstance "
+                        "whose input contract is not first-class yet; "
+                        "type compatibility cannot be verified",
+                    )
+                )
 
     seen_output_bindings: set[str] = set()
 
@@ -693,12 +728,47 @@ def validate_system(
 
         # Internal producer feeds the external System output, therefore the
         # internal endpoint must resolve as a source/output endpoint.
-        resolve_system_endpoint(
+        endpoint_kind, endpoint_type = resolve_system_endpoint(
             f"{path}.endpoint",
             binding.endpoint,
             direction="source",
             missing_port_code="SYS152",
         )
+
+        system_port = output_ports.get(
+            binding.port
+        )
+
+        if system_port is not None:
+            if (
+                endpoint_type is not None
+                and not _message_contracts_compatible(
+                    endpoint_type,
+                    system_port.type_id,
+                    catalog=catalog,
+                )
+            ):
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS154",
+                        path,
+                        "bound internal output is not compatible with the "
+                        "System output contract: "
+                        f"{endpoint_type!r} -> {system_port.type_id!r}",
+                    )
+                )
+            elif endpoint_kind == "application":
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "warning",
+                        "SYS156",
+                        f"{path}.endpoint",
+                        "System output is bound to an ApplicationInstance "
+                        "whose output contract is not first-class yet; "
+                        "type compatibility cannot be verified",
+                    )
+                )
 
     for index, link in enumerate(system.links):
         path = f"links[{index}]"
