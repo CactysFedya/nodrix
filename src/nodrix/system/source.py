@@ -9,7 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
 
 import yaml
 
@@ -47,9 +47,18 @@ class SystemSourceResolution:
     sources: tuple[Path, ...]
     module_sources: tuple[Path, ...] = ()
     config_sources: tuple[Path, ...] = ()
+    config_overlay_sources: tuple[Path, ...] = ()
     config_provenance: dict[str, Path] = dataclass_field(
         default_factory=dict
     )
+
+
+@dataclass(frozen=True, slots=True)
+class SystemConfigOverlay:
+    """One semantic configuration overlay supplied by an authoring frontend."""
+
+    config: Mapping[str, Any]
+    source: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +68,7 @@ class SystemConfigResolution:
     config: dict[str, Any]
     sources: tuple[Path, ...]
     provenance: dict[str, Path]
+    overlay_sources: tuple[Path, ...] = ()
 
     def source_for(
         self,
@@ -380,6 +390,7 @@ def resolve_system_source_document(
     raw: Any,
     *,
     source: str | Path | None = None,
+    config_overlays: Iterable[SystemConfigOverlay] = (),
 ) -> SystemSourceResolution:
     """Resolve one human-facing System Source.
 
@@ -503,6 +514,11 @@ def resolve_system_source_document(
         ),
     )
 
+    config_resolution = apply_system_config_overlays(
+        config_resolution,
+        config_overlays,
+    )
+
     resolved = _bind_config_references(
         resolved,
         config=config_resolution.config,
@@ -510,6 +526,10 @@ def resolve_system_source_document(
 
     sources.extend(
         config_resolution.sources
+    )
+
+    sources.extend(
+        config_resolution.overlay_sources
     )
 
     return SystemSourceResolution(
@@ -521,6 +541,9 @@ def resolve_system_source_document(
         ),
         config_sources=(
             config_resolution.sources
+        ),
+        config_overlay_sources=(
+            config_resolution.overlay_sources
         ),
         config_provenance=dict(
             config_resolution.provenance
@@ -719,6 +742,86 @@ def _load_config_document(
     )
 
 
+def apply_system_config_overlay(
+    resolution: SystemConfigResolution,
+    overlay: SystemConfigOverlay,
+) -> SystemConfigResolution:
+    """Apply one semantic Config overlay after previously resolved values."""
+
+    source = (
+        Path(overlay.source)
+        .expanduser()
+        .resolve()
+    )
+
+    if not isinstance(
+        overlay.config,
+        Mapping,
+    ):
+        raise SystemSourceError(
+            f"System Config overlay must be a mapping: {source}"
+        )
+
+    document = dict(
+        overlay.config
+    )
+
+    previous_config = resolution.config
+
+    config = _deep_merge_config(
+        previous_config,
+        document,
+        source=source,
+    )
+
+    provenance = dict(
+        resolution.provenance
+    )
+
+    _record_config_provenance(
+        provenance,
+        previous_config,
+        document,
+        source=source,
+    )
+
+    return SystemConfigResolution(
+        config=config,
+        sources=resolution.sources,
+        provenance=provenance,
+        overlay_sources=(
+            *resolution.overlay_sources,
+            source,
+        ),
+    )
+
+
+def apply_system_config_overlays(
+    resolution: SystemConfigResolution,
+    overlays: Iterable[SystemConfigOverlay],
+) -> SystemConfigResolution:
+    """Apply ordered semantic Config overlays from lowest to highest precedence."""
+
+    current = resolution
+
+    for overlay in overlays:
+        if not isinstance(
+            overlay,
+            SystemConfigOverlay,
+        ):
+            raise SystemSourceError(
+                "System config overlays must contain "
+                "SystemConfigOverlay values"
+            )
+
+        current = apply_system_config_overlay(
+            current,
+            overlay,
+        )
+
+    return current
+
+
 def resolve_system_config(
     references: Any,
     *,
@@ -816,9 +919,12 @@ def resolve_system_config(
 
 __all__ = [
     "SYSTEM_MODULE_SCHEMA",
+    "SystemConfigOverlay",
     "SystemConfigResolution",
     "SystemSourceError",
     "SystemSourceResolution",
+    "apply_system_config_overlay",
+    "apply_system_config_overlays",
     "resolve_system_config",
     "resolve_system_source_document",
 ]
