@@ -54,7 +54,10 @@ def project_add(
     kind: Annotated[
         str,
         typer.Argument(
-            help="system, pipeline, workflow, environment, or profile"
+            help=(
+                "system, workflow, environment, profile, "
+                "or pipeline (2.x compatibility)"
+            )
         ),
     ],
     name: Annotated[str, typer.Argument()],
@@ -84,6 +87,13 @@ def project_add(
     console.print(
         f"[green]Added[/green] {result.kind} {result.name}: {result.path}"
     )
+
+    if result.kind == "pipeline":
+        console.print(
+            "[yellow]Pipeline is a 2.x compatibility/dataflow resource; "
+            "prefer a nodrix.system/v1 System for new executable "
+            "architectures.[/yellow]"
+        )
 
 
 @project_app.command("list")

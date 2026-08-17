@@ -25,12 +25,20 @@ _RESOURCE_SECTIONS = {
     "component": ("components", "components"),
 }
 
+# Preferred resource kinds for new project authoring.
+#
+# Pipeline remains a supported 2.x compatibility/dataflow resource but is no
+# longer advertised as a peer of the canonical System model.
 _PUBLIC_RESOURCE_KINDS = (
     "system",
-    "pipeline",
     "workflow",
     "environment",
     "profile",
+)
+
+_CREATABLE_RESOURCE_KINDS = (
+    *_PUBLIC_RESOURCE_KINDS,
+    "pipeline",
 )
 
 
@@ -150,7 +158,6 @@ def create_progressive_project(
         "defaults": {"view": "compact"},
         "build": {},
         "systems": {},
-        "pipelines": {},
         "workflows": {},
         "contexts": {},
         "environments": {},
@@ -171,6 +178,13 @@ def create_progressive_project(
 
 
 def _pipeline_document(name: str) -> dict[str, Any]:
+    """Create a 2.x compatibility/dataflow Pipeline document.
+
+    New executable architectures should be authored as ``nodrix.system/v1``.
+    Pipeline authoring remains available so existing 2.x projects and focused
+    dataflow workflows can migrate without a breaking transition.
+    """
+
     return {
         "apiVersion": "plyctl.dev/v2",
         "kind": "Pipeline",
@@ -559,8 +573,8 @@ def add_project_resource(
             "define local SDK nodes, resources, and messages in components/*.py"
         )
 
-    if normalized_kind not in _PUBLIC_RESOURCE_KINDS:
-        available = ", ".join(_PUBLIC_RESOURCE_KINDS)
+    if normalized_kind not in _CREATABLE_RESOURCE_KINDS:
+        available = ", ".join(_CREATABLE_RESOURCE_KINDS)
         raise ValueError(
             f"Unknown resource kind {normalized_kind!r}; choose: {available}"
         )
@@ -652,6 +666,13 @@ def list_project_resources(
         )
         for resource_kind in _PUBLIC_RESOURCE_KINDS
     }
+
+    legacy_pipelines = dict(
+        config.get("pipelines")
+        or {}
+    )
+    if legacy_pipelines:
+        resources["pipeline"] = legacy_pipelines
 
     legacy_components = dict(
         config.get("components")
