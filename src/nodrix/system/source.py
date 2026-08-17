@@ -7,7 +7,7 @@ Authoring constructs disappear before canonical SystemModel validation.
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -45,6 +45,11 @@ class SystemSourceResolution:
     document: Any
     source: Path | None
     sources: tuple[Path, ...]
+    module_sources: tuple[Path, ...] = ()
+    config_sources: tuple[Path, ...] = ()
+    config_provenance: dict[str, Path] = dataclass_field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -436,6 +441,7 @@ def resolve_system_source_document(
         if source_path is not None
         else []
     )
+    all_module_sources: list[Path] = []
 
     if imports_value is not None:
         assert source_path is not None
@@ -462,6 +468,9 @@ def resolve_system_source_document(
             )
 
             sources.extend(
+                module_sources
+            )
+            all_module_sources.extend(
                 module_sources
             )
 
@@ -507,6 +516,15 @@ def resolve_system_source_document(
         document=resolved,
         source=source_path,
         sources=tuple(sources),
+        module_sources=tuple(
+            all_module_sources
+        ),
+        config_sources=(
+            config_resolution.sources
+        ),
+        config_provenance=dict(
+            config_resolution.provenance
+        ),
     )
 
 

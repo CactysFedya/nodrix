@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -53,11 +53,36 @@ class SystemFormatError(NodrixError):
 
 
 @dataclass(frozen=True, slots=True)
+class SystemResolutionDetails:
+    """Authoring inputs used to produce one canonical System."""
+
+    sources: tuple[Path, ...] = ()
+    module_sources: tuple[Path, ...] = ()
+    config_sources: tuple[Path, ...] = ()
+    config_provenance: dict[str, Path] = field(
+        default_factory=dict
+    )
+
+    def source_for_config(
+        self,
+        path: str,
+    ) -> Path | None:
+        """Return the winning Config source for one dotted path."""
+
+        return self.config_provenance.get(
+            path
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class SystemLoadResult:
     system: SystemModel
     canonical: dict[str, Any]
     path: Path
     format: SystemDocumentFormat
+    resolution: SystemResolutionDetails = field(
+        default_factory=SystemResolutionDetails
+    )
 
 
 def _normalize_format(
@@ -254,6 +279,14 @@ def load_system_details(
         canonical=system_to_canonical(system),
         path=system_path,
         format=resolved_format,
+        resolution=SystemResolutionDetails(
+            sources=resolved.sources,
+            module_sources=resolved.module_sources,
+            config_sources=resolved.config_sources,
+            config_provenance=dict(
+                resolved.config_provenance
+            ),
+        ),
     )
 
 
@@ -351,6 +384,7 @@ __all__ = [
     "SystemDocumentFormat",
     "SystemFormatError",
     "SystemLoadResult",
+    "SystemResolutionDetails",
     "dump_system",
     "dump_system_schema",
     "dumps_system",
