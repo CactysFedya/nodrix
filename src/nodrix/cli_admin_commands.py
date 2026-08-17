@@ -33,7 +33,7 @@ from .packages import (
     remove_package,
     verify_package,
 )
-from .profiles import profile_names
+from .profiles import runtime_preset_names
 from .workspace import default_view, resolve_project_root
 from .workspace_views import render_top_view
 from .presentation import render_health, render_status
@@ -60,7 +60,7 @@ def config_profiles_command() -> None:
         "maximum-throughput": "Large queues for offline throughput",
         "debug": "Always validate types and collect dense telemetry",
     }
-    for name in profile_names():
+    for name in runtime_preset_names():
         table.add_row(name, descriptions.get(name, ""))
     console.print(table)
 

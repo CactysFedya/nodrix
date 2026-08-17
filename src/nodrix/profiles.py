@@ -1,10 +1,22 @@
+"""Built-in runtime performance presets.
+
+A RuntimePreset is not a project Profile.
+
+Project Profiles are user-owned ``nodrix.profile/v1`` configuration overlays
+resolved by the workspace/project layer. Runtime presets are built-in
+performance defaults applied while resolving legacy Pipeline manifests.
+
+The historical ``PROFILE_DEFAULTS``, ``profile_names()`` and ``get_profile()``
+names remain compatibility aliases throughout the 2.x series.
+"""
+
 from __future__ import annotations
 
 from copy import deepcopy
 from typing import Any
 
 
-PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
+RUNTIME_PRESET_DEFAULTS: dict[str, dict[str, Any]] = {
     "realtime-low-latency": {
         "runtime": {
             "mode": "realtime",
@@ -100,14 +112,54 @@ PROFILE_DEFAULTS: dict[str, dict[str, Any]] = {
 }
 
 
-def profile_names() -> tuple[str, ...]:
-    return tuple(PROFILE_DEFAULTS)
+def runtime_preset_names() -> tuple[str, ...]:
+    """Return the names of built-in runtime performance presets."""
+
+    return tuple(RUNTIME_PRESET_DEFAULTS)
 
 
-def get_profile(name: str | None) -> dict[str, Any]:
+def get_runtime_preset(
+    name: str | None,
+) -> dict[str, Any]:
+    """Return one independent copy of a built-in RuntimePreset."""
+
     if not name:
         return {}
+
     try:
-        return deepcopy(PROFILE_DEFAULTS[name])
+        return deepcopy(
+            RUNTIME_PRESET_DEFAULTS[name]
+        )
     except KeyError as exc:
-        raise ValueError(f"Unknown Plyctl profile {name!r}; choose: {', '.join(profile_names())}") from exc
+        raise ValueError(
+            f"Unknown Plyctl runtime preset {name!r}; choose: "
+            f"{', '.join(runtime_preset_names())}"
+        ) from exc
+
+
+# Compatibility names retained for the 2.x Pipeline API.
+PROFILE_DEFAULTS = RUNTIME_PRESET_DEFAULTS
+
+
+def profile_names() -> tuple[str, ...]:
+    """Compatibility alias for runtime_preset_names()."""
+
+    return runtime_preset_names()
+
+
+def get_profile(
+    name: str | None,
+) -> dict[str, Any]:
+    """Compatibility alias for get_runtime_preset()."""
+
+    return get_runtime_preset(name)
+
+
+__all__ = [
+    "PROFILE_DEFAULTS",
+    "RUNTIME_PRESET_DEFAULTS",
+    "get_profile",
+    "get_runtime_preset",
+    "profile_names",
+    "runtime_preset_names",
+]

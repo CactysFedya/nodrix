@@ -15,7 +15,7 @@ from .manifest_model import (
     PipelineManifest,
     _expand_env,
 )
-from .profiles import get_profile
+from .profiles import get_runtime_preset
 
 
 _NODE_RESERVED = {
@@ -375,7 +375,7 @@ def _apply_profile(
     if not profile_name:
         return canonical, sources
     try:
-        profile = get_profile(str(profile_name))
+        profile = get_runtime_preset(str(profile_name))
     except ValueError as exc:
         raise ManifestError(str(exc)) from exc
 
