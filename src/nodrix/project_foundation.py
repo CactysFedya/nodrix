@@ -1110,6 +1110,240 @@ def add_project_authoring_asset(
     )
 
 
+@dataclass(frozen=True)
+class ProjectAuthoringAttachment:
+    """One authoring asset attached to a registered System source."""
+
+    asset: ProjectAuthoringAsset
+    system: ProjectResource
+    field: str
+    reference: str
+    changed: bool
+
+
+def _system_authoring_attachment_field(
+    kind: str,
+) -> str:
+    if kind == "module":
+        return "imports"
+    if kind == "config":
+        return "config"
+
+    raise ValueError(
+        f"Authoring asset kind {kind!r} cannot be attached to a System"
+    )
+
+
+def _relative_authoring_reference(
+    asset: Path,
+    *,
+    system: Path,
+) -> str:
+    relative = os.path.relpath(
+        asset,
+        start=system.parent,
+    )
+
+    return Path(relative).as_posix()
+
+
+def _append_root_sequence_reference(
+    text: str,
+    *,
+    field: str,
+    reference: str,
+) -> tuple[str, bool]:
+    """Append one root YAML sequence item while preserving source comments."""
+
+    try:
+        document = yaml.compose(text)
+    except yaml.YAMLError as exc:
+        raise ValueError(
+            f"Cannot parse System Source: {exc}"
+        ) from exc
+
+    if not isinstance(
+        document,
+        yaml.nodes.MappingNode,
+    ):
+        raise ValueError(
+            "System Source must contain a root YAML mapping"
+        )
+
+    matches = [
+        value_node
+        for key_node, value_node in document.value
+        if (
+            isinstance(
+                key_node,
+                yaml.nodes.ScalarNode,
+            )
+            and key_node.value == field
+        )
+    ]
+
+    if len(matches) > 1:
+        raise ValueError(
+            f"System Source contains duplicate root field {field!r}"
+        )
+
+    if not matches:
+        rendered = text.rstrip()
+
+        if rendered:
+            rendered += "\n\n"
+
+        rendered += (
+            f"{field}:\n"
+            f"  - {reference}\n"
+        )
+
+        return rendered, True
+
+    value_node = matches[0]
+
+    if not isinstance(
+        value_node,
+        yaml.nodes.SequenceNode,
+    ):
+        raise ValueError(
+            f"System Source field {field!r} must be a YAML sequence"
+        )
+
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ValueError(
+            f"Cannot parse System Source: {exc}"
+        ) from exc
+
+    if not isinstance(loaded, dict):
+        raise ValueError(
+            "System Source must contain a root YAML mapping"
+        )
+
+    current = loaded.get(field)
+
+    if not isinstance(current, list):
+        raise ValueError(
+            f"System Source field {field!r} must be a YAML sequence"
+        )
+
+    if not all(
+        isinstance(item, str)
+        for item in current
+    ):
+        raise ValueError(
+            f"System Source field {field!r} must contain only path strings"
+        )
+
+    if reference in current:
+        return text, False
+
+    if value_node.flow_style:
+        updated = [
+            *current,
+            reference,
+        ]
+
+        rendered_value = yaml.safe_dump(
+            updated,
+            default_flow_style=True,
+            sort_keys=False,
+        ).strip()
+
+        start = value_node.start_mark.index
+        end = value_node.end_mark.index
+
+        return (
+            text[:start]
+            + rendered_value
+            + text[end:],
+            True,
+        )
+
+    insertion = value_node.end_mark.index
+
+    prefix = (
+        ""
+        if (
+            insertion == 0
+            or text[insertion - 1] == "\n"
+        )
+        else "\n"
+    )
+
+    addition = (
+        prefix
+        + f"  - {reference}\n"
+    )
+
+    return (
+        text[:insertion]
+        + addition
+        + text[insertion:],
+        True,
+    )
+
+
+def attach_project_authoring_asset(
+    asset: ProjectAuthoringAsset,
+    *,
+    system: str,
+) -> ProjectAuthoringAttachment:
+    """Attach a Module or Config asset to one registered System Source."""
+
+    project_root = (
+        asset.project_file
+        .parent
+        .resolve()
+    )
+
+    selected_system = resolve_project_resource(
+        "system",
+        system,
+        root=project_root,
+    )
+
+    field = _system_authoring_attachment_field(
+        asset.kind
+    )
+
+    reference = _relative_authoring_reference(
+        asset.path.resolve(),
+        system=selected_system.path.resolve(),
+    )
+
+    try:
+        source = selected_system.path.read_text(
+            encoding="utf-8"
+        )
+    except OSError as exc:
+        raise ValueError(
+            f"Cannot read System Source {selected_system.path}: {exc}"
+        ) from exc
+
+    updated, changed = _append_root_sequence_reference(
+        source,
+        field=field,
+        reference=reference,
+    )
+
+    if changed:
+        _atomic_text(
+            selected_system.path,
+            updated,
+        )
+
+    return ProjectAuthoringAttachment(
+        asset=asset,
+        system=selected_system,
+        field=field,
+        reference=reference,
+        changed=changed,
+    )
+
+
 def add_project_resource(
     kind: str,
     name: str,

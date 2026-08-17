@@ -13,8 +13,10 @@ from .cli_context import app, console
 from .project_foundation import (
     add_project_authoring_asset,
     add_project_resource,
+    attach_project_authoring_asset,
     create_progressive_project,
     list_project_resources,
+    resolve_project_resource,
 )
 from .workflow_execution import list_workflows, load_workflow
 from .workflow_operation import execute_workflow_operation
@@ -92,6 +94,15 @@ def project_add(
         ),
     ] = False,
     force: Annotated[bool, typer.Option("--force")] = False,
+    system: Annotated[
+        str | None,
+        typer.Option(
+            "--system",
+            help=(
+                "Attach a Module or Config asset to this registered System"
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Create a project resource or authoring asset only when needed."""
 
@@ -101,6 +112,18 @@ def project_add(
             .lower()
             .replace("_", "-")
         )
+
+        if (
+            system is not None
+            and normalized_kind not in {
+                "module",
+                "config",
+            }
+        ):
+            raise ValueError(
+                "--system is supported only for Module or Config "
+                "authoring assets"
+            )
 
         if normalized_kind in {
             "module",
@@ -121,6 +144,14 @@ def project_add(
                     "authoring assets"
                 )
 
+            # Preflight the target before creating the asset so an unknown
+            # System cannot leave behind an unattached file.
+            if system is not None:
+                resolve_project_resource(
+                    "system",
+                    system,
+                )
+
             asset = add_project_authoring_asset(
                 normalized_kind,
                 name,
@@ -131,6 +162,26 @@ def project_add(
                 f"[green]Added[/green] "
                 f"{asset.kind} authoring asset: {asset.path}"
             )
+
+            if system is not None:
+                attachment = attach_project_authoring_asset(
+                    asset,
+                    system=system,
+                )
+
+                state = (
+                    "Attached"
+                    if attachment.changed
+                    else "Already attached"
+                )
+
+                console.print(
+                    f"[green]{state}[/green] "
+                    f"{asset.kind} {asset.name} -> "
+                    f"system {attachment.system.name} "
+                    f"({attachment.field}: {attachment.reference})"
+                )
+
             return
 
         result = add_project_resource(
