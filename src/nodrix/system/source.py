@@ -47,6 +47,14 @@ class SystemSourceResolution:
     sources: tuple[Path, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class SystemConfigResolution:
+    """Resolved semantic System configuration."""
+
+    config: dict[str, Any]
+    sources: tuple[Path, ...]
+
+
 def _load_module(path: Path) -> dict[str, Any]:
     try:
         raw = yaml.safe_load(
@@ -355,9 +363,154 @@ def resolve_system_source_document(
     )
 
 
+def _deep_merge_config(
+    base: Mapping[str, Any],
+    overlay: Mapping[str, Any],
+    *,
+    source: Path,
+) -> dict[str, Any]:
+    """Merge one Config mapping over another deterministically."""
+
+    result = deepcopy(dict(base))
+
+    for key, value in overlay.items():
+        if not isinstance(key, str):
+            raise SystemSourceError(
+                f"Config keys must be strings in {source}: {key!r}"
+            )
+
+        current = result.get(key)
+
+        if (
+            isinstance(current, Mapping)
+            and isinstance(value, Mapping)
+        ):
+            result[key] = _deep_merge_config(
+                current,
+                value,
+                source=source,
+            )
+        else:
+            result[key] = deepcopy(value)
+
+    return result
+
+
+def _load_config_document(
+    path: Path,
+) -> dict[str, Any]:
+    try:
+        raw = yaml.safe_load(
+            path.read_text(encoding="utf-8")
+        )
+    except (OSError, yaml.YAMLError) as exc:
+        raise SystemSourceError(
+            f"Cannot load System Config {path}: {exc}"
+        ) from exc
+
+    if raw is None:
+        return {}
+
+    if not isinstance(raw, Mapping):
+        raise SystemSourceError(
+            f"System Config must contain a YAML mapping: {path}"
+        )
+
+    return _deep_merge_config(
+        {},
+        raw,
+        source=path,
+    )
+
+
+def resolve_system_config(
+    references: Any,
+    *,
+    base_dir: str | Path | None = None,
+) -> SystemConfigResolution:
+    """Resolve ordered Config files into one semantic configuration.
+
+    Config documents are plain YAML mappings, not canonical Definitions.
+
+    Files are merged from left to right. Mapping values merge recursively;
+    scalar and list values are replaced completely by later documents.
+    """
+
+    if references is None:
+        return SystemConfigResolution(
+            config={},
+            sources=(),
+        )
+
+    if isinstance(
+        references,
+        (str, Path),
+    ):
+        items = (references,)
+    elif isinstance(
+        references,
+        (list, tuple),
+    ):
+        items = tuple(references)
+    else:
+        raise SystemSourceError(
+            "System config references must be a YAML path "
+            "or an ordered list of YAML paths"
+        )
+
+    root = (
+        Path(base_dir).expanduser().resolve()
+        if base_dir is not None
+        else Path.cwd().resolve()
+    )
+
+    config: dict[str, Any] = {}
+    sources: list[Path] = []
+
+    for reference in items:
+        if not isinstance(
+            reference,
+            (str, Path),
+        ):
+            raise SystemSourceError(
+                "System config references must contain only YAML paths"
+            )
+
+        path = Path(reference).expanduser()
+
+        if not path.is_absolute():
+            path = root / path
+
+        path = path.resolve()
+
+        if not path.is_file():
+            raise SystemSourceError(
+                f"System Config does not exist: {path}"
+            )
+
+        document = _load_config_document(
+            path
+        )
+
+        config = _deep_merge_config(
+            config,
+            document,
+            source=path,
+        )
+
+        sources.append(path)
+
+    return SystemConfigResolution(
+        config=config,
+        sources=tuple(sources),
+    )
+
+
 __all__ = [
     "SYSTEM_MODULE_SCHEMA",
+    "SystemConfigResolution",
     "SystemSourceError",
     "SystemSourceResolution",
+    "resolve_system_config",
     "resolve_system_source_document",
 ]
