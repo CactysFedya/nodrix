@@ -17,6 +17,7 @@ from .local_dev import compile_local_project, reset_local_development_modules
 from .manifest import load_manifest
 from .presentation import render_system_plan as render_system_plan_view, render_validation
 from .project_foundation import resolve_project_resource
+from .project_system import load_project_system_details
 from .workspace import find_workspace
 from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefinition
 from .system import (
@@ -82,6 +83,35 @@ def _resolve_system_cli_inputs(
     return resolved_path, effective_project
 
 
+def _load_system_cli_details(
+    path: Path,
+    *,
+    profile: str | None = None,
+):
+    """Load one System with an optional explicit project Profile."""
+
+    if profile is None:
+        return load_system_details(
+            path
+        )
+
+    project_root = find_workspace(
+        path.parent
+    )
+
+    if project_root is None:
+        raise LookupError(
+            "--profile requires the System to belong to "
+            "a Nodrix project containing nodrix.yaml"
+        )
+
+    return load_project_system_details(
+        path,
+        profile=profile,
+        root=project_root,
+    )
+
+
 def _diagnostic_dict(item) -> dict[str, str]:
     return {
         "level": str(item.level),
@@ -109,6 +139,10 @@ def _resolution_payload(details) -> dict[str, object]:
         "configSources": [
             str(path)
             for path in resolution.config_sources
+        ],
+        "configOverlaySources": [
+            str(path)
+            for path in resolution.config_overlay_sources
         ],
         "configProvenance": {
             key: str(value)
@@ -171,6 +205,15 @@ def _render_system_resolution(details) -> None:
     for source in resolution.config_sources:
         sources.add_row(
             "CONFIG",
+            _resolution_display_path(
+                source,
+                root=root,
+            ),
+        )
+
+    for source in resolution.config_overlay_sources:
+        sources.add_row(
+            "CONFIG OVERLAY",
             _resolution_display_path(
                 source,
                 root=root,
@@ -284,8 +327,13 @@ def system_validate(
     """
 
     try:
-        resolved_path, effective_project = _resolve_system_cli_inputs(path, project)
-        system = load_system(resolved_path)
+        resolved_path, effective_project = _resolve_system_cli_inputs(
+            path,
+            project,
+        )
+        system = load_system(
+            resolved_path
+        )
         catalog = (
             _catalog_for_project(effective_project)
             if effective_project is not None
@@ -385,6 +433,16 @@ def system_plan(
             help="Optional local/package SDK project used to resolve typed definitions",
         ),
     ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help=(
+                "Project Profile (nodrix.profile/v1) applied as a "
+                "System Config overlay; not a RuntimePreset"
+            ),
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Print machine-readable execution plan JSON"),
@@ -400,8 +458,15 @@ def system_plan(
     """Resolve a System document into nodrix.system-execution-plan/v1."""
 
     try:
-        resolved_path, effective_project = _resolve_system_cli_inputs(path, project)
-        system = load_system(resolved_path)
+        resolved_path, effective_project = _resolve_system_cli_inputs(
+            path,
+            project,
+        )
+        details = _load_system_cli_details(
+            resolved_path,
+            profile=profile,
+        )
+        system = details.system
         catalog = (
             _catalog_for_project(effective_project)
             if effective_project is not None
@@ -670,6 +735,16 @@ def system_show(
         Path | None,
         typer.Argument(help="System YAML/JSON document"),
     ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help=(
+                "Project Profile (nodrix.profile/v1) applied as a "
+                "System Config overlay; not a RuntimePreset"
+            ),
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Print canonical System JSON"),
@@ -682,7 +757,10 @@ def system_show(
         bool,
         typer.Option(
             "--resolution",
-            help="Show System Module, Config, and Config provenance inputs",
+            help=(
+                "Show System Module, Config, Config overlay, "
+                "and provenance inputs"
+            ),
         ),
     ] = False,
 ) -> None:
@@ -700,9 +778,12 @@ def system_show(
         raise typer.Exit(2)
 
     try:
-        resolved_path, _ = _resolve_system_cli_inputs(path)
-        details = load_system_details(
-            resolved_path
+        resolved_path, _ = _resolve_system_cli_inputs(
+            path
+        )
+        details = _load_system_cli_details(
+            resolved_path,
+            profile=profile,
         )
         system = details.system
     except Exception as exc:
