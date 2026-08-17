@@ -14,6 +14,11 @@ from enum import Enum
 from typing import Any, Iterable, Mapping
 
 from ..errors import NodrixError
+from .execution_context import (
+    SystemExecutionContext,
+    SystemExecutionContextBindingError,
+    validate_system_execution_context_binding,
+)
 from .planning import (
     PlannedApplication,
     PlannedArtifact,
@@ -87,6 +92,10 @@ class BackendContext:
 
     plan: SystemExecutionPlan
     backend: str
+    execution_context: SystemExecutionContext | None = field(
+        default=None,
+        repr=False,
+    )
     targets: tuple[PlannedTarget, ...] = ()
     resources: tuple[PlannedResource, ...] = ()
     resource_order: tuple[str, ...] = ()
@@ -98,11 +107,26 @@ class BackendContext:
     outbound_links: tuple[PlannedLink, ...] = ()
     artifacts: tuple[PlannedArtifact, ...] = ()
 
+    def __post_init__(self) -> None:
+        try:
+            validate_system_execution_context_binding(
+                self.plan.execution_context_sha256,
+                self.execution_context,
+            )
+        except SystemExecutionContextBindingError as exc:
+            raise BackendContractError(
+                "BACKEND208",
+                str(exc),
+                path="plan.execution_context_sha256",
+            ) from exc
+
     @classmethod
     def from_plan(
         cls,
         plan: SystemExecutionPlan,
         backend: str,
+        *,
+        execution_context: SystemExecutionContext | None = None,
     ) -> "BackendContext":
         backend = backend.strip()
         if not backend:
@@ -187,6 +211,7 @@ class BackendContext:
         return cls(
             plan=plan,
             backend=backend,
+            execution_context=execution_context,
             targets=targets,
             resources=resources,
             resource_order=resource_order,
@@ -417,14 +442,30 @@ class ExecutionBackend(ABC):
     def capabilities(self) -> BackendCapabilities:
         return self._capabilities
 
-    def context(self, plan: SystemExecutionPlan) -> BackendContext:
-        return BackendContext.from_plan(plan, self.backend_id)
+    def context(
+        self,
+        plan: SystemExecutionPlan,
+        *,
+        execution_context: SystemExecutionContext | None = None,
+    ) -> BackendContext:
+        return BackendContext.from_plan(
+            plan,
+            self.backend_id,
+            execution_context=execution_context,
+        )
 
     def validate_plan(
         self,
         plan: SystemExecutionPlan,
+        *,
+        execution_context: SystemExecutionContext | None = None,
     ) -> BackendValidationReport:
-        return self.validate(self.context(plan))
+        return self.validate(
+            self.context(
+                plan,
+                execution_context=execution_context,
+            )
+        )
 
     def validate(
         self,
@@ -497,8 +538,15 @@ class ExecutionBackend(ABC):
     def prepare_plan(
         self,
         plan: SystemExecutionPlan,
+        *,
+        execution_context: SystemExecutionContext | None = None,
     ) -> PreparedExecution:
-        return self.prepare(self.context(plan))
+        return self.prepare(
+            self.context(
+                plan,
+                execution_context=execution_context,
+            )
+        )
 
     def start(
         self,

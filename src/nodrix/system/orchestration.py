@@ -25,6 +25,11 @@ from .backend import (
     ExecutionBackend,
     PreparedExecution,
 )
+from .execution_context import (
+    SystemExecutionContext,
+    SystemExecutionContextBindingError,
+    validate_system_execution_context_binding,
+)
 from .planning import PlannedTarget, SystemExecutionPlan
 
 
@@ -123,6 +128,8 @@ def plan_execution_scopes(plan: SystemExecutionPlan) -> tuple[ExecutionScope, ..
 def backend_context_for_scope(
     plan: SystemExecutionPlan,
     scope: ExecutionScope,
+    *,
+    execution_context: SystemExecutionContext | None = None,
 ) -> BackendContext:
     """Project one global SystemExecutionPlan into one orchestration scope."""
 
@@ -196,6 +203,7 @@ def backend_context_for_scope(
     return BackendContext(
         plan=plan,
         backend=scope.backend,
+        execution_context=execution_context,
         targets=(target,),
         resources=resources,
         resource_order=resource_order,
@@ -274,6 +282,10 @@ class PreparedScopeExecution:
 @dataclass(frozen=True, slots=True)
 class PreparedSystemExecution:
     plan: SystemExecutionPlan
+    execution_context: SystemExecutionContext | None = field(
+        default=None,
+        repr=False,
+    )
     scopes: tuple[PreparedScopeExecution, ...] = ()
 
 
@@ -395,9 +407,30 @@ class SystemOrchestrator:
     def validate_plan(
         self,
         plan: SystemExecutionPlan,
+        *,
+        execution_context: SystemExecutionContext | None = None,
     ) -> OrchestrationValidationReport:
         scopes = self.scopes(plan)
         diagnostics: list[OrchestrationDiagnostic] = []
+
+        try:
+            validate_system_execution_context_binding(
+                plan.execution_context_sha256,
+                execution_context,
+            )
+        except SystemExecutionContextBindingError as exc:
+            diagnostics.append(
+                OrchestrationDiagnostic(
+                    level="error",
+                    code="ORCH103",
+                    path="execution_context",
+                    message=str(exc),
+                )
+            )
+            return OrchestrationValidationReport(
+                scopes=scopes,
+                diagnostics=tuple(diagnostics),
+            )
 
         for scope in scopes:
             backend = self._bindings.get(scope)
@@ -431,7 +464,11 @@ class SystemOrchestrator:
                 )
                 continue
 
-            context = backend_context_for_scope(plan, scope)
+            context = backend_context_for_scope(
+                plan,
+                scope,
+                execution_context=execution_context,
+            )
             report = backend.validate(context)
             diagnostics.extend(
                 OrchestrationDiagnostic(
@@ -453,14 +490,23 @@ class SystemOrchestrator:
     def prepare_plan(
         self,
         plan: SystemExecutionPlan,
+        *,
+        execution_context: SystemExecutionContext | None = None,
     ) -> PreparedSystemExecution:
-        report = self.validate_plan(plan)
+        report = self.validate_plan(
+            plan,
+            execution_context=execution_context,
+        )
         report.raise_for_errors()
 
         prepared_scopes: list[PreparedScopeExecution] = []
         for scope in report.scopes:
             backend = self._bindings[scope]
-            context = backend_context_for_scope(plan, scope)
+            context = backend_context_for_scope(
+                plan,
+                scope,
+                execution_context=execution_context,
+            )
             try:
                 prepared = backend.prepare(context)
             except Exception as exc:
@@ -479,6 +525,7 @@ class SystemOrchestrator:
 
         return PreparedSystemExecution(
             plan=plan,
+            execution_context=execution_context,
             scopes=tuple(prepared_scopes),
         )
 

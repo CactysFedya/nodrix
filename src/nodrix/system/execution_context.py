@@ -19,6 +19,10 @@ from pydantic import Field
 from .model import SystemBaseModel
 
 
+class SystemExecutionContextBindingError(ValueError):
+    """A materialized execution context does not match its exact Plan binding."""
+
+
 class SystemExecutionContext(SystemBaseModel):
     """Effective execution semantics independent of project authoring names."""
 
@@ -39,6 +43,59 @@ class SystemExecutionContext(SystemBaseModel):
     stream_defaults: Mapping[str, Any] = Field(
         default_factory=dict
     )
+
+
+def validate_system_execution_context_binding(
+    expected_sha256: str | None,
+    context: SystemExecutionContext | None,
+) -> None:
+    """Require a materialized context to match one exact Plan binding."""
+
+    if (
+        expected_sha256 is not None
+        and not isinstance(
+            expected_sha256,
+            str,
+        )
+    ):
+        raise TypeError(
+            "expected_sha256 must be a string or None"
+        )
+
+    if (
+        context is not None
+        and not isinstance(
+            context,
+            SystemExecutionContext,
+        )
+    ):
+        raise TypeError(
+            "context must be a SystemExecutionContext or None"
+        )
+
+    if expected_sha256 is None:
+        if context is not None:
+            raise SystemExecutionContextBindingError(
+                "Plan does not bind an execution context, "
+                "but a materialized context was supplied"
+            )
+        return
+
+    if context is None:
+        raise SystemExecutionContextBindingError(
+            "Plan requires a materialized execution context"
+        )
+
+    actual_sha256 = system_execution_context_digest(
+        context
+    )
+
+    if actual_sha256 != expected_sha256:
+        raise SystemExecutionContextBindingError(
+            "materialized execution context digest does not "
+            "match Plan execution_context_sha256: "
+            f"expected={expected_sha256}, actual={actual_sha256}"
+        )
 
 
 def system_execution_context_document(
@@ -83,6 +140,8 @@ def system_execution_context_digest(
 
 
 __all__ = [
+    "validate_system_execution_context_binding",
+    "SystemExecutionContextBindingError",
     "SystemExecutionContext",
     "system_execution_context_digest",
     "system_execution_context_document",
