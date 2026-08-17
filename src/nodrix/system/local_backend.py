@@ -12,12 +12,14 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import threading
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
 
+from ..environment_materialization import materialize_environment
 from ..manifest import PipelineManifest, dump_manifest
 from ..storage_layout import StorageLayout
 from .backend import (
@@ -210,6 +212,55 @@ def _scope_file_token(value: str) -> str:
 
     token = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip()).strip("-._")
     return token or "scope"
+
+
+def _materialize_local_execution_environment(
+    context: BackendContext,
+    *,
+    cwd: Path,
+) -> dict[str, str] | None:
+    execution_context = context.execution_context
+
+    if execution_context is None:
+        return None
+
+    if (
+        not execution_context.variables
+        and not execution_context.sources
+    ):
+        return None
+
+    return materialize_environment(
+        base=os.environ,
+        variables=execution_context.variables,
+        sources=execution_context.sources,
+        cwd=cwd,
+        activation_label="System execution environment",
+    )
+
+
+def _bind_runtime_execution_environment(
+    runtime: Any,
+    environment: Mapping[str, str] | None,
+) -> None:
+    if environment is None:
+        return
+
+    setter = getattr(
+        runtime,
+        "set_execution_environment",
+        None,
+    )
+
+    if not callable(setter):
+        raise RuntimeError(
+            "Local runtime does not support the explicit "
+            "System execution environment required by this Plan"
+        )
+
+    setter(
+        environment
+    )
 
 
 def _deep_merge_defaults(
@@ -649,14 +700,21 @@ class LocalBackend(ExecutionBackend):
         return diagnostics
 
     def _prepare(self, context: BackendContext) -> PreparedExecution:
-        lowering = lower_local_context(context)
-
         project: LocalProject | None = None
         if self.project_path is not None:
             project = _compile_local_project(self.project_path)
             project_root = project.root
         else:
             project_root = self.working_directory
+
+        execution_environment = (
+            _materialize_local_execution_environment(
+                context,
+                cwd=project_root,
+            )
+        )
+
+        lowering = lower_local_context(context)
 
         generated_dir = StorageLayout(
             project_root
@@ -674,6 +732,11 @@ class LocalBackend(ExecutionBackend):
             manifest_path,
             self.run_root,
         )
+        _bind_runtime_execution_environment(
+            runtime,
+            execution_environment,
+        )
+
 
         activation = (
             _activate_local_project(project)
