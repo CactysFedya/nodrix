@@ -18,6 +18,28 @@ PROJECT_FILE = "nodrix.yaml"
 
 
 @dataclass(frozen=True)
+class ProjectExecutionContext:
+    """Pipeline-neutral project context for one execution.
+
+    Project Profile semantic System config is resolved separately. This
+    context owns execution-only inputs: Environment, variables, shell sources,
+    checks, view selection, and RuntimePreset selection.
+    """
+
+    root: Path
+    config_path: Path
+    config: dict[str, Any]
+    context_name: str | None
+    environment_name: str | None
+    profile_name: str | None
+    view: str
+    runtime_preset: str | None
+    variables: dict[str, str]
+    sources: tuple[Path, ...]
+    checks: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
 class WorkspaceResolution:
     root: Path
     config_path: Path | None
@@ -161,6 +183,248 @@ def _direct_pipeline(value: str, cwd: Path) -> Path | None:
     return None
 
 
+def _resolve_project_execution_context(
+    root: Path,
+    config: dict[str, Any],
+    *,
+    context_name: str | None = None,
+    environment_name: str | None = None,
+    profile_name: str | None = None,
+) -> ProjectExecutionContext:
+    """Resolve execution-only project context without selecting a Pipeline."""
+
+    defaults = _mapping(
+        config.get("defaults")
+    )
+
+    selected_context = (
+        context_name
+        if context_name is not None
+        else _active_context(
+            root,
+            config,
+        )
+    )
+
+    contexts = _mapping(
+        config.get("contexts")
+    )
+
+    context = (
+        _mapping(
+            contexts.get(
+                selected_context
+            )
+        )
+        if selected_context
+        else {}
+    )
+
+    selected_environment = (
+        environment_name
+        or context.get("environment")
+        or defaults.get("environment")
+    )
+
+    selected_profile = (
+        profile_name
+        or context.get("profile")
+        or defaults.get("profile")
+    )
+
+    selected_environment = (
+        str(selected_environment)
+        if selected_environment
+        else None
+    )
+
+    selected_profile = (
+        str(selected_profile)
+        if selected_profile
+        else None
+    )
+
+    environment = _load_named_document(
+        root,
+        "environments",
+        selected_environment,
+    )
+
+    profile = _load_named_document(
+        root,
+        "profiles",
+        selected_profile,
+    )
+
+    values = {
+        "PROJECT_ROOT": str(root),
+        "HOME": str(Path.home()),
+    }
+
+    variables: dict[str, str] = {}
+
+    for source in (
+        _mapping(
+            environment.get(
+                "environment"
+            )
+        ),
+        _mapping(
+            profile.get(
+                "variables"
+            )
+        ),
+        _mapping(
+            context.get(
+                "variables"
+            )
+        ),
+    ):
+        for key, value in source.items():
+            merged = {
+                **values,
+                **variables,
+            }
+
+            variables[str(key)] = _expand(
+                value,
+                merged,
+            )
+
+    source_items = (
+        _mapping(
+            environment.get("shell")
+        ).get("source")
+        or environment.get("source")
+        or ()
+    )
+
+    if isinstance(
+        source_items,
+        str,
+    ):
+        source_items = [
+            source_items
+        ]
+
+    sources: list[Path] = []
+
+    for raw in source_items:
+        source = Path(
+            _expand(
+                raw,
+                {
+                    **values,
+                    **variables,
+                },
+            )
+        )
+
+        if not source.is_absolute():
+            source = root / source
+
+        sources.append(
+            source.resolve()
+        )
+
+    runtime_preset = (
+        context.get(
+            "runtime_profile"
+        )
+        or profile.get(
+            "runtime_profile"
+        )
+        or defaults.get(
+            "runtime_profile"
+        )
+    )
+
+    view = str(
+        context.get("view")
+        or defaults.get("view")
+        or "compact"
+    )
+
+    checks = environment.get(
+        "checks"
+    )
+
+    if checks is None:
+        checks = []
+
+    if not isinstance(
+        checks,
+        list,
+    ):
+        raise ValueError(
+            "environment checks must be a list"
+        )
+
+    return ProjectExecutionContext(
+        root=root,
+        config_path=(
+            root / PROJECT_FILE
+        ),
+        config=config,
+        context_name=selected_context,
+        environment_name=selected_environment,
+        profile_name=selected_profile,
+        view=view,
+        runtime_preset=(
+            str(runtime_preset)
+            if runtime_preset
+            else None
+        ),
+        variables=variables,
+        sources=tuple(sources),
+        checks=tuple(
+            dict(item)
+            for item in checks
+            if isinstance(
+                item,
+                dict,
+            )
+        ),
+    )
+
+
+def resolve_project_execution_context(
+    start: str | Path | None = None,
+    *,
+    context: str | None = None,
+    environment: str | None = None,
+    profile: str | None = None,
+) -> ProjectExecutionContext:
+    """Resolve Pipeline-neutral execution context from one Nodrix project."""
+
+    selected = Path(
+        start or Path.cwd()
+    ).expanduser().resolve()
+
+    root = find_workspace(
+        selected,
+        required=True,
+    )
+
+    assert root is not None
+
+    config_path = (
+        root / PROJECT_FILE
+    )
+
+    config = _load_yaml(
+        config_path
+    )
+
+    return _resolve_project_execution_context(
+        root,
+        config,
+        context_name=context,
+        environment_name=environment,
+        profile_name=profile,
+    )
+
+
 def resolve_pipeline_reference(
     reference: str | Path | None = None,
     *,
@@ -260,65 +524,10 @@ def resolve_pipeline_reference(
             f"workspace aliases: {available}"
         )
 
-    context_name = _active_context(root, config)
-    contexts = _mapping(config.get("contexts"))
-    context = _mapping(contexts.get(context_name)) if context_name else {}
-
-    environment_name = context.get("environment") or defaults.get("environment")
-    profile_name = context.get("profile") or defaults.get("profile")
-    environment_name = str(environment_name) if environment_name else None
-    profile_name = str(profile_name) if profile_name else None
-
-    environment = _load_named_document(
+    execution_context = _resolve_project_execution_context(
         root,
-        "environments",
-        environment_name,
+        config,
     )
-    profile = _load_named_document(root, "profiles", profile_name)
-
-    values = {
-        "PROJECT_ROOT": str(root),
-        "HOME": str(Path.home()),
-    }
-    variables: dict[str, str] = {}
-    for source in (
-        _mapping(environment.get("environment")),
-        _mapping(profile.get("variables")),
-        _mapping(context.get("variables")),
-    ):
-        for key, value in source.items():
-            merged = {**values, **variables}
-            variables[str(key)] = _expand(value, merged)
-
-    source_items = (
-        _mapping(environment.get("shell")).get("source")
-        or environment.get("source")
-        or ()
-    )
-    if isinstance(source_items, str):
-        source_items = [source_items]
-    sources: list[Path] = []
-    for raw in source_items:
-        path = Path(_expand(raw, {**values, **variables}))
-        if not path.is_absolute():
-            path = root / path
-        sources.append(path.resolve())
-
-    runtime_profile = (
-        context.get("runtime_profile")
-        or profile.get("runtime_profile")
-        or defaults.get("runtime_profile")
-    )
-    view = str(
-        context.get("view")
-        or defaults.get("view")
-        or "compact"
-    )
-    checks = environment.get("checks")
-    if checks is None:
-        checks = []
-    if not isinstance(checks, list):
-        raise ValueError("environment checks must be a list")
 
     return WorkspaceResolution(
         root=root,
@@ -326,14 +535,16 @@ def resolve_pipeline_reference(
         config=config,
         pipeline=pipeline,
         pipeline_name=pipeline_name,
-        context_name=context_name,
-        environment_name=environment_name,
-        profile_name=profile_name,
-        view=view,
-        runtime_profile=str(runtime_profile) if runtime_profile else None,
-        variables=variables,
-        sources=tuple(sources),
-        checks=tuple(dict(item) for item in checks if isinstance(item, dict)),
+        context_name=execution_context.context_name,
+        environment_name=execution_context.environment_name,
+        profile_name=execution_context.profile_name,
+        view=execution_context.view,
+        runtime_profile=execution_context.runtime_preset,
+        variables=dict(
+            execution_context.variables
+        ),
+        sources=execution_context.sources,
+        checks=execution_context.checks,
     )
 
 
