@@ -13,6 +13,7 @@ from .profiles import get_runtime_preset
 from .project_foundation import (
     ProjectProfileConfig,
     resolve_project_profile_config,
+    resolve_project_resource,
 )
 from .system.execution_context import (
     SystemExecutionContext,
@@ -100,22 +101,58 @@ def resolve_project_profile_overlay(
 def load_project_system_details(
     path: str | Path,
     *,
-    profile: str,
+    profile: str | None = None,
     root: str | Path | None = None,
     format: str | None = None,
 ) -> SystemLoadResult:
-    """Load a System with one explicit project Profile Config overlay."""
+    """Load one project System with project-local authoring resolution.
 
-    overlay = resolve_project_profile_overlay(
-        profile,
-        root=root,
+    Project System names in ``systems[*].uses`` are authoring aliases.
+    They resolve through the project's registered ``systems`` section and
+    become immutable child System RevisionRefs before canonical validation.
+
+    An optional Project Profile contributes only its semantic System Config
+    overlay here; execution-context semantics remain a separate boundary.
+    """
+
+    system_path = Path(
+        path
+    ).expanduser().resolve()
+
+    resolver_root = (
+        Path(root).expanduser().resolve()
+        if root is not None
+        else system_path.parent
     )
 
+    overlays: tuple[
+        SystemConfigOverlay,
+        ...,
+    ] = ()
+
+    if profile is not None:
+        overlays = (
+            resolve_project_profile_overlay(
+                profile,
+                root=resolver_root,
+            ),
+        )
+
+    def resolve_child_system(
+        reference: str,
+    ) -> Path:
+        return resolve_project_resource(
+            "system",
+            reference,
+            root=resolver_root,
+        ).path
+
     return load_system_details(
-        path,
+        system_path,
         format=format,
-        config_overlays=(
-            overlay,
+        config_overlays=overlays,
+        child_system_resolver=(
+            resolve_child_system
         ),
     )
 

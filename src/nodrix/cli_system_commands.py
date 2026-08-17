@@ -94,21 +94,21 @@ def _load_system_cli_details(
     *,
     profile: str | None = None,
 ):
-    """Load one System with an optional explicit project Profile."""
-
-    if profile is None:
-        return load_system_details(
-            path
-        )
+    """Load one System through its correct authoring boundary."""
 
     project_root = find_workspace(
         path.parent
     )
 
     if project_root is None:
-        raise LookupError(
-            "--profile requires the System to belong to "
-            "a Nodrix project containing nodrix.yaml"
+        if profile is not None:
+            raise LookupError(
+                "--profile requires the System to belong to "
+                "a Nodrix project containing nodrix.yaml"
+            )
+
+        return load_system_details(
+            path
         )
 
     return load_project_system_details(
@@ -182,6 +182,10 @@ def _resolution_payload(details) -> dict[str, object]:
             str(path)
             for path in resolution.module_sources
         ],
+        "childSystemSources": [
+            str(path)
+            for path in resolution.child_system_sources
+        ],
         "configSources": [
             str(path)
             for path in resolution.config_sources
@@ -242,6 +246,15 @@ def _render_system_resolution(details) -> None:
     for source in resolution.module_sources:
         sources.add_row(
             "MODULE",
+            _resolution_display_path(
+                source,
+                root=root,
+            ),
+        )
+
+    for source in resolution.child_system_sources:
+        sources.add_row(
+            "CHILD SYSTEM",
             _resolution_display_path(
                 source,
                 root=root,
@@ -377,9 +390,9 @@ def system_validate(
             path,
             project,
         )
-        system = load_system(
+        system = _load_system_cli_details(
             resolved_path
-        )
+        ).system
         catalog = (
             _catalog_for_project(effective_project)
             if effective_project is not None
@@ -810,7 +823,7 @@ def system_show(
         typer.Option(
             "--resolution",
             help=(
-                "Show System Module, Config, Config overlay, "
+                "Show System Module, child System, Config, Config overlay, "
                 "and provenance inputs"
             ),
         ),
