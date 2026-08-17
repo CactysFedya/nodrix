@@ -66,6 +66,7 @@ class RuntimeBuildMixin:
         return cls(parameters)
 
     def build(self) -> None:
+        self._lock_execution_environment()
         self._built = False
         security_issues = configured_security_issues(self.manifest)
         if security_issues:

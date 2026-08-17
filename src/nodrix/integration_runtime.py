@@ -86,6 +86,7 @@ class IntegrationRuntimeMixin:
                                 run_dir=run_dir,
                                 project_dir=self.base_dir,
                                 runtime_mode=self.manifest.runtime.mode,
+                                environment=self.execution_environment,
                                 bindings={
                                     binding: self.sessions[session_name].instance
                                     for binding, session_name in loaded.config.bindings.items()
@@ -149,6 +150,7 @@ class IntegrationRuntimeMixin:
                     run_dir=run_dir,
                     project_dir=self.base_dir,
                     runtime_mode=self.manifest.runtime.mode,
+                    environment=self.execution_environment,
                     bindings={
                         binding: self._resource_instance(resource_name)
                         for binding, resource_name in loaded.config.bindings.items()
@@ -269,6 +271,7 @@ class IntegrationRuntimeMixin:
                                 run_dir=run_dir,
                                 project_dir=self.base_dir,
                                 runtime_mode=self.manifest.runtime.mode,
+                                environment=self.execution_environment,
                             )
                         )
                     )

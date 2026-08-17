@@ -3,11 +3,12 @@ from __future__ import annotations
 from dataclasses import asdict
 import gc
 import multiprocessing as mp
+import os
 from multiprocessing.connection import Connection
 from pathlib import Path
 import time
 import threading
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 from .cv_types import EncodedFrame, Frame, ManagedBuffer, MemoryType, Tensor
 from .messages import Message
@@ -281,11 +282,33 @@ def _load_child_node(uses: str, base_dir: Path, parameters: dict[str, Any]) -> N
     return cls(parameters)
 
 
+def _install_child_environment(
+    environment: Mapping[str, str] | None,
+) -> None:
+    """Install an exact environment only inside an isolated child."""
+
+    if environment is None:
+        return
+
+    normalized = {
+        str(key): str(value)
+        for key, value in environment.items()
+    }
+
+    os.environ.clear()
+    os.environ.update(
+        normalized
+    )
+
+
 def _child_main(connection: Connection, config: dict[str, Any]) -> None:
     node: Node | None = None
     producer: Any = None
     context: NodeContext | None = None
     try:
+        _install_child_environment(
+            config.get("environment")
+        )
         base_dir = Path(config["base_dir"])
         node = _load_child_node(config["uses"], base_dir, config["parameters"])
         context = NodeContext(
@@ -294,6 +317,7 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
             project_dir=base_dir,
             runtime_mode=config["runtime_mode"],
             engine="unified-process",
+            environment=dict(os.environ),
             device=config.get("device", "auto"),
             external_links=tuple(config.get("external_links") or ()),
         )
@@ -301,7 +325,6 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
         affinity = config.get("cpu_affinity") or []
         if affinity:
             try:
-                import os
                 os.sched_setaffinity(0, set(int(item) for item in affinity))
             except (AttributeError, OSError):
                 pass
@@ -499,6 +522,11 @@ class ProcessNodeProxy(Node):
             "parameters": self.parameters,
             "run_dir": str(self.context.run_dir),
             "runtime_mode": self.context.runtime_mode,
+            "environment": (
+                None
+                if self.context.environment is None
+                else dict(self.context.environment)
+            ),
             "threshold": self.threshold,
             "cpu_affinity": self.cpu_affinity,
             "device": self.device,

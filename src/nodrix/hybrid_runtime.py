@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+import os
+from types import MappingProxyType
+
 from datetime import datetime, timezone
 import inspect
 import json
@@ -70,6 +74,8 @@ class HybridPipelineRuntime(
                 self.base_dir
             ).runs_root
         ).resolve()
+        self._execution_environment: Mapping[str, str] | None = None
+        self._execution_environment_locked = False
         self.nodes: dict[str, LoadedNode] = {}
         self.sessions: dict[str, LoadedSession] = {}
         self.resources: dict[str, LoadedResource] = {}
@@ -99,6 +105,78 @@ class HybridPipelineRuntime(
         self._watchdog_thread: threading.Thread | None = None
         self._built = False
         self._nodes_closed = False
+
+    @staticmethod
+    def _freeze_execution_environment(
+        environment: Mapping[str, str],
+    ) -> Mapping[str, str]:
+        return MappingProxyType(
+            {
+                str(key): str(value)
+                for key, value in environment.items()
+            }
+        )
+
+    @property
+    def execution_environment(
+        self,
+    ) -> Mapping[str, str]:
+        """Return the runtime-owned environment snapshot."""
+
+        if self._execution_environment is None:
+            return self._freeze_execution_environment(
+                os.environ
+            )
+
+        return self._execution_environment
+
+    def environment_value(
+        self,
+        name: str,
+        default: str | None = None,
+    ) -> str | None:
+        return self.execution_environment.get(
+            name,
+            default,
+        )
+
+    def set_execution_environment(
+        self,
+        environment: Mapping[str, str],
+    ) -> None:
+        """Bind one exact environment before runtime build."""
+
+        if self._execution_environment_locked:
+            raise RuntimeError(
+                "Execution environment is already locked "
+                "for this runtime"
+            )
+
+        if not isinstance(
+            environment,
+            Mapping,
+        ):
+            raise TypeError(
+                "environment must be a mapping"
+            )
+
+        self._execution_environment = (
+            self._freeze_execution_environment(
+                environment
+            )
+        )
+
+    def _lock_execution_environment(
+        self,
+    ) -> None:
+        if self._execution_environment is None:
+            self._execution_environment = (
+                self._freeze_execution_environment(
+                    os.environ
+                )
+            )
+
+        self._execution_environment_locked = True
 
     def _emit_event(self, kind: str, **payload: Any) -> None:
         event = {"kind": kind, "time_ns": time.time_ns(), **payload}
@@ -134,6 +212,7 @@ class HybridPipelineRuntime(
                 project_dir=self.base_dir,
                 runtime_mode=self.manifest.runtime.mode,
                 engine="unified",
+                environment=self.execution_environment,
                 device=loaded.config.execution.device,
                 bindings={
                     binding: self._resource_instance(resource_name)

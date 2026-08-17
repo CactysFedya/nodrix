@@ -21,6 +21,10 @@ class NodeContext:
     device: str = "auto"
     bindings: Mapping[str, Any] = field(default_factory=dict)
     external_links: tuple[Mapping[str, Any], ...] = ()
+    environment: Mapping[str, str] | None = field(
+        default=None,
+        repr=False,
+    )
     _output_allocator: Callable[[int, bool], ManagedBuffer] | None = None
 
     def allocate_buffer(self, size: int, *, readonly: bool = False) -> ManagedBuffer:

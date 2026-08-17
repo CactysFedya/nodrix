@@ -23,6 +23,10 @@ class ResourceContext:
     project_dir: Path
     runtime_mode: str
     bindings: Mapping[str, Any] = field(default_factory=dict)
+    environment: Mapping[str, str] | None = field(
+        default=None,
+        repr=False,
+    )
 
     def binding(self, name: str = "session", *, required: bool = True) -> Any:
         value = self.bindings.get(name)
@@ -41,6 +45,10 @@ class ApplicationContext:
     runtime_mode: str
     bindings: Mapping[str, Any] = field(default_factory=dict)
     external_links: tuple[Mapping[str, Any], ...] = ()
+    environment: Mapping[str, str] | None = field(
+        default=None,
+        repr=False,
+    )
 
     def binding(self, name: str = "session", *, required: bool = True) -> Any:
         value = self.bindings.get(name)

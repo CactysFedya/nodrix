@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import platform
 import sys
 from pathlib import Path
@@ -232,7 +231,9 @@ class RuntimeExecutionMixin:
                 resolved = dict(item)
                 token_env = resolved.pop("token_env", None)
                 if token_env and not resolved.get("token"):
-                    resolved["token"] = os.environ.get(str(token_env))
+                    resolved["token"] = self.environment_value(
+                        str(token_env)
+                    )
                 if resolved.get("access_mode") == "token" and not resolved.get("token"):
                     raise RuntimeGraphError(
                         f"Stream {resolved['name']!r} requires environment variable {token_env!r}"
