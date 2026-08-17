@@ -245,3 +245,39 @@ def test_config_binding_does_not_change_semantic_identity(
         system_definition_digest(configured)
         == system_definition_digest(literal)
     )
+
+
+def test_whole_config_mapping_can_bind_application_parameters(
+    tmp_path: Path,
+) -> None:
+    _write(
+        tmp_path / "config/defaults.yaml",
+        "mapping:\n"
+        "  voxel_size_m: 0.1\n"
+        "  point_stride: 1\n"
+        "  max_voxels: 5000000\n",
+    )
+
+    system_path = _write(
+        tmp_path / "system.yaml",
+        "apiVersion: nodrix.system/v1\n"
+        "kind: System\n"
+        "name: robot\n"
+        "config: [config/defaults.yaml]\n"
+        "applications:\n"
+        "  - name: mapper\n"
+        "    uses: mapping.voxel_map\n"
+        '    parameters: "${config.mapping}"\n',
+    )
+
+    system = load_system(
+        system_path
+    )
+
+    assert dict(
+        system.applications[0].parameters
+    ) == {
+        "voxel_size_m": 0.1,
+        "point_stride": 1,
+        "max_voxels": 5000000,
+    }

@@ -30,6 +30,7 @@ def test_empty_config_resolution() -> None:
 
     assert resolved.config == {}
     assert resolved.sources == ()
+    assert resolved.provenance == {}
 
 
 def test_single_config_document_is_plain_mapping(

@@ -49,10 +49,21 @@ class SystemSourceResolution:
 
 @dataclass(frozen=True, slots=True)
 class SystemConfigResolution:
-    """Resolved semantic System configuration."""
+    """Resolved semantic System configuration and its source provenance."""
 
     config: dict[str, Any]
     sources: tuple[Path, ...]
+    provenance: dict[str, Path]
+
+    def source_for(
+        self,
+        path: str,
+    ) -> Path | None:
+        """Return the winning source for one resolved dotted Config path."""
+
+        return self.provenance.get(
+            path
+        )
 
 
 def _load_module(path: Path) -> dict[str, Any]:
@@ -515,6 +526,16 @@ def _deep_merge_config(
                 f"Config keys must be strings in {source}: {key!r}"
             )
 
+        if not key:
+            raise SystemSourceError(
+                f"Config keys must not be empty in {source}"
+            )
+
+        if "." in key:
+            raise SystemSourceError(
+                f"Config keys must not contain '.' in {source}: {key!r}"
+            )
+
         current = result.get(key)
 
         if (
@@ -530,6 +551,127 @@ def _deep_merge_config(
             result[key] = deepcopy(value)
 
     return result
+
+
+def _config_leaf_paths(
+    value: Any,
+    *,
+    prefix: str = "",
+) -> tuple[str, ...]:
+    """Return addressable leaf paths from one Config value."""
+
+    if isinstance(value, Mapping):
+        if not value:
+            return (
+                (prefix,)
+                if prefix
+                else ()
+            )
+
+        result: list[str] = []
+
+        for key, item in value.items():
+            path = (
+                f"{prefix}.{key}"
+                if prefix
+                else str(key)
+            )
+
+            result.extend(
+                _config_leaf_paths(
+                    item,
+                    prefix=path,
+                )
+            )
+
+        return tuple(result)
+
+    return (
+        (prefix,)
+        if prefix
+        else ()
+    )
+
+
+def _config_written_paths(
+    base: Mapping[str, Any],
+    overlay: Mapping[str, Any],
+    *,
+    prefix: str = "",
+) -> tuple[str, ...]:
+    """Return Config paths actually written by one overlay."""
+
+    result: list[str] = []
+
+    for key, value in overlay.items():
+        path = (
+            f"{prefix}.{key}"
+            if prefix
+            else str(key)
+        )
+
+        current = base.get(key)
+
+        if (
+            isinstance(current, Mapping)
+            and isinstance(value, Mapping)
+        ):
+            result.extend(
+                _config_written_paths(
+                    current,
+                    value,
+                    prefix=path,
+                )
+            )
+            continue
+
+        if isinstance(value, Mapping):
+            paths = _config_leaf_paths(
+                value,
+                prefix=path,
+            )
+
+            result.extend(
+                paths or (path,)
+            )
+            continue
+
+        result.append(path)
+
+    return tuple(result)
+
+
+def _record_config_provenance(
+    provenance: dict[str, Path],
+    base: Mapping[str, Any],
+    document: Mapping[str, Any],
+    *,
+    source: Path,
+) -> None:
+    """Record which Config source owns each value written by an overlay."""
+
+    for path in _config_written_paths(
+        base,
+        document,
+    ):
+        for existing in tuple(
+            provenance
+        ):
+            if (
+                existing == path
+                or existing.startswith(
+                    path + "."
+                )
+                or path.startswith(
+                    existing + "."
+                )
+            ):
+                provenance.pop(
+                    existing,
+                    None,
+                )
+
+        provenance[path] = source
 
 
 def _load_config_document(
@@ -576,6 +718,7 @@ def resolve_system_config(
         return SystemConfigResolution(
             config={},
             sources=(),
+            provenance={},
         )
 
     if isinstance(
@@ -602,6 +745,7 @@ def resolve_system_config(
 
     config: dict[str, Any] = {}
     sources: list[Path] = []
+    provenance: dict[str, Path] = {}
 
     for reference in items:
         if not isinstance(
@@ -628,8 +772,17 @@ def resolve_system_config(
             path
         )
 
+        previous_config = config
+
         config = _deep_merge_config(
-            config,
+            previous_config,
+            document,
+            source=path,
+        )
+
+        _record_config_provenance(
+            provenance,
+            previous_config,
             document,
             source=path,
         )
@@ -639,6 +792,7 @@ def resolve_system_config(
     return SystemConfigResolution(
         config=config,
         sources=tuple(sources),
+        provenance=provenance,
     )
 
 
