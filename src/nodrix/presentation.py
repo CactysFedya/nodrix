@@ -992,6 +992,7 @@ def _backend_counts(plan: Any, backend: str) -> tuple[int, int, int, int, int, i
 def _plan_summary(plan: Any) -> Text:
     summary = plan.summary
     labels = (
+        ("system", "systems"),
         ("target", "targets"),
         ("resource", "resources"),
         ("application", "applications"),
@@ -1009,6 +1010,92 @@ def _plan_summary(plan: Any) -> Text:
     return Text(" · ".join(parts), style="dim")
 
 
+def _system_plan_tree(
+    plan: Any,
+) -> Text:
+    """Render recursive child-System composition without changing plan semantics."""
+
+    lines = Text()
+
+    lines.append("● ", style="cyan")
+    lines.append(
+        str(plan.system),
+        style="bold",
+    )
+    lines.append(
+        f"  sha256:{str(plan.system_sha256)[:12]}",
+        style="dim",
+    )
+    lines.append("\n")
+
+    def append_children(
+        parent: Any,
+        prefix: str,
+    ) -> None:
+        children = tuple(
+            parent.systems
+        )
+
+        for index, child in enumerate(
+            children
+        ):
+            last = (
+                index
+                == len(children) - 1
+            )
+
+            connector = (
+                "└─ "
+                if last
+                else "├─ "
+            )
+
+            lines.append(
+                prefix + connector,
+                style="dim",
+            )
+
+            # Left side is the instance role inside the parent.
+            lines.append(
+                str(child.name),
+                style="bold",
+            )
+
+            # Right side is the independently identified System Definition.
+            lines.append(
+                " → ",
+                style="dim",
+            )
+            lines.append(
+                str(child.plan.system),
+                style="cyan",
+            )
+
+            lines.append(
+                "  "
+                f"sha256:{str(child.plan.system_sha256)[:12]}",
+                style="dim",
+            )
+            lines.append("\n")
+
+            append_children(
+                child.plan,
+                prefix
+                + (
+                    "   "
+                    if last
+                    else "│  "
+                ),
+            )
+
+    append_children(
+        plan,
+        "",
+    )
+
+    return lines
+
+
 def render_system_plan(plan: Any) -> Group:
     """Render a nodrix.system execution plan as a readable architecture tree."""
 
@@ -1018,6 +1105,15 @@ def render_system_plan(plan: Any) -> Group:
     header.append(f"\n{plan.schema_id}", style="dim")
 
     sections: list[RenderableType] = [header, _plan_summary(plan)]
+
+    if plan.systems:
+        sections.extend(
+            [
+                Text(""),
+                _section("SYSTEMS"),
+                _system_plan_tree(plan),
+            ]
+        )
 
     backend_names = _plan_backend_names(plan)
     if backend_names:

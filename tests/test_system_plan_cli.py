@@ -313,3 +313,81 @@ def test_system_plan_with_project_uses_typed_validation(
     assert result.exit_code == 1
     assert "PLAN100" in result.output
     assert "SYS132" in result.output
+
+
+def test_system_plan_human_output_shows_system_hierarchy(
+    tmp_path: Path,
+) -> None:
+    sensor = tmp_path / "sensor.yaml"
+
+    sensor.write_text(
+        """apiVersion: nodrix.system/v1
+kind: System
+name: sensor
+""",
+        encoding="utf-8",
+    )
+
+    perception = (
+        tmp_path
+        / "perception.yaml"
+    )
+
+    perception.write_text(
+        """apiVersion: nodrix.system/v1
+kind: System
+name: perception
+systems:
+- name: sensor
+  uses: ./sensor.yaml
+""",
+        encoding="utf-8",
+    )
+
+    robot = tmp_path / "robot.yaml"
+
+    robot.write_text(
+        """apiVersion: nodrix.system/v1
+kind: System
+name: robot
+systems:
+- name: perception
+  uses: ./perception.yaml
+""",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "plan",
+            str(robot),
+        ],
+    )
+
+    assert (
+        result.exit_code
+        == 0
+    ), result.output
+
+    assert "PLAN robot" in result.output
+    assert "SYSTEMS" in result.output
+
+    # Instance role and independently identified
+    # System Definition remain visibly distinct.
+    assert (
+        "perception → perception"
+        in result.output
+    )
+    assert (
+        "sensor → sensor"
+        in result.output
+    )
+
+    # The hierarchy uses tree presentation rather
+    # than flattening children into the parent.
+    assert "└─ perception" in result.output
+    assert "└─ sensor" in result.output
+
+    assert "sha256:" in result.output
