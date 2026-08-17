@@ -97,6 +97,16 @@ class ProjectResource:
     project_file: Path
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectProfileConfig:
+    """Semantic System configuration declared by one project Profile."""
+
+    name: str
+    config: dict[str, Any]
+    path: Path
+    project_file: Path
+
+
 @dataclass(frozen=True)
 class ProjectAuthoringAsset:
     """Project-local authoring input that is not a canonical project resource."""
@@ -790,10 +800,18 @@ def _profile_scaffold(
 #
 # Необязательные поля:
 #
+# config:
+#   mapping:
+#     voxel_size_m: 0.1
+#     point_stride: 1
+#
+#   Profile.config содержит semantic System configuration.
+#   Это не environment variables и не RuntimePreset.
+#
 # runtime_profile: realtime-low-latency
 #
 # variables:
-#   MAP_VOXEL_SIZE: "0.1"
+#   ROBOT_MODEL: rpi5
 #
 # Начинайте с пустого Profile и добавляйте значения только для варианта проекта.
 """
@@ -823,10 +841,18 @@ def _profile_scaffold(
 #
 # Optional fields:
 #
+# config:
+#   mapping:
+#     voxel_size_m: 0.1
+#     point_stride: 1
+#
+#   Profile.config contains semantic System configuration.
+#   It is not environment variables and it is not a RuntimePreset.
+#
 # runtime_profile: realtime-low-latency
 #
 # variables:
-#   MAP_VOXEL_SIZE: "0.1"
+#   ROBOT_MODEL: rpi5
 #
 # Start with an empty Profile and add values only for a project variant.
 """
@@ -1548,4 +1574,76 @@ def resolve_project_resource(
         name=selected,
         path=target,
         project_file=project_file,
+    )
+
+
+def resolve_project_profile_config(
+    name: str | None = None,
+    *,
+    root: str | Path | None = None,
+) -> ProjectProfileConfig:
+    """Resolve optional semantic System configuration from a project Profile.
+
+    Profile remains a project configuration resource, not a System Definition.
+    Only its ``config`` mapping belongs to semantic System configuration.
+    ``variables`` and ``runtime_profile`` keep their existing meanings.
+    """
+
+    resource = resolve_project_resource(
+        "profile",
+        name,
+        root=root,
+    )
+
+    document = _load_yaml(
+        resource.path
+    )
+
+    schema = document.get(
+        "schema"
+    )
+
+    if schema != "nodrix.profile/v1":
+        raise ValueError(
+            f"Project Profile {resource.name!r} must use "
+            "schema 'nodrix.profile/v1'"
+        )
+
+    declared_name = document.get(
+        "name"
+    )
+
+    if (
+        declared_name is not None
+        and str(declared_name) != resource.name
+    ):
+        raise ValueError(
+            f"Project Profile {resource.name!r} declares "
+            f"name {declared_name!r}"
+        )
+
+    raw_config = document.get(
+        "config"
+    )
+
+    if raw_config is None:
+        config: dict[str, Any] = {}
+    elif isinstance(
+        raw_config,
+        dict,
+    ):
+        config = dict(
+            raw_config
+        )
+    else:
+        raise ValueError(
+            f"Project Profile {resource.name!r} field "
+            "'config' must be a YAML mapping"
+        )
+
+    return ProjectProfileConfig(
+        name=resource.name,
+        config=config,
+        path=resource.path,
+        project_file=resource.project_file,
     )

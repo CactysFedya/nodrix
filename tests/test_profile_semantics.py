@@ -157,3 +157,197 @@ def test_project_profile_can_select_runtime_preset(
         document["runtime_profile"]
         in runtime_preset_names()
     )
+
+
+def test_project_profile_without_config_keeps_empty_system_config(
+    tmp_path: Path,
+) -> None:
+    create_progressive_project(
+        tmp_path
+    )
+
+    profile = add_project_resource(
+        "profile",
+        "default",
+        root=tmp_path,
+        make_default=True,
+    )
+
+    from nodrix.project_foundation import (
+        resolve_project_profile_config,
+    )
+
+    resolved = resolve_project_profile_config(
+        root=tmp_path,
+    )
+
+    assert resolved.name == "default"
+    assert resolved.path == profile.path
+    assert resolved.config == {}
+
+    # Backward compatibility: creating a Profile still does not
+    # eagerly add a new config field to the document.
+    document = yaml.safe_load(
+        profile.path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert document == {
+        "schema": "nodrix.profile/v1",
+        "name": "default",
+        "variables": {},
+    }
+
+
+def test_project_profile_can_declare_semantic_system_config(
+    tmp_path: Path,
+) -> None:
+    create_progressive_project(
+        tmp_path
+    )
+
+    profile = add_project_resource(
+        "profile",
+        "rpi5",
+        root=tmp_path,
+    )
+
+    profile.path.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "nodrix.profile/v1",
+                "name": "rpi5",
+                "variables": {
+                    "ROBOT_MODEL": "rpi5",
+                },
+                "runtime_profile": (
+                    "realtime-low-latency"
+                ),
+                "config": {
+                    "mapping": {
+                        "voxel_size_m": 0.1,
+                        "point_stride": 1,
+                    },
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    from nodrix.project_foundation import (
+        resolve_project_profile_config,
+    )
+
+    resolved = resolve_project_profile_config(
+        "rpi5",
+        root=tmp_path,
+    )
+
+    assert resolved.config == {
+        "mapping": {
+            "voxel_size_m": 0.1,
+            "point_stride": 1,
+        },
+    }
+
+    # Existing Profile responsibilities remain independent.
+    document = yaml.safe_load(
+        profile.path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert document["variables"] == {
+        "ROBOT_MODEL": "rpi5",
+    }
+
+    assert (
+        document["runtime_profile"]
+        == "realtime-low-latency"
+    )
+
+
+def test_project_profile_config_must_be_mapping(
+    tmp_path: Path,
+) -> None:
+    create_progressive_project(
+        tmp_path
+    )
+
+    profile = add_project_resource(
+        "profile",
+        "broken",
+        root=tmp_path,
+    )
+
+    profile.path.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "nodrix.profile/v1",
+                "name": "broken",
+                "variables": {},
+                "config": [
+                    "not",
+                    "a",
+                    "mapping",
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    from nodrix.project_foundation import (
+        resolve_project_profile_config,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="config.*must be a YAML mapping",
+    ):
+        resolve_project_profile_config(
+            "broken",
+            root=tmp_path,
+        )
+
+
+def test_project_profile_config_requires_profile_schema(
+    tmp_path: Path,
+) -> None:
+    create_progressive_project(
+        tmp_path
+    )
+
+    profile = add_project_resource(
+        "profile",
+        "broken",
+        root=tmp_path,
+    )
+
+    profile.path.write_text(
+        yaml.safe_dump(
+            {
+                "schema": "wrong.schema/v1",
+                "name": "broken",
+                "variables": {},
+                "config": {},
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    from nodrix.project_foundation import (
+        resolve_project_profile_config,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="nodrix.profile/v1",
+    ):
+        resolve_project_profile_config(
+            "broken",
+            root=tmp_path,
+        )

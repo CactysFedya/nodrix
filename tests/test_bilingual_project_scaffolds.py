@@ -180,3 +180,35 @@ def test_unknown_project_language_is_rejected(
             tmp_path,
             language="de",
         )
+
+
+def test_profile_scaffold_teaches_semantic_system_config(
+    tmp_path: Path,
+) -> None:
+    for language in (
+        "en",
+        "ru",
+    ):
+        root = (
+            tmp_path / language
+        )
+
+        create_progressive_project(
+            root,
+            language=language,
+        )
+
+        profile = add_project_resource(
+            "profile",
+            "robot",
+            root=root,
+        )
+
+        text = profile.path.read_text(
+            encoding="utf-8"
+        )
+
+        assert "# config:" in text
+        assert "voxel_size_m: 0.1" in text
+        assert "Profile.config" in text
+        assert "RuntimePreset" in text
