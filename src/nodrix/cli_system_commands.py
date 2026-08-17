@@ -26,9 +26,9 @@ from .system import (
     dump_system,
     dump_system_schema,
     load_system,
+    load_system_details,
     pipeline_manifest_to_system,
     plan_system,
-    system_to_canonical,
     validate_system,
 )
 
@@ -89,6 +89,117 @@ def _diagnostic_dict(item) -> dict[str, str]:
         "path": str(item.path),
         "message": str(item.message),
     }
+
+
+def _resolution_payload(details) -> dict[str, object]:
+    """Return machine-readable System authoring resolution diagnostics."""
+
+    resolution = details.resolution
+
+    return {
+        "source": str(details.path),
+        "sources": [
+            str(path)
+            for path in resolution.sources
+        ],
+        "moduleSources": [
+            str(path)
+            for path in resolution.module_sources
+        ],
+        "configSources": [
+            str(path)
+            for path in resolution.config_sources
+        ],
+        "configProvenance": {
+            key: str(value)
+            for key, value in sorted(
+                resolution.config_provenance.items()
+            )
+        },
+    }
+
+
+def _resolution_display_path(
+    path: Path,
+    *,
+    root: Path,
+) -> str:
+    """Prefer paths relative to the root System source."""
+
+    try:
+        return str(
+            path.relative_to(root)
+        )
+    except ValueError:
+        return str(path)
+
+
+def _render_system_resolution(details) -> None:
+    """Render authoring sources without changing canonical System output."""
+
+    resolution = details.resolution
+    root = details.path.parent
+
+    console.print()
+    console.print("[bold]Resolution[/bold]")
+
+    sources = Table(
+        box=None,
+        show_edge=False,
+        pad_edge=False,
+    )
+    sources.add_column("TYPE")
+    sources.add_column("SOURCE")
+
+    sources.add_row(
+        "SYSTEM",
+        _resolution_display_path(
+            details.path,
+            root=root,
+        ),
+    )
+
+    for source in resolution.module_sources:
+        sources.add_row(
+            "MODULE",
+            _resolution_display_path(
+                source,
+                root=root,
+            ),
+        )
+
+    for source in resolution.config_sources:
+        sources.add_row(
+            "CONFIG",
+            _resolution_display_path(
+                source,
+                root=root,
+            ),
+        )
+
+    console.print(sources)
+
+    if resolution.config_provenance:
+        provenance = Table(
+            box=None,
+            show_edge=False,
+            pad_edge=False,
+        )
+        provenance.add_column("CONFIG PATH")
+        provenance.add_column("SOURCE")
+
+        for config_path, source in sorted(
+            resolution.config_provenance.items()
+        ):
+            provenance.add_row(
+                config_path,
+                _resolution_display_path(
+                    source,
+                    root=root,
+                ),
+            )
+
+        console.print(provenance)
 
 
 def _catalog_for_project(path: Path) -> DefinitionCatalog:
@@ -567,6 +678,13 @@ def system_show(
         bool,
         typer.Option("--document", help="Print canonical System YAML instead of a summary"),
     ] = False,
+    resolution: Annotated[
+        bool,
+        typer.Option(
+            "--resolution",
+            help="Show System Module, Config, and Config provenance inputs",
+        ),
+    ] = False,
 ) -> None:
     """Show the canonical System document or a concise architecture summary."""
 
@@ -574,17 +692,38 @@ def system_show(
         console.print("[red]Use either --json or --document, not both.[/red]")
         raise typer.Exit(2)
 
+    if document and resolution:
+        console.print(
+            "[red]--resolution cannot be combined with --document; "
+            "use the summary view or --json --resolution.[/red]"
+        )
+        raise typer.Exit(2)
+
     try:
         resolved_path, _ = _resolve_system_cli_inputs(path)
-        system = load_system(resolved_path)
+        details = load_system_details(
+            resolved_path
+        )
+        system = details.system
     except Exception as exc:
         console.print(f"[red]Cannot load System:[/red] {exc}")
         raise typer.Exit(1)
 
     if json_output:
+        payload = (
+            {
+                "system": details.canonical,
+                "resolution": _resolution_payload(
+                    details
+                ),
+            }
+            if resolution
+            else details.canonical
+        )
+
         console.print_json(
             json.dumps(
-                system_to_canonical(system),
+                payload,
                 ensure_ascii=False,
             )
         )
@@ -652,6 +791,11 @@ def system_show(
                 artifact.producer or "-",
             )
         console.print(artifacts)
+
+    if resolution:
+        _render_system_resolution(
+            details
+        )
 
 
 def _default_system_output(pipeline: Path) -> Path:

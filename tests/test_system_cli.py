@@ -285,3 +285,186 @@ def test_system_validate_with_project_resolves_sdk_definitions(tmp_path: Path) -
 
     assert result.exit_code == 1
     assert "SYS132" in result.output
+
+
+def test_system_show_json_resolution_wraps_canonical_system(
+    tmp_path: Path,
+) -> None:
+    modules = tmp_path / "modules"
+    config = tmp_path / "config"
+    modules.mkdir()
+    config.mkdir()
+
+    module = modules / "target.yaml"
+    module.write_text(
+        "schema: nodrix.system-module/v1\n"
+        "targets:\n"
+        "  - name: pi5\n"
+        "    kind: host\n"
+        "    properties:\n"
+        '      threads: "${config.runtime.threads}"\n',
+        encoding="utf-8",
+    )
+
+    config_file = config / "defaults.yaml"
+    config_file.write_text(
+        "runtime:\n"
+        "  threads: 4\n",
+        encoding="utf-8",
+    )
+
+    system_path = tmp_path / "system.yaml"
+    system_path.write_text(
+        "apiVersion: nodrix.system/v1\n"
+        "kind: System\n"
+        "name: resolved\n"
+        "imports: [modules/target.yaml]\n"
+        "config: [config/defaults.yaml]\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "show",
+            str(system_path),
+            "--json",
+            "--resolution",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    payload = json.loads(
+        result.stdout
+    )
+
+    assert payload["system"]["apiVersion"] == "nodrix.system/v1"
+    assert payload["system"]["name"] == "resolved"
+
+    assert "imports" not in payload["system"]
+    assert "config" not in payload["system"]
+
+    resolution = payload["resolution"]
+
+    assert resolution["source"] == str(
+        system_path.resolve()
+    )
+    assert resolution["moduleSources"] == [
+        str(module.resolve())
+    ]
+    assert resolution["configSources"] == [
+        str(config_file.resolve())
+    ]
+    assert resolution["configProvenance"][
+        "runtime.threads"
+    ] == str(config_file.resolve())
+
+
+def test_system_show_default_json_contract_remains_canonical(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "system.yaml"
+
+    dump_system(
+        SystemModel(name="canonical"),
+        path,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "show",
+            str(path),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    payload = json.loads(
+        result.stdout
+    )
+
+    assert payload["name"] == "canonical"
+    assert "system" not in payload
+    assert "resolution" not in payload
+
+
+def test_system_show_resolution_renders_authoring_sources(
+    tmp_path: Path,
+) -> None:
+    modules = tmp_path / "modules"
+    config = tmp_path / "config"
+    modules.mkdir()
+    config.mkdir()
+
+    (modules / "mapping.yaml").write_text(
+        "schema: nodrix.system-module/v1\n"
+        "applications: []\n",
+        encoding="utf-8",
+    )
+
+    (config / "defaults.yaml").write_text(
+        "mapping:\n"
+        "  voxel_size_m: 0.1\n",
+        encoding="utf-8",
+    )
+
+    system_path = tmp_path / "system.yaml"
+    system_path.write_text(
+        "apiVersion: nodrix.system/v1\n"
+        "kind: System\n"
+        "name: resolved\n"
+        "imports: [modules/mapping.yaml]\n"
+        "config: [config/defaults.yaml]\n"
+        "metadata:\n"
+        '  voxel: "${config.mapping.voxel_size_m}"\n',
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "show",
+            str(system_path),
+            "--resolution",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Resolution" in result.output
+    assert "SYSTEM" in result.output
+    assert "MODULE" in result.output
+    assert "CONFIG" in result.output
+    assert "modules/mapping.yaml" in result.output
+    assert "config/defaults.yaml" in result.output
+    assert "mapping.voxel_size_m" in result.output
+
+
+def test_system_show_document_rejects_resolution(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "system.yaml"
+
+    dump_system(
+        SystemModel(name="canonical"),
+        path,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "show",
+            str(path),
+            "--document",
+            "--resolution",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "cannot be combined" in result.output
