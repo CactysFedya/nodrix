@@ -533,10 +533,26 @@ def system_plan(
             if effective_project is not None
             else None
         )
+        child_definitions = dict(
+            details.resolution.child_system_definitions
+        )
+
+        def resolve_child_system(
+            revision,
+        ):
+            return child_definitions.get(
+                revision.canonical
+            )
+
         plan = plan_system(
             system,
             catalog=catalog,
             execution_context=execution_context,
+            system_resolver=(
+                resolve_child_system
+                if system.systems
+                else None
+            ),
         )
     except Exception as exc:
         if json_output:

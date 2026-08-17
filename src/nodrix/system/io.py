@@ -68,6 +68,9 @@ class SystemResolutionDetails:
     sources: tuple[Path, ...] = ()
     module_sources: tuple[Path, ...] = ()
     child_system_sources: tuple[Path, ...] = ()
+    child_system_definitions: dict[str, SystemModel] = field(
+        default_factory=dict
+    )
     config_sources: tuple[Path, ...] = ()
     config_overlay_sources: tuple[Path, ...] = ()
     config_provenance: dict[str, Path] = field(
@@ -282,7 +285,11 @@ def _resolve_child_system_references(
     source: Path | None,
     stack: tuple[Path, ...],
     child_system_resolver: Callable[[str], Path] | None,
-) -> tuple[Any, tuple[Path, ...]]:
+) -> tuple[
+    Any,
+    tuple[Path, ...],
+    dict[str, SystemModel],
+]:
     """Resolve authoring child-System paths to immutable RevisionRefs.
 
     Child paths are source syntax only. The returned document contains no child
@@ -291,21 +298,25 @@ def _resolve_child_system_references(
     """
 
     if not isinstance(raw, Mapping):
-        return raw, ()
+        return raw, (), {}
 
     document = deepcopy(dict(raw))
     systems = document.get("systems")
 
     if systems is None:
-        return document, ()
+        return document, (), {}
 
     if not isinstance(systems, (list, tuple)):
         # Preserve normal Pydantic/System format diagnostics for malformed
         # canonical structure.
-        return document, ()
+        return document, (), {}
 
     resolved_items: list[Any] = []
     child_sources: list[Path] = []
+    child_definitions: dict[
+        str,
+        SystemModel,
+    ] = {}
 
     for index, raw_item in enumerate(systems):
         if not isinstance(raw_item, Mapping):
@@ -422,6 +433,14 @@ def _resolve_child_system_references(
         item["uses"] = revision.canonical
         resolved_items.append(item)
 
+        child_definitions[
+            revision.canonical
+        ] = child.system
+
+        child_definitions.update(
+            child.resolution.child_system_definitions
+        )
+
         child_sources.append(
             child.path
         )
@@ -434,6 +453,7 @@ def _resolve_child_system_references(
     return (
         document,
         _unique_paths(child_sources),
+        child_definitions,
     )
 
 
@@ -462,7 +482,7 @@ def loads_system(
         raw,
         config_overlays=config_overlays,
     )
-    document, _child_sources = (
+    document, _child_sources, _child_definitions = (
         _resolve_child_system_references(
             resolved.document,
             source=None,
@@ -541,7 +561,11 @@ def _load_system_details_internal(
         config_overlays=config_overlays,
     )
 
-    document, child_system_sources = (
+    (
+        document,
+        child_system_sources,
+        child_system_definitions,
+    ) = (
         _resolve_child_system_references(
             resolved.document,
             source=system_path,
@@ -570,6 +594,9 @@ def _load_system_details_internal(
             sources=resolved.sources,
             module_sources=resolved.module_sources,
             child_system_sources=child_system_sources,
+            child_system_definitions=dict(
+                child_system_definitions
+            ),
             config_sources=resolved.config_sources,
             config_overlay_sources=(
                 resolved.config_overlay_sources
