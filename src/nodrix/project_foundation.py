@@ -19,8 +19,19 @@ _RESOURCE_SECTIONS = {
     "workflow": ("workflows", "workflows"),
     "environment": ("environments", "environments"),
     "profile": ("profiles", "profiles"),
+    # Compatibility-only registration used by existing project manifests.
+    # Local SDK source modules live in components/*.py and are not project
+    # resources of kind Component.
     "component": ("components", "components"),
 }
+
+_PUBLIC_RESOURCE_KINDS = (
+    "system",
+    "pipeline",
+    "workflow",
+    "environment",
+    "profile",
+)
 
 
 @dataclass(frozen=True)
@@ -141,7 +152,6 @@ def create_progressive_project(
         "systems": {},
         "pipelines": {},
         "workflows": {},
-        "components": {},
         "contexts": {},
         "environments": {},
         "profiles": {},
@@ -267,16 +277,6 @@ def _profile_document(name: str) -> dict[str, Any]:
     }
 
 
-def _component_document(name: str) -> dict[str, Any]:
-    return {
-        "schema": "nodrix.component/v1",
-        "name": name,
-        "lifecycle": "managed",
-        "provider": "process",
-        "configuration": {},
-    }
-
-
 def _resource_document(
     kind: str,
     name: str,
@@ -298,10 +298,6 @@ def _resource_document(
         if template not in {None, "empty"}:
             raise ValueError("Profile currently supports only the empty template")
         return _profile_document(name)
-    if kind == "component":
-        if template not in {None, "empty"}:
-            raise ValueError("Component currently supports only the empty template")
-        return _component_document(name)
     available = ", ".join(sorted(_RESOURCE_SECTIONS))
     raise ValueError(f"Unknown resource kind {kind!r}; choose: {available}")
 
@@ -556,8 +552,15 @@ def add_project_resource(
 ) -> ProjectResource:
     normalized_kind = kind.strip().lower().replace("_", "-")
     normalized_name = name.strip()
-    if normalized_kind not in _RESOURCE_SECTIONS:
-        available = ", ".join(sorted(_RESOURCE_SECTIONS))
+
+    if normalized_kind == "component":
+        raise ValueError(
+            "Standalone project Component resources are compatibility-only; "
+            "define local SDK nodes, resources, and messages in components/*.py"
+        )
+
+    if normalized_kind not in _PUBLIC_RESOURCE_KINDS:
+        available = ", ".join(_PUBLIC_RESOURCE_KINDS)
         raise ValueError(
             f"Unknown resource kind {normalized_kind!r}; choose: {available}"
         )
@@ -640,10 +643,24 @@ def list_project_resources(
             raise ValueError(f"Unknown resource kind {normalized!r}; choose: {available}")
         section = _RESOURCE_SECTIONS[normalized][0]
         return {normalized: dict(config.get(section) or {})}
-    return {
-        resource_kind: dict(config.get(section) or {})
-        for resource_kind, (section, _) in _RESOURCE_SECTIONS.items()
+    resources = {
+        resource_kind: dict(
+            config.get(
+                _RESOURCE_SECTIONS[resource_kind][0]
+            )
+            or {}
+        )
+        for resource_kind in _PUBLIC_RESOURCE_KINDS
     }
+
+    legacy_components = dict(
+        config.get("components")
+        or {}
+    )
+    if legacy_components:
+        resources["component"] = legacy_components
+
+    return resources
 
 def resolve_project_resource(
     kind: str,

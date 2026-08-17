@@ -54,7 +54,7 @@ def project_add(
     kind: Annotated[
         str,
         typer.Argument(
-            help="system, pipeline, workflow, environment, profile, or component"
+            help="system, pipeline, workflow, environment, or profile"
         ),
     ],
     name: Annotated[str, typer.Argument()],
