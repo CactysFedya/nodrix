@@ -21,7 +21,10 @@ from .workflow_planning import WorkflowPlanResult, plan_workflow
 
 
 project_app = typer.Typer(
-    help="Create a project progressively and add resources only when needed."
+    help=(
+        "Create and evolve a Nodrix project around canonical Systems "
+        "and supporting resources."
+    )
 )
 workflow_app = typer.Typer(
     help="Inspect and run finite prepare, build, test and deployment workflows."
@@ -36,7 +39,7 @@ def project_init(
     directory: Annotated[Path, typer.Argument()] = Path.cwd(),
     force: Annotated[bool, typer.Option("--force")] = False,
 ) -> None:
-    """Create nodrix.yaml without eagerly creating architecture directories."""
+    """Create a minimal system-first nodrix.yaml project manifest."""
 
     try:
         created = create_progressive_project(directory, force=force)
@@ -67,11 +70,17 @@ def project_add(
     ] = None,
     make_default: Annotated[
         bool,
-        typer.Option("--default", help="Set system/pipeline/environment/profile as default"),
+        typer.Option(
+            "--default",
+            help=(
+                "Set system, environment, or profile as default; "
+                "Pipeline defaults remain available for 2.x compatibility"
+            ),
+        ),
     ] = False,
     force: Annotated[bool, typer.Option("--force")] = False,
 ) -> None:
-    """Create and register one project resource."""
+    """Create one project resource; Pipeline authoring is 2.x compatibility."""
 
     try:
         result = add_project_resource(

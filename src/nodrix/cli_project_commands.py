@@ -99,7 +99,7 @@ def init(
     elif selected:
         console.print("Run: [bold]cd %s && plyctl validate && plyctl run[/bold]" % directory)
     else:
-        console.print("Add nodes to pipeline.yaml, or create a runnable example with: "
+        console.print("For a 2.x Pipeline project, add nodes to pipeline.yaml, or create a runnable example with: "
                       f"[bold]plyctl init {directory} --template vision --force[/bold]")
 
 
@@ -205,11 +205,11 @@ def schema_command(
         typer.Option(
             "--output",
             "-o",
-            help="Destination for the canonical pipeline JSON Schema",
+            help="Destination for the 2.x Pipeline JSON Schema",
         ),
     ] = Path(".plyctl-schema.json"),
 ) -> None:
-    """Write the canonical Plyctl pipeline JSON Schema for editor tooling."""
+    """Write the 2.x Pipeline JSON Schema for compatibility editor tooling."""
 
     try:
         destination = write_manifest_schema(output)
@@ -357,7 +357,7 @@ def run(
     block_values: Annotated[list[str] | None, typer.Option("--block", help="Replace a reusable block: name=path.yaml")] = None,
     production: Annotated[bool, typer.Option("--production", help="Enforce the Manifest v2 production safety gate")] = False,
 ) -> None:
-    """Execute a pipeline with reproducibility and optional Prometheus metrics."""
+    """Execute a 2.x Pipeline with reproducibility and optional Prometheus metrics."""
     from .workspace import (
         activate_workspace_environment,
         resolve_pipeline_reference,

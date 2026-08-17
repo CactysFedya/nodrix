@@ -18,7 +18,7 @@ from .provider_cli import provider_app
 
 app = typer.Typer(
     name="plyctl",
-    help="The Pipeline OS for real-time local and distributed systems.",
+    help="Executable system architecture and operations for local and distributed systems.",
     no_args_is_help=False,
     invoke_without_command=True,
     rich_markup_mode=None,
@@ -34,9 +34,9 @@ device_app = typer.Typer(help="Inspect DLPack, DMA-BUF, V4L2, CUDA and native de
 package_app = typer.Typer(help="Build and manage local Plyctl packages.")
 plugin_app = typer.Typer(help="Search, verify, install, inspect, and remove offline plugins.")
 runs_app = typer.Typer(help="Inspect reproducible run artifacts.")
-config_app = typer.Typer(help="Inspect resolved profiles and configuration values.")
-block_app = typer.Typer(help="List and inspect reusable YAML node blocks.")
-fragment_app = typer.Typer(help="Create and validate reusable typed subgraphs.")
+config_app = typer.Typer(help="Inspect resolved runtime presets and configuration values.")
+block_app = typer.Typer(help="List and inspect reusable 2.x Pipeline YAML node blocks.")
+fragment_app = typer.Typer(help="Create and validate reusable 2.x Pipeline typed subgraphs.")
 app.add_typer(node_app, name="node")
 app.add_typer(stream_app, name="stream")
 app.add_typer(native_app, name="native")

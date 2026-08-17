@@ -180,7 +180,7 @@ def _execute_benchmark_run(
 
 @app.command()
 def benchmark(
-    pipeline: Annotated[Path | None, typer.Argument(help="Pipeline manifest; defaults to pipeline.yaml")] = None,
+    pipeline: Annotated[Path | None, typer.Argument(help="2.x Pipeline manifest; defaults to pipeline.yaml")] = None,
     spec: Annotated[Path | None, typer.Option("--spec", help="Versioned benchmark YAML specification")] = None,
     repeat: Annotated[int | None, typer.Option("--repeat", min=1)] = None,
     warmup: Annotated[int | None, typer.Option("--warmup", min=0)] = None,
@@ -339,7 +339,7 @@ def _latest_run_report(root: Path) -> Path:
 @app.command("diagnose")
 def diagnose_command(
     target: Annotated[Path | None, typer.Argument(help="Run directory, summary JSON, or pipeline")] = None,
-    run_pipeline: Annotated[bool, typer.Option("--run", help="Execute a pipeline before diagnosis")] = False,
+    run_pipeline: Annotated[bool, typer.Option("--run", help="Execute the 2.x Pipeline before diagnosis")] = False,
     output: Annotated[Path | None, typer.Option("--output", "-o")] = None,
     json_output: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
