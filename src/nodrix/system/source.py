@@ -251,6 +251,115 @@ def _resolve_module(
     )
 
 
+_CONFIG_REFERENCE_PREFIX = "${config."
+
+
+def _config_reference_path(
+    value: str,
+) -> str | None:
+    """Return the dotted path for one exact Config reference."""
+
+    if not value.startswith(_CONFIG_REFERENCE_PREFIX):
+        return None
+
+    if not value.endswith("}"):
+        return None
+
+    path = value[
+        len(_CONFIG_REFERENCE_PREFIX):-1
+    ]
+
+    if (
+        not path
+        or any(
+            not part
+            for part in path.split(".")
+        )
+    ):
+        raise SystemSourceError(
+            f"Invalid System Config reference: {value!r}"
+        )
+
+    return path
+
+
+def _lookup_config_value(
+    config: Mapping[str, Any],
+    path: str,
+    *,
+    location: str,
+) -> Any:
+    """Resolve one dotted path from semantic System Config."""
+
+    current: Any = config
+
+    for part in path.split("."):
+        if (
+            not isinstance(current, Mapping)
+            or part not in current
+        ):
+            raise SystemSourceError(
+                f"Unknown System Config path {path!r} "
+                f"referenced at {location}"
+            )
+
+        current = current[part]
+
+    return deepcopy(current)
+
+
+def _bind_config_references(
+    value: Any,
+    *,
+    config: Mapping[str, Any],
+    location: str = "$",
+) -> Any:
+    """Replace exact ``${config.*}`` references with typed values."""
+
+    if isinstance(value, str):
+        path = _config_reference_path(
+            value
+        )
+
+        if path is not None:
+            return _lookup_config_value(
+                config,
+                path,
+                location=location,
+            )
+
+        if _CONFIG_REFERENCE_PREFIX in value:
+            raise SystemSourceError(
+                "Embedded System Config interpolation is not supported "
+                f"at {location}: {value!r}; "
+                "use one exact ${config.path} reference"
+            )
+
+        return value
+
+    if isinstance(value, Mapping):
+        return {
+            key: _bind_config_references(
+                item,
+                config=config,
+                location=f"{location}.{key}",
+            )
+            for key, item in value.items()
+        }
+
+    if isinstance(value, list):
+        return [
+            _bind_config_references(
+                item,
+                config=config,
+                location=f"{location}[{index}]",
+            )
+            for index, item in enumerate(value)
+        ]
+
+    return deepcopy(value)
+
+
 def resolve_system_source_document(
     raw: Any,
     *,
@@ -258,10 +367,12 @@ def resolve_system_source_document(
 ) -> SystemSourceResolution:
     """Resolve one human-facing System Source.
 
-    ``imports`` composes ``nodrix.system-module/v1`` structural modules.
-    ``config`` remains reserved for a later 2.17 milestone.
+    ``imports`` composes structural ``nodrix.system-module/v1`` documents.
+    ``config`` resolves ordered semantic Config files.
 
-    All authoring fields disappear before SystemModel validation.
+    Exact ``${config.path}`` references are replaced with their original typed
+    values after structural composition. Authoring-only fields disappear before
+    canonical SystemModel validation.
     """
 
     source_path = (
@@ -285,60 +396,63 @@ def resolve_system_source_document(
         dict(raw)
     )
 
-    if "config" in source_document:
-        raise SystemSourceError(
-            "System authoring field is reserved "
-            "but not enabled yet: config"
-        )
-
     imports_value = source_document.pop(
         "imports",
         None,
     )
 
-    if imports_value is None:
-        return SystemSourceResolution(
-            document=source_document,
-            source=source_path,
-            sources=(
-                (source_path,)
-                if source_path is not None
-                else ()
-            ),
-        )
-
-    if source_path is None:
-        raise SystemSourceError(
-            "System imports require a file-backed source "
-            "so relative Module paths can be resolved"
-        )
-
-    imports = _resolve_import_paths(
-        imports_value,
-        base_dir=source_path.parent,
-        owner=source_path,
+    config_value = source_document.pop(
+        "config",
+        None,
     )
 
+    if (
+        source_path is None
+        and (
+            imports_value is not None
+            or config_value is not None
+        )
+    ):
+        raise SystemSourceError(
+            "System imports/config require a file-backed source "
+            "so relative paths can be resolved"
+        )
+
     resolved: dict[str, Any] = {}
-    sources: list[Path] = [source_path]
-    seen: set[Path] = set()
 
-    for imported in imports:
-        module, module_sources = _resolve_module(
-            imported,
-            stack=(source_path,),
-            seen=seen,
+    sources: list[Path] = (
+        [source_path]
+        if source_path is not None
+        else []
+    )
+
+    if imports_value is not None:
+        assert source_path is not None
+
+        imports = _resolve_import_paths(
+            imports_value,
+            base_dir=source_path.parent,
+            owner=source_path,
         )
 
-        _merge_structure(
-            resolved,
-            module,
-            owner=str(imported),
-        )
+        seen: set[Path] = set()
 
-        sources.extend(
-            module_sources
-        )
+        for imported in imports:
+            module, module_sources = _resolve_module(
+                imported,
+                stack=(source_path,),
+                seen=seen,
+            )
+
+            _merge_structure(
+                resolved,
+                module,
+                owner=str(imported),
+            )
+
+            sources.extend(
+                module_sources
+            )
 
     root_structure = {
         field: source_document.pop(field)
@@ -353,7 +467,29 @@ def resolve_system_source_document(
     _merge_structure(
         resolved,
         root_structure,
-        owner=str(source_path),
+        owner=(
+            str(source_path)
+            if source_path is not None
+            else "<memory>"
+        ),
+    )
+
+    config_resolution = resolve_system_config(
+        config_value,
+        base_dir=(
+            source_path.parent
+            if source_path is not None
+            else None
+        ),
+    )
+
+    resolved = _bind_config_references(
+        resolved,
+        config=config_resolution.config,
+    )
+
+    sources.extend(
+        config_resolution.sources
     )
 
     return SystemSourceResolution(

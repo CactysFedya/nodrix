@@ -276,9 +276,14 @@ def test_module_layout_does_not_change_semantic_revision(
     )
 
 
-def test_config_remains_reserved(
+def test_config_is_authoring_only(
     tmp_path: Path,
 ) -> None:
+    _write(
+        tmp_path / "config/defaults.yaml",
+        "{}\n",
+    )
+
     system_path = _write(
         tmp_path / "system.yaml",
         "apiVersion: nodrix.system/v1\n"
@@ -288,11 +293,12 @@ def test_config_remains_reserved(
         "  - config/defaults.yaml\n",
     )
 
-    with pytest.raises(
-        SystemSourceError,
-        match="reserved",
-    ):
-        load_system(system_path)
+    system = load_system(
+        system_path
+    )
+
+    assert system.name == "robot"
+    assert "config" not in SystemModel.model_fields
 
 
 def test_authoring_fields_are_not_system_model_fields() -> None:
