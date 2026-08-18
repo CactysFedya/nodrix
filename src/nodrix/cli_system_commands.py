@@ -19,6 +19,7 @@ from .presentation import (
     render_system_execution_status,
     render_system_plan as render_system_plan_view,
     render_validation,
+    system_execution_status_fingerprint,
 )
 from .project_foundation import resolve_project_resource
 from .project_system import (
@@ -955,16 +956,22 @@ def system_run(
             f"systems={len(handle.systems)}"
         )
 
-        previous_state = None
+        previous_snapshot = None
 
         while True:
             status = orchestrator.inspect(
                 handle
             )
 
+            snapshot = (
+                system_execution_status_fingerprint(
+                    status
+                )
+            )
+
             if (
-                status.state
-                is not previous_state
+                snapshot
+                != previous_snapshot
             ):
                 console.print(
                     render_system_execution_status(
@@ -972,8 +979,8 @@ def system_run(
                         status,
                     )
                 )
-                previous_state = (
-                    status.state
+                previous_snapshot = (
+                    snapshot
                 )
 
             if status.terminal:

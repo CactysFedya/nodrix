@@ -13,6 +13,7 @@ from nodrix.presentation import (
     render_status,
     render_system_execution_status,
     render_system_plan,
+    system_execution_status_fingerprint,
     render_top_view,
 )
 from nodrix.workspace import create_workspace, default_view, set_active_context
@@ -571,4 +572,106 @@ def test_system_execution_status_renders_leaf_failure_reason_once() -> None:
             "with code 1"
         )
         == 1
+    )
+
+
+def test_system_execution_fingerprint_detects_nested_visible_change() -> None:
+    child_running = _system_status(
+        "running",
+        execution_id="system-child",
+        scopes=(
+            _scope_status(
+                "pi5:local",
+                "running",
+            ),
+        ),
+    )
+
+    child_completed = _system_status(
+        "completed",
+        execution_id="system-child",
+        scopes=(
+            _scope_status(
+                "pi5:local",
+                "completed",
+            ),
+        ),
+    )
+
+    first = _system_status(
+        "running",
+        execution_id="system-root",
+        systems=(
+            _child_system_status(
+                "lidar",
+                "livox-mid360",
+                child_running,
+            ),
+        ),
+    )
+
+    second = _system_status(
+        "running",
+        execution_id="system-root",
+        systems=(
+            _child_system_status(
+                "lidar",
+                "livox-mid360",
+                child_completed,
+            ),
+        ),
+    )
+
+    assert first.state.value == "running"
+    assert second.state.value == "running"
+
+    assert (
+        system_execution_status_fingerprint(
+            first
+        )
+        != system_execution_status_fingerprint(
+            second
+        )
+    )
+
+
+def test_system_execution_fingerprint_ignores_dynamic_details() -> None:
+    first = _system_status(
+        "running",
+        execution_id="system-root",
+        scopes=(
+            _scope_status(
+                "pi5:local",
+                "running",
+            ),
+        ),
+    )
+
+    second = _system_status(
+        "running",
+        execution_id="system-root",
+        scopes=(
+            _scope_status(
+                "pi5:local",
+                "running",
+            ),
+        ),
+    )
+
+    first.details = {
+        "poll": 1,
+        "cpu_percent": 10.0,
+    }
+    second.details = {
+        "poll": 2,
+        "cpu_percent": 99.0,
+    }
+
+    assert (
+        system_execution_status_fingerprint(
+            first
+        )
+        == system_execution_status_fingerprint(
+            second
+        )
     )

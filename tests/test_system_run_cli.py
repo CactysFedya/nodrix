@@ -788,3 +788,142 @@ def test_system_run_executes_child_system_standalone(
         .system
         == "livox-mid360"
     )
+
+
+def test_system_run_renders_scope_transition_while_parent_stays_running(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "transition.yaml"
+
+    dump_system(
+        SystemModel(
+            name="transition-run",
+            targets=(
+                Target(
+                    name="robot",
+                    kind="host",
+                    properties={
+                        "backend": "local",
+                    },
+                ),
+                Target(
+                    name="workstation",
+                    kind="host",
+                    properties={
+                        "backend": "local",
+                    },
+                ),
+            ),
+            graphs=(
+                Graph(
+                    name="robot_graph",
+                    nodes=(
+                        NodeInstance(
+                            name="robot_worker",
+                            uses="demo.worker",
+                            target="robot",
+                        ),
+                    ),
+                ),
+                Graph(
+                    name="workstation_graph",
+                    nodes=(
+                        NodeInstance(
+                            name="workstation_worker",
+                            uses="demo.worker",
+                            target="workstation",
+                        ),
+                    ),
+                ),
+            ),
+        ),
+        path,
+    )
+
+    FakeLocalBackend.reset()
+
+    # inspect #1
+    #   robot       RUNNING
+    #   workstation RUNNING
+    #
+    # inspect #2
+    #   robot       COMPLETED
+    #   workstation RUNNING
+    #
+    # Parent remains RUNNING here.
+    #
+    # inspect #3
+    #   robot       COMPLETED
+    #   workstation COMPLETED
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.RUNNING
+        ),
+        _status(
+            BackendExecutionState.RUNNING
+        ),
+        _status(
+            BackendExecutionState.COMPLETED
+        ),
+        _status(
+            BackendExecutionState.RUNNING
+        ),
+        _status(
+            BackendExecutionState.COMPLETED
+        ),
+        _status(
+            BackendExecutionState.COMPLETED
+        ),
+    ]
+
+    monkeypatch.setattr(
+        system_cli,
+        "LocalBackend",
+        FakeLocalBackend,
+    )
+    monkeypatch.setattr(
+        system_cli.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "run",
+            str(path),
+        ],
+    )
+
+    assert (
+        result.exit_code == 0
+    ), result.output
+
+    output = _plain(
+        result.output
+    )
+
+    assert (
+        len(
+            FakeLocalBackend.instances
+        )
+        == 2
+    )
+
+    # Three visible tree snapshots must be rendered:
+    # initial RUNNING, nested transition while the parent
+    # remains RUNNING, and final COMPLETED.
+    assert (
+        output.count(
+            "robot:local"
+        )
+        == 3
+    )
+    assert (
+        output.count(
+            "workstation:local"
+        )
+        == 3
+    )

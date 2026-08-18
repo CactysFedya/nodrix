@@ -1149,6 +1149,94 @@ def _execution_has_failed_child(status: Any) -> bool:
     return False
 
 
+
+def system_execution_status_fingerprint(
+    status: Any,
+) -> tuple[Any, ...]:
+    """Return the presentation-relevant identity of an execution snapshot.
+
+    Dynamic backend details are intentionally excluded. The fingerprint changes
+    only when information visible in the human execution tree changes.
+    """
+
+    scopes = tuple(
+        (
+            str(item.scope.id),
+            str(item.status.backend),
+            str(item.status.execution_id),
+            _execution_state_value(
+                item.status.state
+            ),
+            item.status.message,
+        )
+        for item in getattr(
+            status,
+            "scopes",
+            (),
+        )
+    )
+
+    systems = []
+
+    for child in getattr(
+        status,
+        "systems",
+        (),
+    ):
+        child_plan = getattr(
+            getattr(
+                child,
+                "instance",
+                None,
+            ),
+            "plan",
+            None,
+        )
+
+        definition = (
+            getattr(
+                child_plan,
+                "system",
+                None,
+            )
+            if child_plan is not None
+            else None
+        )
+
+        systems.append(
+            (
+                str(child.name),
+                (
+                    str(definition)
+                    if definition is not None
+                    else None
+                ),
+                system_execution_status_fingerprint(
+                    child.status
+                ),
+            )
+        )
+
+    return (
+        str(
+            getattr(
+                status,
+                "execution_id",
+                "",
+            )
+        ),
+        _execution_state_value(
+            status.state
+        ),
+        getattr(
+            status,
+            "message",
+            None,
+        ),
+        scopes,
+        tuple(systems),
+    )
+
 def render_system_execution_status(
     system_name: str,
     status: Any,
