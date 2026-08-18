@@ -19,6 +19,7 @@ from ..errors import NodrixError
 SYSTEM_MODULE_SCHEMA = "nodrix.system-module/v1"
 
 _SYSTEM_STRUCTURE_FIELDS = (
+    "dependencies",
     "resources",
     "applications",
     "graphs",

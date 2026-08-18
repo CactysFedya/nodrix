@@ -282,3 +282,29 @@ def test_execution_event_rejects_naive_timestamp() -> None:
                 30,
             ),
         )
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [
+        ExecutionEventKind.CHILD_STARTED,
+        ExecutionEventKind.DEPENDENCY_WAITING,
+        ExecutionEventKind.DEPENDENCY_SATISFIED,
+        ExecutionEventKind.DEPENDENCY_FAILED,
+    ],
+)
+def test_startup_execution_events_require_execution_id(
+    kind: ExecutionEventKind,
+) -> None:
+    with pytest.raises(ValueError, match="execution_id"):
+        ExecutionEvent(
+            event=kind,
+            system="rpi5-mapping",
+        )
+
+    event = ExecutionEvent(
+        event=kind,
+        system="rpi5-mapping",
+        execution_id="system-001",
+    )
+    assert event.to_dict()["event"] == kind.value

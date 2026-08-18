@@ -56,6 +56,15 @@ def system_plan_digest(
             None,
         )
 
+    # Preserve pre-2.20 Plan identity when no sibling startup topology exists.
+    if document.get(
+        "system_startup"
+    ) is None:
+        document.pop(
+            "system_startup",
+            None,
+        )
+
     encoded = json.dumps(
         document,
         ensure_ascii=False,

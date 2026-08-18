@@ -16,6 +16,9 @@ from ..model import RevisionRef
 
 from ._base import SystemBaseModel
 from .catalog import DefinitionCatalog
+from .dependencies import (
+    SystemDependencyCondition,
+)
 from .definition import system_definition_digest
 from .graph import split_local_endpoint, split_system_endpoint
 from .model import SystemModel
@@ -177,6 +180,24 @@ class PlannedSystemInstance(SystemBaseModel):
     plan: "SystemExecutionPlan"
 
 
+class PlannedSystemDependency(SystemBaseModel):
+    """One validated sibling startup edge copied into the execution plan."""
+
+    ordinal: int
+    system: str
+    requires: str
+    condition: SystemDependencyCondition
+    timeout_seconds: float
+
+
+class PlannedSystemStartup(SystemBaseModel):
+    """Deterministic startup topology compiled once by the planner."""
+
+    dependencies: tuple[PlannedSystemDependency, ...]
+    order: tuple[str, ...]
+    roots: tuple[str, ...]
+
+
 class SystemExecutionPlan(SystemBaseModel):
     """Resolved system topology consumed by future execution backends."""
 
@@ -188,6 +209,7 @@ class SystemExecutionPlan(SystemBaseModel):
     system_sha256: str
     execution_context_sha256: str | None = None
     systems: tuple[PlannedSystemInstance, ...] = ()
+    system_startup: PlannedSystemStartup | None = None
     targets: tuple[PlannedTarget, ...] = ()
     resources: tuple[PlannedResource, ...] = ()
     resource_order: tuple[str, ...] = ()
@@ -369,6 +391,59 @@ def plan_system(
     _raise_validation_errors(validation)
 
     diagnostics = _validation_diagnostics(validation)
+
+    planned_system_startup: PlannedSystemStartup | None = None
+
+    if system.dependencies:
+        dependency_edges = [
+            (
+                dependency.requires,
+                dependency.system,
+            )
+            for dependency in system.dependencies
+        ]
+        system_order, systems_acyclic = _topological_order(
+            [
+                instance.name
+                for instance in system.systems
+            ],
+            dependency_edges,
+        )
+
+        if not systems_acyclic:
+            raise SystemPlanningError(
+                "PLAN406",
+                "dependencies",
+                "System dependency graph contains a cycle",
+            )
+
+        dependent_names = {
+            dependency.system
+            for dependency in system.dependencies
+        }
+
+        planned_system_startup = PlannedSystemStartup(
+            dependencies=tuple(
+                PlannedSystemDependency(
+                    ordinal=index,
+                    system=dependency.system,
+                    requires=dependency.requires,
+                    condition=dependency.condition,
+                    timeout_seconds=(
+                        dependency.timeout_seconds
+                    ),
+                )
+                for index, dependency in enumerate(
+                    system.dependencies
+                )
+            ),
+            order=system_order,
+            roots=tuple(
+                instance.name
+                for instance in system.systems
+                if instance.name not in dependent_names
+            ),
+        )
 
     planned_systems_list: list[
         PlannedSystemInstance
@@ -825,6 +900,7 @@ def plan_system(
             else None
         ),
         systems=planned_systems,
+        system_startup=planned_system_startup,
         targets=planned_targets,
         resources=planned_resources,
         resource_order=resource_order,
@@ -846,6 +922,15 @@ def plan_system(
             "connections": sum(len(graph.connections) for graph in graphs_tuple),
             "links": len(links_tuple),
             "artifacts": len(artifacts_tuple),
+            **(
+                {
+                    "dependencies": len(
+                        planned_system_startup.dependencies
+                    ),
+                }
+                if planned_system_startup is not None
+                else {}
+            ),
         },
     )
 
@@ -861,6 +946,8 @@ __all__ = [
     "PlannedNode",
     "PlannedResource",
     "PlannedSystemInstance",
+    "PlannedSystemDependency",
+    "PlannedSystemStartup",
     "PlannedTarget",
     "PlanningDiagnostic",
     "SystemDefinitionResolver",

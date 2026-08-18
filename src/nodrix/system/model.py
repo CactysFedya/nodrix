@@ -11,6 +11,7 @@ from .contracts import (
     SystemBoundaryBindings,
     SystemPort,
 )
+from .dependencies import SystemDependency
 from .graph import Graph, SystemLink
 from .instances import (
     ApplicationInstance,
@@ -46,6 +47,7 @@ class SystemModel(SystemBaseModel):
         default_factory=SystemBoundaryBindings
     )
     systems: tuple[SystemInstance, ...] = ()
+    dependencies: tuple[SystemDependency, ...] = ()
     resources: tuple[ResourceInstance, ...] = ()
     applications: tuple[ApplicationInstance, ...] = ()
     graphs: tuple[Graph, ...] = ()

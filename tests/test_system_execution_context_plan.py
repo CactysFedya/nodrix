@@ -209,6 +209,10 @@ def test_no_context_preserves_legacy_plan_digest_shape() -> None:
         "execution_context_sha256",
         None,
     )
+    legacy_document.pop(
+        "system_startup",
+        None,
+    )
 
     encoded = json.dumps(
         legacy_document,

@@ -113,9 +113,12 @@ monitoring. Standard output contains exactly one compact JSON object per line.
 Human diagnostics and planner warnings are written to standard error.
 
 Every event identifies itself with `apiVersion: nodrix.execution.event/v1` and
-`kind: ExecutionEvent`. The stream uses `prepared`, `started`, `snapshot`,
-`stopping`, `finished`, and `error` events. Snapshot events are emitted only
-when presentation-relevant lifecycle or observation data changes.
+`kind: ExecutionEvent`. The stream uses `prepared`, `child_started`,
+`dependency_waiting`, `dependency_satisfied`, `dependency_failed`, `started`,
+`snapshot`, `stopping`, `finished`, and `error` events. Dependency events make
+bounded readiness waits observable before the complete System reaches
+`started`. Snapshot events are emitted only when presentation-relevant
+lifecycle or observation data changes.
 
 The `status` field contains the complete System hierarchy, including child
 instance and resolved definition identities, execution scopes, readiness,

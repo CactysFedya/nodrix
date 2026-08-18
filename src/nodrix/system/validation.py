@@ -324,6 +324,7 @@ def validate_system(
             )
 
     target_names = {item.name for item in system.targets}
+    system_names = {item.name for item in system.systems}
     resource_names = {item.name for item in system.resources}
     resource_map = {item.name: item for item in system.resources}
     application_names = {item.name for item in system.applications}
@@ -336,6 +337,64 @@ def validate_system(
         item.name: item
         for item in system.outputs
     }
+
+    dependency_edges: set[tuple[str, str]] = set()
+
+    for index, dependency in enumerate(
+        system.dependencies
+    ):
+        path = f"dependencies[{index}]"
+        edge = (
+            dependency.system,
+            dependency.requires,
+        )
+
+        if dependency.system not in system_names:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS061",
+                    f"{path}.system",
+                    "dependency target must name a sibling SystemInstance: "
+                    f"unknown SystemInstance {dependency.system!r}",
+                )
+            )
+
+        if dependency.requires not in system_names:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS062",
+                    f"{path}.requires",
+                    "dependency prerequisite must name a sibling "
+                    f"SystemInstance: unknown SystemInstance "
+                    f"{dependency.requires!r}",
+                )
+            )
+
+        if dependency.system == dependency.requires:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS063",
+                    path,
+                    "SystemInstance cannot depend on itself",
+                )
+            )
+
+        if edge in dependency_edges:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS064",
+                    path,
+                    "duplicate System dependency edge: "
+                    f"{dependency.system!r} requires "
+                    f"{dependency.requires!r}",
+                )
+            )
+
+        dependency_edges.add(edge)
     input_ports = {
         item.name: item
         for item in system.inputs

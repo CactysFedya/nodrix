@@ -828,6 +828,8 @@ class LocalBackend(ExecutionBackend):
                         "resources",
                         "applications",
                         "system_links",
+                        "readiness",
+                        "health",
                     }
                 ),
             ),

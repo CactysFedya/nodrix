@@ -32,6 +32,10 @@ from .contracts import (
     SystemPort,
     SystemPortBinding,
 )
+from .dependencies import (
+    SystemDependency,
+    SystemDependencyCondition,
+)
 from .graph import (
     Connection,
     Graph,
@@ -86,6 +90,8 @@ from .orchestration import (
     SystemExecutionHandle,
     SystemExecutionStatus,
     SystemOrchestrator,
+    SystemStartupEvent,
+    SystemStartupEventKind,
     backend_context_for_scope,
     plan_execution_scopes,
 )
@@ -106,7 +112,9 @@ from .planning import (
     PlannedLink,
     PlannedNode,
     PlannedResource,
+    PlannedSystemDependency,
     PlannedSystemInstance,
+    PlannedSystemStartup,
     PlannedTarget,
     PlanningDiagnostic,
     SystemDefinitionResolver,
@@ -190,9 +198,13 @@ __all__ = [
     "SystemExecutionHandle",
     "SystemExecutionStatus",
     "SystemOrchestrator",
+    "SystemStartupEvent",
+    "SystemStartupEventKind",
     "backend_context_for_scope",
     "plan_execution_scopes",
     "SystemDiagnostic",
+    "SystemDependency",
+    "SystemDependencyCondition",
     "SystemLink",
     "SystemInstance",
     "SystemBoundaryBindings",
@@ -207,7 +219,9 @@ __all__ = [
     "PlannedLink",
     "PlannedNode",
     "PlannedResource",
+    "PlannedSystemDependency",
     "PlannedSystemInstance",
+    "PlannedSystemStartup",
     "PlannedTarget",
     "PlanningDiagnostic",
     "SystemDefinitionResolver",

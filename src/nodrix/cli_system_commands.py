@@ -38,6 +38,8 @@ from .system import (
     ExecutionEvent,
     ExecutionEventKind,
     LocalBackend,
+    SystemStartupEvent,
+    SystemStartupEventKind,
     SystemOrchestrator,
     dump_system,
     dump_system_schema,
@@ -750,6 +752,79 @@ def _emit_system_execution_event(
     )
 
 
+def _emit_system_startup_event(
+    event: SystemStartupEvent,
+    *,
+    jsonl: bool,
+) -> None:
+    if jsonl:
+        event_kind = {
+            SystemStartupEventKind.CHILD_STARTED: (
+                ExecutionEventKind.CHILD_STARTED
+            ),
+            SystemStartupEventKind.DEPENDENCY_WAITING: (
+                ExecutionEventKind.DEPENDENCY_WAITING
+            ),
+            SystemStartupEventKind.DEPENDENCY_SATISFIED: (
+                ExecutionEventKind.DEPENDENCY_SATISFIED
+            ),
+            SystemStartupEventKind.DEPENDENCY_FAILED: (
+                ExecutionEventKind.DEPENDENCY_FAILED
+            ),
+        }[event.event]
+        details: dict[str, object] = {
+            "child": event.child,
+            "childExecutionId": event.child_execution_id,
+            "dependencyOrdinal": event.dependency_ordinal,
+            "requires": event.requires,
+            "condition": (
+                event.condition.value
+                if event.condition is not None
+                else None
+            ),
+            "timeoutSeconds": event.timeout_seconds,
+            "elapsedSeconds": event.elapsed_seconds,
+        }
+        _emit_system_execution_event(
+            event=event_kind,
+            system=event.system,
+            execution_id=event.execution_id,
+            message=event.message,
+            details=details,
+        )
+        return
+
+    path = f"{event.system}.{event.child}"
+    if event.event is SystemStartupEventKind.CHILD_STARTED:
+        console.print(
+            "[green]CHILD STARTED[/green] "
+            f"[bold]{path}[/bold] · {event.child_execution_id}"
+        )
+        return
+
+    dependency = (
+        f"{path} <- {event.requires} · "
+        f"condition={event.condition.value} · "
+        f"elapsed={event.elapsed_seconds:g}s/"
+        f"{event.timeout_seconds:g}s"
+    )
+    if event.event is SystemStartupEventKind.DEPENDENCY_WAITING:
+        console.print(
+            "[yellow]DEPENDENCY WAITING[/yellow] "
+            f"{dependency}"
+        )
+    elif event.event is SystemStartupEventKind.DEPENDENCY_SATISFIED:
+        console.print(
+            "[green]DEPENDENCY SATISFIED[/green] "
+            f"{dependency}"
+        )
+    else:
+        console.print(
+            "[red]DEPENDENCY FAILED[/red] "
+            f"{dependency} · {event.message}"
+        )
+
+
 @system_app.command("run")
 def system_run(
     path: Annotated[
@@ -1098,6 +1173,12 @@ def system_run(
             prepared,
             rollback_timeout_seconds=(
                 stop_timeout
+            ),
+            startup_event_sink=(
+                lambda event: _emit_system_startup_event(
+                    event,
+                    jsonl=jsonl,
+                )
             ),
         )
 

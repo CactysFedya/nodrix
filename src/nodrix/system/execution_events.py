@@ -32,6 +32,10 @@ class ExecutionEventKind(StrEnum):
 
     PREPARED = "prepared"
     STARTED = "started"
+    CHILD_STARTED = "child_started"
+    DEPENDENCY_WAITING = "dependency_waiting"
+    DEPENDENCY_SATISFIED = "dependency_satisfied"
+    DEPENDENCY_FAILED = "dependency_failed"
     SNAPSHOT = "snapshot"
     STOPPING = "stopping"
     FINISHED = "finished"
@@ -395,6 +399,10 @@ class ExecutionEvent:
             self.event
             in {
                 ExecutionEventKind.STARTED,
+                ExecutionEventKind.CHILD_STARTED,
+                ExecutionEventKind.DEPENDENCY_WAITING,
+                ExecutionEventKind.DEPENDENCY_SATISFIED,
+                ExecutionEventKind.DEPENDENCY_FAILED,
                 ExecutionEventKind.STOPPING,
             }
             and self.resolved_execution_id

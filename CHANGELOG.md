@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased — System dependencies and readiness (2.20)
+
+- Added strict backend-neutral sibling `SystemDependency` definitions with
+  `started`, `ready`, and `healthy` conditions and finite per-edge timeouts.
+- Added semantic sibling/self/duplicate validation, planner cycle detection,
+  and a deterministic compiled startup topology in `SystemExecutionPlan`.
+- Added bounded monotonic readiness scheduling, independent startup branches,
+  startup latches, explicit unsupported-observation failures, and rollback in
+  reverse actual start order.
+- Added typed startup events plus human and JSONL CLI output for child start,
+  dependency waiting, satisfaction, and failure.
+- Preserved declaration-order behavior and Plan digests for Systems without
+  dependencies, and documented the contract in synchronized EN/RU pages and
+  generated System YAML comments.
+
 ## 2.3.0b1 — Beta stabilization
 
 - Added one canonical module instance per local Python file, registered it in

@@ -589,6 +589,15 @@ def _system_scaffold(
 # targets: []         # Где могут исполняться части системы.
 # resources: []       # Общие зависимости и execution context.
 # applications: []    # Процессы, launch-файлы и другие applications.
+# systems:             # Переиспользуемые дочерние System Definitions.
+#   - name: driver     # Имя instance внутри родительской System.
+#     uses: ./driver.yaml  # Путь или закреплённая revision Definition.
+#
+# dependencies:        # Порядок запуска sibling System instances.
+#   - system: mapper   # Эта System будет запущена после условия ниже.
+#     requires: driver # Prerequisite sibling instance.
+#     condition: ready # started | ready | healthy
+#     timeoutSeconds: 30  # Ограниченное ожидание без busy-loop.
 #
 # Начинайте с identity System и добавляйте архитектуру только по необходимости.
 """
@@ -622,6 +631,15 @@ def _system_scaffold(
 # targets: []         # Where parts of the system can execute.
 # resources: []       # Shared dependencies and execution context.
 # applications: []    # Processes, launches or other applications.
+# systems:             # Reusable child System Definitions.
+#   - name: driver     # Instance name inside this parent System.
+#     uses: ./driver.yaml  # Path or pinned Definition revision.
+#
+# dependencies:        # Startup order between sibling System instances.
+#   - system: mapper   # This System starts after the condition below.
+#     requires: driver # Prerequisite sibling instance.
+#     condition: ready # started | ready | healthy
+#     timeoutSeconds: 30  # Bounded wait without a busy-loop.
 #
 # Start with the System identity and add architecture only when needed.
 """

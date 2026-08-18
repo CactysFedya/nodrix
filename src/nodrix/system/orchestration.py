@@ -13,7 +13,10 @@ milestones.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from enum import StrEnum
+import math
+import time
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from ..errors import NodrixError
@@ -32,7 +35,9 @@ from .execution_context import (
     SystemExecutionContextBindingError,
     validate_system_execution_context_binding,
 )
+from .dependencies import SystemDependencyCondition
 from .planning import (
+    PlannedSystemDependency,
     PlannedSystemInstance,
     PlannedTarget,
     SystemExecutionPlan,
@@ -421,6 +426,100 @@ class SystemExecutionHandle:
                 return child
 
         raise KeyError(name)
+
+
+class SystemStartupEventKind(StrEnum):
+    """Observable transition emitted by the 2.20 startup scheduler."""
+
+    CHILD_STARTED = "child_started"
+    DEPENDENCY_WAITING = "dependency_waiting"
+    DEPENDENCY_SATISFIED = "dependency_satisfied"
+    DEPENDENCY_FAILED = "dependency_failed"
+
+
+@dataclass(frozen=True, slots=True)
+class SystemStartupEvent:
+    """Typed startup event independent from CLI and storage formats."""
+
+    event: SystemStartupEventKind
+    execution_id: str
+    system: str
+    child: str
+    child_execution_id: str | None = None
+    dependency_ordinal: int | None = None
+    requires: str | None = None
+    condition: SystemDependencyCondition | None = None
+    timeout_seconds: float | None = None
+    elapsed_seconds: float | None = None
+    message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.event, SystemStartupEventKind):
+            raise TypeError("event must be a SystemStartupEventKind")
+
+        for field_name in (
+            "execution_id",
+            "system",
+            "child",
+        ):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name} must be a non-empty string")
+            object.__setattr__(self, field_name, value.strip())
+
+        if (
+            self.child_execution_id is not None
+            and (
+                not isinstance(self.child_execution_id, str)
+                or not self.child_execution_id.strip()
+            )
+        ):
+            raise ValueError(
+                "child_execution_id must be a non-empty string or None"
+            )
+
+        if (
+            self.message is not None
+            and (
+                not isinstance(self.message, str)
+                or not self.message.strip()
+            )
+        ):
+            raise ValueError("message must be a non-empty string or None")
+
+        if self.event is SystemStartupEventKind.CHILD_STARTED:
+            if not self.child_execution_id:
+                raise ValueError(
+                    "child_started events require child_execution_id"
+                )
+            return
+
+        if (
+            not isinstance(self.dependency_ordinal, int)
+            or isinstance(self.dependency_ordinal, bool)
+            or self.dependency_ordinal < 0
+        ):
+            raise ValueError(
+                "dependency_ordinal must be a non-negative integer"
+            )
+        if not isinstance(self.requires, str) or not self.requires.strip():
+            raise ValueError("requires must be a non-empty string")
+        if not isinstance(self.condition, SystemDependencyCondition):
+            raise TypeError("condition must be a SystemDependencyCondition")
+        if (
+            self.timeout_seconds is None
+            or not math.isfinite(self.timeout_seconds)
+            or self.timeout_seconds <= 0
+        ):
+            raise ValueError("timeout_seconds must be finite and positive")
+        if (
+            self.elapsed_seconds is None
+            or not math.isfinite(self.elapsed_seconds)
+            or self.elapsed_seconds < 0
+        ):
+            raise ValueError(
+                "elapsed_seconds must be finite and non-negative"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -839,6 +938,31 @@ def _failed_system_status(
     )
 
 
+def _observation_gap(
+    status: SystemExecutionStatus,
+    *,
+    path: str,
+) -> str | None:
+    """Return the first execution path without observation support."""
+
+    if not status.scopes and not status.systems:
+        return path
+
+    for scope in status.scopes:
+        if scope.status.observation is None:
+            return f"{path}.scopes.{scope.scope.id}"
+
+    for child in status.systems:
+        missing = _observation_gap(
+            child.status,
+            path=f"{path}.systems.{child.name}",
+        )
+        if missing is not None:
+            return missing
+
+    return None
+
+
 class SystemOrchestrator:
     """Coordinate multiple target/backend scopes as one System lifecycle.
 
@@ -853,7 +977,23 @@ class SystemOrchestrator:
             ExecutionScope | tuple[str, str],
             ExecutionBackend,
         ],
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        wait: Callable[[float], None] = time.sleep,
+        dependency_poll_interval_seconds: float = 0.1,
     ) -> None:
+        if not callable(clock):
+            raise TypeError("clock must be callable")
+        if not callable(wait):
+            raise TypeError("wait must be callable")
+        if (
+            not math.isfinite(dependency_poll_interval_seconds)
+            or dependency_poll_interval_seconds <= 0
+        ):
+            raise ValueError(
+                "dependency_poll_interval_seconds must be finite and positive"
+            )
+
         normalized: dict[ExecutionScope, ExecutionBackend] = {}
         for raw_scope, backend in bindings.items():
             if isinstance(raw_scope, ExecutionScope):
@@ -868,6 +1008,11 @@ class SystemOrchestrator:
                 raise ValueError(f"duplicate orchestrator binding for {scope.id}")
             normalized[scope] = backend
         self._bindings = normalized
+        self._clock = clock
+        self._wait = wait
+        self._dependency_poll_interval_seconds = (
+            dependency_poll_interval_seconds
+        )
 
     @property
     def bindings(self) -> Mapping[ExecutionScope, ExecutionBackend]:
@@ -1079,19 +1224,135 @@ class SystemOrchestrator:
             ),
         )
 
+    def _dependency_condition_satisfied(
+        self,
+        dependency: PlannedSystemDependency,
+        status: SystemExecutionStatus,
+    ) -> bool:
+        path = f"dependencies.{dependency.ordinal}"
+        context = (
+            f"prerequisite {dependency.requires!r} for child System "
+            f"{dependency.system!r}"
+        )
+
+        if status.state is BackendExecutionState.FAILED:
+            reason = status.message or "execution failed"
+            raise OrchestrationError(
+                "ORCH302",
+                f"{context} failed before satisfying "
+                f"{dependency.condition.value!r}: {reason}",
+                path=path,
+            )
+
+        if dependency.condition is SystemDependencyCondition.STARTED:
+            return True
+
+        missing = _observation_gap(
+            status,
+            path=f"systems.{dependency.requires}",
+        )
+        if missing is not None:
+            raise OrchestrationError(
+                "ORCH304",
+                f"{context} cannot satisfy {dependency.condition.value!r}: "
+                f"observation is unsupported at {missing}",
+                path=path,
+            )
+
+        observation = status.observation
+        if observation is None:
+            raise OrchestrationError(
+                "ORCH304",
+                f"{context} cannot satisfy {dependency.condition.value!r}: "
+                "observation is unsupported",
+                path=path,
+            )
+
+        if observation.health is ExecutionHealthState.UNHEALTHY:
+            reason = observation.message or "execution is unhealthy"
+            raise OrchestrationError(
+                "ORCH303",
+                f"{context} became unhealthy before satisfying "
+                f"{dependency.condition.value!r}: {reason}",
+                path=path,
+            )
+
+        if dependency.condition is SystemDependencyCondition.READY:
+            satisfied = observation.ready is True
+        else:
+            satisfied = (
+                observation.health
+                is ExecutionHealthState.HEALTHY
+            )
+
+        if satisfied:
+            return True
+
+        if status.terminal:
+            raise OrchestrationError(
+                "ORCH302",
+                f"{context} reached terminal state {status.state.value!r} "
+                f"before satisfying {dependency.condition.value!r}",
+                path=path,
+            )
+
+        return False
+
     def start(
         self,
         prepared: PreparedSystemExecution,
         *,
         rollback_timeout_seconds: float | None = None,
+        startup_event_sink: Callable[[SystemStartupEvent], None] | None = None,
     ) -> SystemExecutionHandle:
         if (
             rollback_timeout_seconds is not None
-            and rollback_timeout_seconds < 0
+            and (
+                not math.isfinite(
+                    rollback_timeout_seconds
+                )
+                or rollback_timeout_seconds < 0
+            )
         ):
             raise ValueError(
-                "rollback_timeout_seconds cannot be negative"
+                "rollback_timeout_seconds must be finite and non-negative"
             )
+        if startup_event_sink is not None and not callable(startup_event_sink):
+            raise TypeError("startup_event_sink must be callable or None")
+
+        execution_id = f"system-{uuid4().hex[:12]}"
+
+        startup = prepared.plan.system_startup
+        prepared_by_name = {
+            child.name: child
+            for child in prepared.systems
+        }
+
+        if startup is not None:
+            order = startup.order
+            child_names = set(prepared_by_name)
+            if (
+                len(order) != len(child_names)
+                or len(set(order)) != len(order)
+                or set(order) != child_names
+            ):
+                raise OrchestrationError(
+                    "ORCH305",
+                    "compiled System startup order does not match prepared children",
+                    path="system_startup.order",
+                )
+
+            for dependency in startup.dependencies:
+                if (
+                    dependency.system not in child_names
+                    or dependency.requires not in child_names
+                    or dependency.system == dependency.requires
+                ):
+                    raise OrchestrationError(
+                        "ORCH305",
+                        "compiled System dependency references invalid children",
+                        path=f"system_startup.dependencies.{dependency.ordinal}",
+                    )
 
         running_scopes: list[
             RunningScopeExecution
@@ -1100,6 +1361,12 @@ class SystemOrchestrator:
         running_systems: list[
             RunningChildSystemExecution
         ] = []
+
+        def emit_startup_event(
+            event: SystemStartupEvent,
+        ) -> None:
+            if startup_event_sink is not None:
+                startup_event_sink(event)
 
         def rollback() -> list[str]:
             errors: list[str] = []
@@ -1138,6 +1405,47 @@ class SystemOrchestrator:
 
             return errors
 
+        def start_child(
+            child: PreparedChildSystemExecution,
+        ) -> None:
+            try:
+                child_handle = self.start(
+                    child.execution,
+                    rollback_timeout_seconds=(
+                        rollback_timeout_seconds
+                    ),
+                    startup_event_sink=startup_event_sink,
+                )
+            except Exception as exc:
+                raise OrchestrationError(
+                    "ORCH204",
+                    (
+                        "start failed for child System "
+                        f"{child.name!r}: {exc}"
+                    ),
+                    path=f"systems.{child.name}",
+                ) from exc
+
+            running_systems.append(
+                RunningChildSystemExecution(
+                    instance=child.instance,
+                    handle=child_handle,
+                )
+            )
+            emit_startup_event(
+                SystemStartupEvent(
+                    event=(
+                        SystemStartupEventKind.CHILD_STARTED
+                    ),
+                    execution_id=execution_id,
+                    system=prepared.plan.system,
+                    child=child.name,
+                    child_execution_id=(
+                        child_handle.execution_id
+                    ),
+                )
+            )
+
         # Start direct scopes of this System.
         for item in prepared.scopes:
             try:
@@ -1174,48 +1482,265 @@ class SystemOrchestrator:
                 )
             )
 
-        # Then start nested child Systems in declaration order.
-        for child in prepared.systems:
-            try:
-                child_handle = self.start(
-                    child.execution,
-                    rollback_timeout_seconds=(
-                        rollback_timeout_seconds
-                    ),
-                )
-            except Exception as exc:
-                rollback_errors = rollback()
-
-                suffix = (
-                    "; rollback errors: "
-                    + "; ".join(
-                        rollback_errors
+        try:
+            if startup is None:
+                # Systems without dependency declarations retain the exact
+                # pre-2.20 declaration-order lifecycle.
+                for child in prepared.systems:
+                    start_child(child)
+            else:
+                dependencies_by_system: dict[
+                    str,
+                    tuple[PlannedSystemDependency, ...],
+                ] = {
+                    name: tuple(
+                        dependency
+                        for dependency in startup.dependencies
+                        if dependency.system == name
                     )
-                    if rollback_errors
-                    else ""
-                )
+                    for name in startup.order
+                }
+                pending = list(startup.order)
+                running_by_name: dict[
+                    str,
+                    RunningChildSystemExecution,
+                ] = {}
+                started_at: dict[str, float] = {}
+                waiting_dependencies: set[int] = set()
+                satisfied_dependencies: set[int] = set()
 
-                raise OrchestrationError(
-                    "ORCH204",
-                    (
-                        "start failed for child System "
-                        f"{child.name!r}: "
-                        f"{exc}{suffix}"
-                    ),
-                    path=f"systems.{child.name}",
-                ) from exc
+                def dependency_elapsed(
+                    dependency: PlannedSystemDependency,
+                ) -> float:
+                    return max(
+                        0.0,
+                        self._clock()
+                        - started_at[dependency.requires],
+                    )
 
-            running_systems.append(
-                RunningChildSystemExecution(
-                    instance=child.instance,
-                    handle=child_handle,
-                )
+                def emit_dependency_event(
+                    event: SystemStartupEventKind,
+                    dependency: PlannedSystemDependency,
+                    *,
+                    message: str | None = None,
+                ) -> None:
+                    emit_startup_event(
+                        SystemStartupEvent(
+                            event=event,
+                            execution_id=execution_id,
+                            system=prepared.plan.system,
+                            child=dependency.system,
+                            dependency_ordinal=(
+                                dependency.ordinal
+                            ),
+                            requires=dependency.requires,
+                            condition=dependency.condition,
+                            timeout_seconds=(
+                                dependency.timeout_seconds
+                            ),
+                            elapsed_seconds=(
+                                dependency_elapsed(
+                                    dependency
+                                )
+                            ),
+                            message=message,
+                        )
+                    )
+
+                def dependency_timeout_error(
+                    dependency: PlannedSystemDependency,
+                ) -> OrchestrationError:
+                    error = OrchestrationError(
+                        "ORCH301",
+                        (
+                            f"timed out after "
+                            f"{dependency.timeout_seconds:g}s waiting for "
+                            f"prerequisite {dependency.requires!r} to "
+                            f"satisfy {dependency.condition.value!r} for "
+                            f"child System {dependency.system!r}"
+                        ),
+                        path=f"dependencies.{dependency.ordinal}",
+                    )
+                    emit_dependency_event(
+                        SystemStartupEventKind.DEPENDENCY_FAILED,
+                        dependency,
+                        message=error.message,
+                    )
+                    return error
+
+                while pending:
+                    made_progress = False
+                    status_cache: dict[
+                        str,
+                        SystemExecutionStatus,
+                    ] = {}
+                    unresolved_deadlines: list[float] = []
+
+                    for name in tuple(pending):
+                        dependencies = dependencies_by_system[name]
+                        eligible = True
+
+                        for dependency in dependencies:
+                            if (
+                                dependency.ordinal
+                                in satisfied_dependencies
+                            ):
+                                continue
+
+                            prerequisite = running_by_name.get(
+                                dependency.requires
+                            )
+                            if prerequisite is None:
+                                eligible = False
+                                continue
+
+                            deadline = (
+                                started_at[dependency.requires]
+                                + dependency.timeout_seconds
+                            )
+
+                            if (
+                                dependency.condition
+                                is SystemDependencyCondition.STARTED
+                            ):
+                                if self._clock() > deadline:
+                                    raise dependency_timeout_error(
+                                        dependency
+                                    )
+                                satisfied_dependencies.add(
+                                    dependency.ordinal
+                                )
+                                emit_dependency_event(
+                                    SystemStartupEventKind
+                                    .DEPENDENCY_SATISFIED,
+                                    dependency,
+                                )
+                                continue
+
+                            status = status_cache.get(
+                                dependency.requires
+                            )
+                            if status is None:
+                                status = self.inspect(
+                                    prerequisite.handle
+                                )
+                                status_cache[
+                                    dependency.requires
+                                ] = status
+
+                            observed_at = self._clock()
+                            if observed_at > deadline:
+                                raise dependency_timeout_error(
+                                    dependency
+                                )
+
+                            try:
+                                satisfied = (
+                                    self._dependency_condition_satisfied(
+                                        dependency,
+                                        status,
+                                    )
+                                )
+                            except OrchestrationError as exc:
+                                emit_dependency_event(
+                                    SystemStartupEventKind
+                                    .DEPENDENCY_FAILED,
+                                    dependency,
+                                    message=exc.message,
+                                )
+                                raise
+
+                            if satisfied:
+                                satisfied_dependencies.add(
+                                    dependency.ordinal
+                                )
+                                emit_dependency_event(
+                                    SystemStartupEventKind
+                                    .DEPENDENCY_SATISFIED,
+                                    dependency,
+                                )
+                                continue
+
+                            eligible = False
+                            if observed_at >= deadline:
+                                raise dependency_timeout_error(
+                                    dependency
+                                )
+
+                            if (
+                                dependency.ordinal
+                                not in waiting_dependencies
+                            ):
+                                waiting_dependencies.add(
+                                    dependency.ordinal
+                                )
+                                emit_dependency_event(
+                                    SystemStartupEventKind
+                                    .DEPENDENCY_WAITING,
+                                    dependency,
+                                )
+                            unresolved_deadlines.append(
+                                deadline
+                            )
+
+                        if not eligible:
+                            continue
+
+                        child = prepared_by_name[name]
+                        child_started_at = self._clock()
+                        start_child(child)
+                        running = running_systems[-1]
+                        running_by_name[name] = running
+                        started_at[name] = child_started_at
+                        pending.remove(name)
+                        made_progress = True
+
+                    if not pending or made_progress:
+                        continue
+
+                    if not unresolved_deadlines:
+                        raise OrchestrationError(
+                            "ORCH305",
+                            "compiled System startup topology cannot make progress",
+                            path="system_startup",
+                        )
+
+                    nearest_deadline = min(
+                        unresolved_deadlines
+                    )
+                    delay = min(
+                        self._dependency_poll_interval_seconds,
+                        nearest_deadline - self._clock(),
+                    )
+                    if delay > 0:
+                        self._wait(delay)
+
+        except Exception as exc:
+            rollback_errors = rollback()
+            suffix = (
+                "; rollback errors: "
+                + "; ".join(rollback_errors)
+                if rollback_errors
+                else ""
             )
 
+            if isinstance(exc, OrchestrationError):
+                if not suffix:
+                    raise
+                raise OrchestrationError(
+                    exc.code,
+                    f"{exc.message}{suffix}",
+                    path=exc.path,
+                ) from exc
+
+            raise OrchestrationError(
+                "ORCH305",
+                f"System startup scheduler failed: {exc}{suffix}",
+                path="system_startup",
+            ) from exc
+
         return SystemExecutionHandle(
-            execution_id=(
-                f"system-{uuid4().hex[:12]}"
-            ),
+            execution_id=execution_id,
             prepared=prepared,
             scopes=tuple(
                 running_scopes

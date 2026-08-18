@@ -108,9 +108,12 @@ Observation является живым состоянием выполнени�
 предупреждения planner выводятся в стандартный поток ошибок.
 
 Каждое событие содержит `apiVersion: nodrix.execution.event/v1` и
-`kind: ExecutionEvent`. Поток использует события `prepared`, `started`,
-`snapshot`, `stopping`, `finished` и `error`. Событие snapshot выводится только
-при изменении значимых lifecycle-данных или observation.
+`kind: ExecutionEvent`. Поток использует события `prepared`, `child_started`,
+`dependency_waiting`, `dependency_satisfied`, `dependency_failed`, `started`,
+`snapshot`, `stopping`, `finished` и `error`. События dependencies делают
+ограниченное ожидание readiness наблюдаемым ещё до полного запуска System.
+Событие snapshot выводится только при изменении значимых lifecycle-данных или
+observation.
 
 Поле `status` содержит полную иерархию System: идентичность дочернего instance
 и разрешённого definition, execution scopes, readiness, health, сообщения и

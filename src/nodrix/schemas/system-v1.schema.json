@@ -356,6 +356,58 @@
       "title": "SystemBoundaryBindings",
       "type": "object"
     },
+    "SystemDependency": {
+      "additionalProperties": false,
+      "description": "One explicit startup edge between sibling System instances.\n\n``system`` names the dependent sibling. ``requires`` names its prerequisite.\nThe edge belongs to their parent System Definition and therefore cannot\naddress ancestors, descendants, execution scopes, or backend objects.",
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/SystemDependencyCondition"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "requires": {
+          "minLength": 1,
+          "title": "Requires",
+          "type": "string"
+        },
+        "system": {
+          "minLength": 1,
+          "title": "System",
+          "type": "string"
+        },
+        "timeoutSeconds": {
+          "exclusiveMinimum": 0,
+          "title": "Timeoutseconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "system",
+        "requires",
+        "condition",
+        "timeoutSeconds"
+      ],
+      "title": "SystemDependency",
+      "type": "object"
+    },
+    "SystemDependencyCondition": {
+      "description": "Startup condition that a prerequisite System must satisfy.",
+      "enum": [
+        "started",
+        "ready",
+        "healthy"
+      ],
+      "title": "SystemDependencyCondition",
+      "type": "string"
+    },
     "SystemInstance": {
       "additionalProperties": false,
       "description": "One exact child System Definition instantiated by a parent System.\n\n``uses`` is the canonical immutable RevisionRef of the child System\nDefinition. Filesystem paths, project aliases, source filenames, and\nunpinned EntityRefs are authoring concerns and must be resolved before\nconstructing the canonical SystemModel.\n\nA SystemInstance is part of the canonical architecture. It is not a\nSystem Module and does not disappear during source resolution.",
@@ -588,6 +640,14 @@
     },
     "bindings": {
       "$ref": "#/$defs/SystemBoundaryBindings"
+    },
+    "dependencies": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SystemDependency"
+      },
+      "title": "Dependencies",
+      "type": "array"
     },
     "description": {
       "anyOf": [

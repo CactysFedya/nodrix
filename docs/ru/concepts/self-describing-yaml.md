@@ -111,7 +111,9 @@ Self-Describing standard сейчас применяется к:
 System является канонической исполняемой архитектурой.
 
 Scaffold может объяснять validation, planning, execution, inspection, targets,
-resources, applications, graphs и relations.
+resources, applications, вложенные Systems, startup dependencies, graphs и
+relations. В примере dependency всегда подписаны `system`, `requires`,
+`condition` и `timeoutSeconds`.
 
 ### Workflow
 

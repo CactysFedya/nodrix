@@ -244,6 +244,32 @@ def test_created_system_is_self_describing(
         "systems/robot.yaml"
         in text
     )
+    assert "# dependencies:" in text
+    assert "#     condition: ready # started | ready | healthy" in text
+    assert "#     timeoutSeconds: 30" in text
+
+
+def test_created_russian_system_explains_dependency_fields(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "robot"
+    create_progressive_project(
+        root,
+        language="ru",
+    )
+
+    resource = add_project_resource(
+        "system",
+        "robot",
+        root=root,
+    )
+    text = resource.path.read_text(encoding="utf-8")
+
+    assert "# dependencies:" in text
+    assert "Порядок запуска" in text
+    assert "#     requires: driver" in text
+    assert "#     condition: ready # started | ready | healthy" in text
+    assert "Ограниченное ожидание без busy-loop" in text
 
 
 def test_system_scaffold_preserves_canonical_document(

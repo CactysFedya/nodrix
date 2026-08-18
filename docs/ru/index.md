@@ -74,6 +74,8 @@ concepts/index
 concepts/workspaces
 concepts/runtime
 concepts/providers
+concepts/self-describing-yaml
+concepts/system-dependencies
 ```
 
 ```{toctree}
@@ -109,6 +111,7 @@ examples/index
 
 PRINCIPLES
 COMPATIBILITY
+ROADMAP
 adr/README
 planning/index
 releases/index

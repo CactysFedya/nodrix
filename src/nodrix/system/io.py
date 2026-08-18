@@ -33,6 +33,7 @@ _TOP_LEVEL_ORDER = (
     "outputs",
     "bindings",
     "systems",
+    "dependencies",
     "resources",
     "applications",
     "graphs",

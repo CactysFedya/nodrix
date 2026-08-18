@@ -670,6 +670,109 @@ def _write_hierarchical_run_systems(
     )
 
 
+def _write_dependency_run_systems(
+    root: Path,
+) -> Path:
+    _write_local_system(
+        root / "driver.yaml",
+        name="driver",
+    )
+    _write_local_system(
+        root / "mapper.yaml",
+        name="mapper",
+    )
+    parent_path = root / "mapping.yaml"
+    parent_path.write_text(
+        yaml.safe_dump(
+            {
+                "apiVersion": "nodrix.system/v1",
+                "kind": "System",
+                "name": "mapping",
+                "systems": [
+                    {
+                        "name": "driver",
+                        "uses": "./driver.yaml",
+                    },
+                    {
+                        "name": "mapper",
+                        "uses": "./mapper.yaml",
+                    },
+                ],
+                "dependencies": [
+                    {
+                        "system": "mapper",
+                        "requires": "driver",
+                        "condition": "ready",
+                        "timeoutSeconds": 5.0,
+                    },
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    return parent_path
+
+
+def test_system_run_jsonl_emits_dependency_startup_events(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = _write_dependency_run_systems(tmp_path)
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.RUNNING,
+            observation=ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        ),
+        _status(BackendExecutionState.COMPLETED),
+        _status(BackendExecutionState.COMPLETED),
+    ]
+    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(system_cli.time, "sleep", lambda _: None)
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "run",
+            str(path),
+            "--output",
+            "jsonl",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payloads = [
+        json.loads(line)
+        for line in result.output.splitlines()
+        if line.strip()
+    ]
+    assert [payload["event"] for payload in payloads] == [
+        "prepared",
+        "child_started",
+        "dependency_satisfied",
+        "child_started",
+        "started",
+        "finished",
+    ]
+    dependency = payloads[2]
+    assert dependency["system"] == "mapping"
+    assert dependency["details"] == {
+        "child": "mapper",
+        "childExecutionId": None,
+        "dependencyOrdinal": 0,
+        "requires": "driver",
+        "condition": "ready",
+        "timeoutSeconds": 5.0,
+        "elapsedSeconds": dependency["details"]["elapsedSeconds"],
+    }
+    assert dependency["details"]["elapsedSeconds"] >= 0
+
+
 def test_system_run_executes_child_system_hierarchy(
     tmp_path: Path,
     monkeypatch,

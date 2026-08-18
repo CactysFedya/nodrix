@@ -108,7 +108,9 @@ The self-describing standard currently applies to:
 System is the canonical executable architecture.
 
 Its scaffold may explain validation, planning, execution, inspection, targets,
-resources, applications, graphs, and relations.
+resources, applications, nested Systems, startup dependencies, graphs, and
+relations. Dependency examples always label `system`, `requires`, `condition`,
+and `timeoutSeconds`.
 
 ### Workflow
 
