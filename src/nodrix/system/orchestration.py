@@ -22,6 +22,7 @@ from .backend import (
     BackendExecutionHandle,
     BackendExecutionState,
     BackendExecutionStatus,
+    ExecutionObservation,
     ExecutionBackend,
     PreparedExecution,
 )
@@ -472,6 +473,7 @@ class SystemExecutionStatus:
     systems: tuple[ChildSystemExecutionStatus, ...] = ()
     message: str | None = None
     details: Mapping[str, Any] = field(default_factory=dict)
+    observation: ExecutionObservation | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -481,6 +483,18 @@ class SystemExecutionStatus:
             raise TypeError(
                 "SystemExecutionStatus.message must be "
                 "a string or None"
+            )
+
+        if (
+            self.observation is not None
+            and not isinstance(
+                self.observation,
+                ExecutionObservation,
+            )
+        ):
+            raise TypeError(
+                "SystemExecutionStatus.observation must be "
+                "an ExecutionObservation or None"
             )
 
         if not isinstance(

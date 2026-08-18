@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import StrEnum
 from enum import Enum
 from typing import Any, Iterable, Mapping
 
@@ -387,6 +388,60 @@ class BackendExecutionHandle:
             )
 
 
+class ExecutionHealthState(StrEnum):
+    """Backend-neutral health classification for one execution."""
+
+    UNKNOWN = "unknown"
+    HEALTHY = "healthy"
+    DEGRADED = "degraded"
+    UNHEALTHY = "unhealthy"
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionObservation:
+    """Backend-neutral readiness and health observation.
+
+    ``None`` readiness means that readiness is currently unknown. Absence of
+    the observation itself means that the backend does not expose this
+    capability.
+    """
+
+    ready: bool | None = None
+    health: ExecutionHealthState = ExecutionHealthState.UNKNOWN
+    message: str | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            self.ready is not None
+            and not isinstance(
+                self.ready,
+                bool,
+            )
+        ):
+            raise TypeError(
+                "ExecutionObservation.ready must be a bool or None"
+            )
+
+        if not isinstance(
+            self.health,
+            ExecutionHealthState,
+        ):
+            raise TypeError(
+                "ExecutionObservation.health must be an ExecutionHealthState"
+            )
+
+        if (
+            self.message is not None
+            and not isinstance(
+                self.message,
+                str,
+            )
+        ):
+            raise TypeError(
+                "ExecutionObservation.message must be a string or None"
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class BackendExecutionStatus:
     backend: str
@@ -394,8 +449,21 @@ class BackendExecutionStatus:
     state: BackendExecutionState
     message: str | None = None
     details: Mapping[str, Any] = field(default_factory=dict)
+    observation: ExecutionObservation | None = None
 
     def __post_init__(self) -> None:
+        if (
+            self.observation is not None
+            and not isinstance(
+                self.observation,
+                ExecutionObservation,
+            )
+        ):
+            raise TypeError(
+                "BackendExecutionStatus.observation must be "
+                "an ExecutionObservation or None"
+            )
+
         object.__setattr__(self, "details", dict(self.details))
 
     @property
@@ -699,6 +767,8 @@ __all__ = [
     "BackendExecutionHandle",
     "BackendExecutionState",
     "BackendExecutionStatus",
+    "ExecutionHealthState",
+    "ExecutionObservation",
     "BackendValidationError",
     "BackendValidationReport",
     "ExecutionBackend",
