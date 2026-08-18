@@ -15,7 +15,11 @@ import yaml
 from .cli_context import app, console
 from .local_dev import compile_local_project, reset_local_development_modules
 from .manifest import load_manifest
-from .presentation import render_system_plan as render_system_plan_view, render_validation
+from .presentation import (
+    render_system_execution_status,
+    render_system_plan as render_system_plan_view,
+    render_validation,
+)
 from .project_foundation import resolve_project_resource
 from .project_system import (
     load_project_system_details,
@@ -610,20 +614,6 @@ def _render_backend_validation(report) -> None:
     console.print(table)
 
 
-def _execution_state_color(
-    state: BackendExecutionState,
-) -> str:
-    if state in {
-        BackendExecutionState.COMPLETED,
-        BackendExecutionState.STOPPED,
-    }:
-        return "green"
-
-    if state is BackendExecutionState.FAILED:
-        return "red"
-
-    return "yellow"
-
 
 def _render_orchestration_validation(
     report,
@@ -665,66 +655,6 @@ def _render_orchestration_validation(
         )
 
     console.print(table)
-
-
-def _render_system_run_status(
-    system_name: str,
-    status,
-    *,
-    indent: int = 0,
-) -> None:
-    prefix = "  " * indent
-    state = status.state.value.upper()
-    color = _execution_state_color(
-        status.state
-    )
-
-    suffix = (
-        f" · {status.message}"
-        if status.message
-        else ""
-    )
-
-    console.print(
-        f"{prefix}[{color}]{state}[/{color}] "
-        f"[bold]{system_name}[/bold] · "
-        f"{status.execution_id} · "
-        f"scopes={len(status.scopes)} · "
-        f"systems={len(status.systems)}"
-        f"{suffix}"
-    )
-
-    for item in status.scopes:
-        scope_state = (
-            item.status.state.value.upper()
-        )
-        scope_color = _execution_state_color(
-            item.status.state
-        )
-        scope_suffix = (
-            f" · {item.status.message}"
-            if item.status.message
-            else ""
-        )
-
-        console.print(
-            f"{prefix}  "
-            f"[{scope_color}]"
-            f"{scope_state}"
-            f"[/{scope_color}] "
-            f"{item.scope.id} · "
-            f"{item.status.backend}:"
-            f"{item.status.execution_id}"
-            f"{scope_suffix}"
-        )
-
-    for child in status.systems:
-        _render_system_run_status(
-            f"{system_name}/{child.name}",
-            child.status,
-            indent=indent + 1,
-        )
-
 
 def _hierarchical_execution_scopes(
     plan,
@@ -1036,9 +966,11 @@ def system_run(
                 status.state
                 is not previous_state
             ):
-                _render_system_run_status(
-                    system.name,
-                    status,
+                console.print(
+                    render_system_execution_status(
+                        system.name,
+                        status,
+                    )
                 )
                 previous_state = (
                     status.state
@@ -1096,9 +1028,11 @@ def system_run(
             )
             raise typer.Exit(130)
 
-        _render_system_run_status(
-            system.name,
-            status,
+        console.print(
+            render_system_execution_status(
+                system.name,
+                status,
+            )
         )
 
         if (

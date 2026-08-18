@@ -1096,6 +1096,319 @@ def _system_plan_tree(
     return lines
 
 
+
+def _execution_state_value(value: object) -> str:
+    state = getattr(value, "value", value)
+    return str(state or "unknown").strip().lower()
+
+
+def _execution_state_symbol(value: object) -> str:
+    state = _execution_state_value(value)
+
+    if state == "failed":
+        return "✗"
+    if state == "completed":
+        return "✓"
+    if state == "stopped":
+        return "■"
+    if state == "running":
+        return "●"
+    if state == "prepared":
+        return "○"
+    if state == "stopping":
+        return "!"
+
+    return "!"
+
+
+def _execution_state_style(value: object) -> str:
+    return _state_style(
+        _execution_state_value(value)
+    )
+
+
+def _execution_has_failed_child(status: Any) -> bool:
+    for item in getattr(status, "scopes", ()):
+        if (
+            _execution_state_value(
+                item.status.state
+            )
+            == "failed"
+        ):
+            return True
+
+    for child in getattr(status, "systems", ()):
+        if (
+            _execution_state_value(
+                child.status.state
+            )
+            == "failed"
+        ):
+            return True
+
+    return False
+
+
+def render_system_execution_status(
+    system_name: str,
+    status: Any,
+) -> Group:
+    """Render one hierarchical System execution status snapshot.
+
+    The renderer owns presentation only. Execution aggregation, lifecycle
+    transitions and failure propagation remain responsibilities of the
+    orchestration layer.
+    """
+
+    lines = Text()
+
+    def append_system(
+        name: str,
+        item_status: Any,
+        *,
+        definition: str | None = None,
+        prefix: str = "",
+        connector: str = "",
+    ) -> None:
+        state = _execution_state_value(
+            item_status.state
+        )
+        style = _execution_state_style(
+            item_status.state
+        )
+
+        if connector:
+            lines.append(
+                prefix + connector,
+                style="dim",
+            )
+
+        lines.append(
+            f"{_execution_state_symbol(item_status.state)} ",
+            style=style,
+        )
+        lines.append(
+            name,
+            style="bold",
+        )
+
+        if (
+            definition is not None
+            and definition != name
+        ):
+            lines.append(
+                " → ",
+                style="dim",
+            )
+            lines.append(
+                definition,
+                style="cyan",
+            )
+
+        lines.append("  ")
+        lines.append(
+            state.upper(),
+            style=style,
+        )
+
+        execution_id = getattr(
+            item_status,
+            "execution_id",
+            None,
+        )
+        if execution_id:
+            lines.append(
+                f"  {execution_id}",
+                style="dim",
+            )
+
+        scopes = tuple(
+            getattr(
+                item_status,
+                "scopes",
+                (),
+            )
+        )
+        systems = tuple(
+            getattr(
+                item_status,
+                "systems",
+                (),
+            )
+        )
+
+        lines.append(
+            f"  scopes={len(scopes)}"
+            f" · systems={len(systems)}",
+            style="dim",
+        )
+        lines.append("\n")
+
+        children: list[tuple[str, Any]] = [
+            ("scope", scope)
+            for scope in scopes
+        ]
+        children.extend(
+            ("system", child)
+            for child in systems
+        )
+
+        child_prefix = (
+            prefix
+            + (
+                "   "
+                if connector == "└─ "
+                else "│  "
+                if connector == "├─ "
+                else ""
+            )
+        )
+
+        for index, (
+            kind,
+            child,
+        ) in enumerate(children):
+            last = (
+                index
+                == len(children) - 1
+            )
+            branch = (
+                "└─ "
+                if last
+                else "├─ "
+            )
+
+            if kind == "scope":
+                scope_status = child.status
+                scope_state = (
+                    _execution_state_value(
+                        scope_status.state
+                    )
+                )
+                scope_style = (
+                    _execution_state_style(
+                        scope_status.state
+                    )
+                )
+
+                lines.append(
+                    child_prefix + branch,
+                    style="dim",
+                )
+                lines.append(
+                    f"{_execution_state_symbol(scope_status.state)} ",
+                    style=scope_style,
+                )
+                lines.append(
+                    child.scope.id,
+                    style="bold",
+                )
+                lines.append("  ")
+                lines.append(
+                    scope_state.upper(),
+                    style=scope_style,
+                )
+                lines.append(
+                    f"  {scope_status.backend}:"
+                    f"{scope_status.execution_id}",
+                    style="dim",
+                )
+                lines.append("\n")
+
+                if scope_status.message:
+                    message_prefix = (
+                        child_prefix
+                        + (
+                            "   "
+                            if last
+                            else "│  "
+                        )
+                    )
+                    lines.append(
+                        message_prefix,
+                        style="dim",
+                    )
+                    lines.append(
+                        str(scope_status.message),
+                        style="red",
+                    )
+                    lines.append("\n")
+
+                continue
+
+            child_definition = getattr(
+                getattr(
+                    child,
+                    "instance",
+                    None,
+                ),
+                "plan",
+                None,
+            )
+            definition_name = (
+                getattr(
+                    child_definition,
+                    "system",
+                    None,
+                )
+                if child_definition is not None
+                else None
+            )
+
+            append_system(
+                str(child.name),
+                child.status,
+                definition=(
+                    str(definition_name)
+                    if definition_name
+                    else None
+                ),
+                prefix=child_prefix,
+                connector=branch,
+            )
+
+        message = getattr(
+            item_status,
+            "message",
+            None,
+        )
+
+        # Aggregated parent failures usually repeat a lower-level reason.
+        # Show the message at the lowest informative System boundary instead
+        # of printing the same exception on every ancestor.
+        if (
+            message
+            and not _execution_has_failed_child(
+                item_status
+            )
+        ):
+            message_prefix = (
+                prefix
+                + (
+                    "   "
+                    if connector == "└─ "
+                    else "│  "
+                    if connector == "├─ "
+                    else "   "
+                )
+            )
+            lines.append(
+                message_prefix,
+                style="dim",
+            )
+            lines.append(
+                str(message),
+                style="red",
+            )
+            lines.append("\n")
+
+    append_system(
+        system_name,
+        status,
+    )
+
+    return Group(lines)
+
 def render_system_plan(plan: Any) -> Group:
     """Render a nodrix.system execution plan as a readable architecture tree."""
 

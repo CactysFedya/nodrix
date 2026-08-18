@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import StringIO
+from types import SimpleNamespace
 
 from rich.console import Console
 
@@ -10,6 +11,7 @@ from nodrix.presentation import (
     render_run_active_info,
     render_run_summary,
     render_status,
+    render_system_execution_status,
     render_system_plan,
     render_top_view,
 )
@@ -328,3 +330,245 @@ def test_run_active_info_uses_short_workspace_artifact_path() -> None:
     assert "/Users/demo/project" not in output
     assert "Monitor" in output
     assert "plyctl top" in output
+
+
+def _execution_state(
+    value: str,
+):
+    return SimpleNamespace(
+        value=value,
+    )
+
+
+def _scope_status(
+    scope: str,
+    state: str,
+    *,
+    execution_id: str = "local-001",
+    message: str | None = None,
+):
+    target, backend = scope.split(
+        ":",
+        1,
+    )
+
+    return SimpleNamespace(
+        scope=SimpleNamespace(
+            id=scope,
+            target=target,
+            backend=backend,
+        ),
+        status=SimpleNamespace(
+            state=_execution_state(
+                state
+            ),
+            backend=backend,
+            execution_id=execution_id,
+            message=message,
+        ),
+    )
+
+
+def _system_status(
+    state: str,
+    *,
+    execution_id: str,
+    scopes=(),
+    systems=(),
+    message: str | None = None,
+):
+    return SimpleNamespace(
+        state=_execution_state(
+            state
+        ),
+        execution_id=execution_id,
+        scopes=tuple(scopes),
+        systems=tuple(systems),
+        message=message,
+    )
+
+
+def _child_system_status(
+    role: str,
+    definition: str,
+    status,
+):
+    return SimpleNamespace(
+        name=role,
+        instance=SimpleNamespace(
+            plan=SimpleNamespace(
+                system=definition,
+            )
+        ),
+        status=status,
+    )
+
+
+def test_system_execution_status_renders_flat_scope() -> None:
+    status = _system_status(
+        "running",
+        execution_id="system-root",
+        scopes=(
+            _scope_status(
+                "pi5:local",
+                "running",
+            ),
+        ),
+    )
+
+    output = _plain(
+        render_system_execution_status(
+            "livox-mid360",
+            status,
+        )
+    )
+
+    assert "● livox-mid360" in output
+    assert "RUNNING" in output
+    assert "pi5:local" in output
+    assert "local:local-001" in output
+    assert "scopes=1" in output
+    assert "systems=0" in output
+
+
+def test_system_execution_status_renders_child_system_identity() -> None:
+    child = _system_status(
+        "running",
+        execution_id="system-child",
+        scopes=(
+            _scope_status(
+                "pi5:local",
+                "running",
+            ),
+        ),
+    )
+    root = _system_status(
+        "running",
+        execution_id="system-root",
+        systems=(
+            _child_system_status(
+                "lidar",
+                "livox-mid360",
+                child,
+            ),
+        ),
+    )
+
+    output = _plain(
+        render_system_execution_status(
+            "rpi5-mapping",
+            root,
+        )
+    )
+
+    assert "rpi5-mapping" in output
+    assert "lidar → livox-mid360" in output
+    assert "pi5:local" in output
+    assert "systems=1" in output
+
+
+def test_system_execution_status_renders_deep_hierarchy() -> None:
+    driver = _system_status(
+        "running",
+        execution_id="system-driver",
+        scopes=(
+            _scope_status(
+                "pi5:local",
+                "running",
+            ),
+        ),
+    )
+    lidar = _system_status(
+        "running",
+        execution_id="system-lidar",
+        systems=(
+            _child_system_status(
+                "driver",
+                "livox-driver",
+                driver,
+            ),
+        ),
+    )
+    robot = _system_status(
+        "running",
+        execution_id="system-robot",
+        systems=(
+            _child_system_status(
+                "lidar",
+                "livox-mid360",
+                lidar,
+            ),
+        ),
+    )
+
+    output = _plain(
+        render_system_execution_status(
+            "robot",
+            robot,
+        )
+    )
+
+    assert "lidar → livox-mid360" in output
+    assert "driver → livox-driver" in output
+    assert "pi5:local" in output
+
+
+def test_system_execution_status_renders_leaf_failure_reason_once() -> None:
+    failed_scope = _scope_status(
+        "pi5:local",
+        "failed",
+        message=(
+            "RuntimeError: process exited "
+            "with code 1"
+        ),
+    )
+
+    child = _system_status(
+        "failed",
+        execution_id="system-child",
+        scopes=(
+            failed_scope,
+        ),
+        message=(
+            "RuntimeError: process exited "
+            "with code 1"
+        ),
+    )
+
+    root = _system_status(
+        "failed",
+        execution_id="system-root",
+        systems=(
+            _child_system_status(
+                "localization",
+                "fast-livo2",
+                child,
+            ),
+        ),
+        message=(
+            "RuntimeError: process exited "
+            "with code 1"
+        ),
+    )
+
+    output = _plain(
+        render_system_execution_status(
+            "rpi5-mapping",
+            root,
+        )
+    )
+
+    assert "✗ rpi5-mapping" in output
+    assert (
+        "localization → fast-livo2"
+        in output
+    )
+    assert "pi5:local" in output
+    assert "FAILED" in output
+    assert (
+        output.count(
+            "RuntimeError: process exited "
+            "with code 1"
+        )
+        == 1
+    )
