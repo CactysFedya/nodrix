@@ -105,3 +105,19 @@ A health or readiness change is rendered even when the lifecycle state remains
 
 Observation is live execution state. It is not stored as a field in the System
 YAML definition.
+
+### JSON Lines execution events
+
+Use `plyctl system run SYSTEM --output jsonl` for automation and external
+monitoring. Standard output contains exactly one compact JSON object per line.
+Human diagnostics and planner warnings are written to standard error.
+
+Every event identifies itself with `apiVersion: nodrix.execution.event/v1` and
+`kind: ExecutionEvent`. The stream uses `prepared`, `started`, `snapshot`,
+`stopping`, `finished`, and `error` events. Snapshot events are emitted only
+when presentation-relevant lifecycle or observation data changes.
+
+The `status` field contains the complete System hierarchy, including child
+instance and resolved definition identities, execution scopes, readiness,
+health, messages, and stable failure details. This public System stream is
+separate from the legacy Pipeline runtime's internal `events.jsonl` journal.

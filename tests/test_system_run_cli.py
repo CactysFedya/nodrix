@@ -22,6 +22,8 @@ from nodrix.system import (
     BackendExecutionStatus,
     BackendValidationReport,
     ExecutionBackend,
+    EXECUTION_EVENT_API_VERSION,
+    EXECUTION_EVENT_KIND,
     ExecutionHealthState,
     ExecutionObservation,
     Graph,
@@ -166,6 +168,9 @@ def test_system_run_help_exposes_execution_options() -> None:
     assert "--run-root" in output
     assert "--stop-timeout" in output
     assert "--warnings-as-errors" in output
+    assert "--output" in output
+    assert "human" in output
+    assert "jsonl" in output
 
 
 def test_system_run_executes_local_backend_to_completion(
@@ -1051,3 +1056,120 @@ def test_system_run_renders_nested_system_observation(
     assert "systems=1" in output
     assert "lidar → livox-mid360" in output
     assert "health=healthy" in output
+
+
+def test_system_run_emits_versioned_jsonl_events(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "jsonl.yaml"
+    _write_local_system(
+        path,
+        name="jsonl-run",
+    )
+
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.RUNNING,
+            observation=ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        ),
+        _status(
+            BackendExecutionState.RUNNING,
+            observation=ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.DEGRADED,
+                message="camera latency is elevated",
+            ),
+        ),
+        _status(
+            BackendExecutionState.COMPLETED,
+            observation=ExecutionObservation(
+                ready=False,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        ),
+    ]
+
+    monkeypatch.setattr(
+        system_cli,
+        "LocalBackend",
+        FakeLocalBackend,
+    )
+    monkeypatch.setattr(
+        system_cli.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "run",
+            str(path),
+            "--output",
+            "jsonl",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    events = [
+        json.loads(line)
+        for line in result.stdout.splitlines()
+        if line.strip()
+    ]
+
+    assert [
+        item["event"]
+        for item in events
+    ] == [
+        "prepared",
+        "started",
+        "snapshot",
+        "snapshot",
+        "finished",
+    ]
+
+    assert all(
+        item["apiVersion"]
+        == EXECUTION_EVENT_API_VERSION
+        for item in events
+    )
+    assert all(
+        item["kind"]
+        == EXECUTION_EVENT_KIND
+        for item in events
+    )
+    assert all(
+        item["system"] == "jsonl-run"
+        for item in events
+    )
+
+    snapshots = [
+        item
+        for item in events
+        if item["event"] == "snapshot"
+    ]
+    assert snapshots[0][
+        "status"
+    ]["observation"]["health"] == "healthy"
+    assert snapshots[1][
+        "status"
+    ]["observation"]["health"] == "degraded"
+
+    final = events[-1]
+    assert final[
+        "status"
+    ]["state"] == "completed"
+    assert final[
+        "status"
+    ]["observation"]["ready"] is False
+
+    assert "PREPARED" not in result.stdout
+    assert "\x1b[" not in result.stdout
+    assert result.stderr == ""

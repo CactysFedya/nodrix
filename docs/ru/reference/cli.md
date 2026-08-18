@@ -99,3 +99,20 @@ Lifecycle и observation являются разными понятиями:
 
 Observation является живым состоянием выполнения и не сохраняется как поле
 декларативного System YAML.
+
+### События выполнения JSON Lines
+
+Для автоматизации и внешнего мониторинга используйте
+`plyctl system run SYSTEM --output jsonl`. Стандартный вывод содержит ровно
+один компактный JSON-объект в каждой строке. Диагностика для человека и
+предупреждения planner выводятся в стандартный поток ошибок.
+
+Каждое событие содержит `apiVersion: nodrix.execution.event/v1` и
+`kind: ExecutionEvent`. Поток использует события `prepared`, `started`,
+`snapshot`, `stopping`, `finished` и `error`. Событие snapshot выводится только
+при изменении значимых lifecycle-данных или observation.
+
+Поле `status` содержит полную иерархию System: идентичность дочернего instance
+и разрешённого definition, execution scopes, readiness, health, сообщения и
+стабильные сведения об ошибках. Этот публичный поток System отделён от
+внутреннего legacy-журнала `events.jsonl` Pipeline runtime.

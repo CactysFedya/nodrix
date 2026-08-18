@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from enum import StrEnum
 from pathlib import Path
 import sys
 import time
@@ -34,10 +35,13 @@ from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefiniti
 from .system import (
     BackendExecutionState,
     DefinitionCatalog,
+    ExecutionEvent,
+    ExecutionEventKind,
     LocalBackend,
     SystemOrchestrator,
     dump_system,
     dump_system_schema,
+    dumps_execution_event,
     load_system_details,
     pipeline_manifest_to_system,
     plan_execution_scopes,
@@ -718,6 +722,34 @@ def _local_orchestration_bindings(
     return bindings
 
 
+class _SystemRunOutputFormat(StrEnum):
+    HUMAN = "human"
+    JSONL = "jsonl"
+
+
+def _emit_system_execution_event(
+    *,
+    event: ExecutionEventKind,
+    system: str,
+    execution_id: str | None = None,
+    status=None,
+    message: str | None = None,
+    details: dict[str, object] | None = None,
+) -> None:
+    typer.echo(
+        dumps_execution_event(
+            ExecutionEvent(
+                event=event,
+                system=system,
+                execution_id=execution_id,
+                status=status,
+                message=message,
+                details=details or {},
+            )
+        )
+    )
+
+
 @system_app.command("run")
 def system_run(
     path: Annotated[
@@ -769,6 +801,16 @@ def system_run(
             ),
         ),
     ] = 10.0,
+    output_format: Annotated[
+        _SystemRunOutputFormat,
+        typer.Option(
+            "--output",
+            help=(
+                "Output format: human tree or "
+                "versioned JSON Lines events"
+            ),
+        ),
+    ] = _SystemRunOutputFormat.HUMAN,
     warnings_as_errors: Annotated[
         bool,
         typer.Option(
@@ -781,6 +823,15 @@ def system_run(
     ] = False,
 ) -> None:
     """Plan and execute one canonical System hierarchy."""
+    jsonl = (
+        output_format
+        is _SystemRunOutputFormat.JSONL
+    )
+    event_system = (
+        path.stem
+        if path is not None
+        else "unknown"
+    )
 
     try:
         (
@@ -800,6 +851,7 @@ def system_run(
         )
 
         system = details.system
+        event_system = system.name
 
         catalog = (
             _catalog_for_project(
@@ -836,42 +888,84 @@ def system_run(
         )
 
     except Exception as exc:
-        console.print(
-            "[red]System run failed:[/red] "
-            f"{exc}"
-        )
+        if jsonl:
+            _emit_system_execution_event(
+                event=ExecutionEventKind.ERROR,
+                system=event_system,
+                message=str(exc),
+                details={
+                    "phase": "resolution",
+                },
+            )
+        else:
+            console.print(
+                "[red]System run failed:[/red] "
+                f"{exc}"
+            )
         raise typer.Exit(1)
 
     if (
         warnings_as_errors
         and plan.diagnostics
     ):
-        console.print(
-            "[red]System run refused:[/red] "
+        message = (
             "RUN102: planner warnings are present "
             "and --warnings-as-errors was set"
         )
 
-        _render_system_plan(
-            plan
-        )
+        if jsonl:
+            _emit_system_execution_event(
+                event=ExecutionEventKind.ERROR,
+                system=event_system,
+                message=message,
+                details={
+                    "phase": "planning",
+                    "diagnostics": [
+                        {
+                            "code": item.code,
+                            "path": item.path,
+                            "message": item.message,
+                        }
+                        for item in plan.diagnostics
+                    ],
+                },
+            )
+        else:
+            console.print(
+                "[red]System run refused:[/red] "
+                f"{message}"
+            )
+            _render_system_plan(
+                plan
+            )
 
         raise typer.Exit(1)
 
     if plan.diagnostics:
-        console.print(
-            "[yellow]Planner warnings:"
-            "[/yellow] "
-            f"{len(plan.diagnostics)}"
-        )
-
-        for item in plan.diagnostics:
+        if jsonl:
+            for item in plan.diagnostics:
+                typer.echo(
+                    (
+                        f"{item.code} "
+                        f"{item.path or '-'} · "
+                        f"{item.message}"
+                    ),
+                    err=True,
+                )
+        else:
             console.print(
-                f"[yellow]{item.code}"
-                f"[/yellow] "
-                f"{item.path or '-'} · "
-                f"{item.message}"
+                "[yellow]Planner warnings:"
+                "[/yellow] "
+                f"{len(plan.diagnostics)}"
             )
+
+            for item in plan.diagnostics:
+                console.print(
+                    f"[yellow]{item.code}"
+                    f"[/yellow] "
+                    f"{item.path or '-'} · "
+                    f"{item.message}"
+                )
 
     execution_root = (
         find_workspace(
@@ -904,16 +998,55 @@ def system_run(
     )
 
     if report.diagnostics:
-        _render_orchestration_validation(
-            report
-        )
+        if jsonl:
+            for item in report.diagnostics:
+                typer.echo(
+                    (
+                        f"{item.code} "
+                        f"{item.path or '-'} · "
+                        f"{item.message}"
+                    ),
+                    err=True,
+                )
+        else:
+            _render_orchestration_validation(
+                report
+            )
 
     if not report.valid:
-        console.print(
-            "[red]System run failed:[/red] "
+        message = (
             "RUN103: SystemOrchestrator rejected "
             "the execution plan"
         )
+        if jsonl:
+            _emit_system_execution_event(
+                event=ExecutionEventKind.ERROR,
+                system=event_system,
+                message=message,
+                details={
+                    "phase": "validation",
+                    "diagnostics": [
+                        {
+                            "level": item.level,
+                            "code": item.code,
+                            "path": item.path,
+                            "message": item.message,
+                            "scope": (
+                                item.scope.id
+                                if item.scope
+                                is not None
+                                else None
+                            ),
+                        }
+                        for item in report.diagnostics
+                    ],
+                },
+            )
+        else:
+            console.print(
+                "[red]System run failed:[/red] "
+                f"{message}"
+            )
         raise typer.Exit(1)
 
     try:
@@ -925,18 +1058,38 @@ def system_run(
         )
 
     except Exception as exc:
-        console.print(
-            "[red]System prepare failed:[/red] "
-            f"{exc}"
-        )
+        if jsonl:
+            _emit_system_execution_event(
+                event=ExecutionEventKind.ERROR,
+                system=event_system,
+                message=str(exc),
+                details={
+                    "phase": "prepare",
+                },
+            )
+        else:
+            console.print(
+                "[red]System prepare failed:[/red] "
+                f"{exc}"
+            )
         raise typer.Exit(1)
 
-    console.print(
-        "[green]PREPARED[/green] "
-        f"[bold]{system.name}[/bold] · "
-        f"scopes={len(prepared.scopes)} · "
-        f"systems={len(prepared.systems)}"
-    )
+    if jsonl:
+        _emit_system_execution_event(
+            event=ExecutionEventKind.PREPARED,
+            system=event_system,
+            details={
+                "scopes": len(prepared.scopes),
+                "systems": len(prepared.systems),
+            },
+        )
+    else:
+        console.print(
+            "[green]PREPARED[/green] "
+            f"[bold]{system.name}[/bold] · "
+            f"scopes={len(prepared.scopes)} · "
+            f"systems={len(prepared.systems)}"
+        )
 
     handle = None
 
@@ -948,13 +1101,26 @@ def system_run(
             ),
         )
 
-        console.print(
-            "[green]STARTED[/green] "
-            f"[bold]{system.name}[/bold] · "
-            f"{handle.execution_id} · "
-            f"scopes={len(handle.scopes)} · "
-            f"systems={len(handle.systems)}"
-        )
+        if jsonl:
+            _emit_system_execution_event(
+                event=ExecutionEventKind.STARTED,
+                system=event_system,
+                execution_id=(
+                    handle.execution_id
+                ),
+                details={
+                    "scopes": len(handle.scopes),
+                    "systems": len(handle.systems),
+                },
+            )
+        else:
+            console.print(
+                "[green]STARTED[/green] "
+                f"[bold]{system.name}[/bold] · "
+                f"{handle.execution_id} · "
+                f"scopes={len(handle.scopes)} · "
+                f"systems={len(handle.systems)}"
+            )
 
         previous_snapshot = None
 
@@ -973,12 +1139,23 @@ def system_run(
                 snapshot
                 != previous_snapshot
             ):
-                console.print(
-                    render_system_execution_status(
-                        system.name,
-                        status,
+                if jsonl:
+                    _emit_system_execution_event(
+                        event=(
+                            ExecutionEventKind.FINISHED
+                            if status.terminal
+                            else ExecutionEventKind.SNAPSHOT
+                        ),
+                        system=event_system,
+                        status=status,
                     )
-                )
+                else:
+                    console.print(
+                        render_system_execution_status(
+                            system.name,
+                            status,
+                        )
+                    )
                 previous_snapshot = (
                     snapshot
                 )
@@ -1009,17 +1186,39 @@ def system_run(
 
     except KeyboardInterrupt:
         if handle is None:
-            console.print(
-                "[yellow]Interrupted before "
-                "execution started.[/yellow]"
+            message = (
+                "Interrupted before execution started."
             )
+            if jsonl:
+                _emit_system_execution_event(
+                    event=ExecutionEventKind.ERROR,
+                    system=event_system,
+                    message=message,
+                    details={
+                        "phase": "start",
+                        "interrupted": True,
+                    },
+                )
+            else:
+                console.print(
+                    f"[yellow]{message}[/yellow]"
+                )
             raise typer.Exit(130)
 
-        console.print(
-            "[yellow]Stopping[/yellow] "
-            f"[bold]{system.name}[/bold] · "
-            f"{handle.execution_id}"
-        )
+        if jsonl:
+            _emit_system_execution_event(
+                event=ExecutionEventKind.STOPPING,
+                system=event_system,
+                execution_id=(
+                    handle.execution_id
+                ),
+            )
+        else:
+            console.print(
+                "[yellow]Stopping[/yellow] "
+                f"[bold]{system.name}[/bold] · "
+                f"{handle.execution_id}"
+            )
 
         try:
             status = orchestrator.stop(
@@ -1029,33 +1228,101 @@ def system_run(
                 ),
             )
         except Exception as exc:
-            console.print(
-                "[red]System stop failed:[/red] "
-                f"{exc}"
-            )
+            if jsonl:
+                _emit_system_execution_event(
+                    event=ExecutionEventKind.ERROR,
+                    system=event_system,
+                    execution_id=(
+                        handle.execution_id
+                    ),
+                    message=str(exc),
+                    details={
+                        "phase": "stop",
+                    },
+                )
+            else:
+                console.print(
+                    "[red]System stop failed:[/red] "
+                    f"{exc}"
+                )
             raise typer.Exit(130)
 
-        console.print(
-            render_system_execution_status(
-                system.name,
-                status,
+        if jsonl:
+            _emit_system_execution_event(
+                event=(
+                    ExecutionEventKind.FINISHED
+                    if status.terminal
+                    else ExecutionEventKind.SNAPSHOT
+                ),
+                system=event_system,
+                status=status,
             )
-        )
+        else:
+            console.print(
+                render_system_execution_status(
+                    system.name,
+                    status,
+                )
+            )
 
         if (
             status.state
             is BackendExecutionState.STOPPING
         ):
-            console.print(
-                "[yellow]Runtime is still stopping "
-                "after the requested timeout."
-                "[/yellow]"
-            )
+            if jsonl:
+                typer.echo(
+                    (
+                        "Runtime is still stopping "
+                        "after the requested timeout."
+                    ),
+                    err=True,
+                )
+            else:
+                console.print(
+                    "[yellow]Runtime is still stopping "
+                    "after the requested timeout."
+                    "[/yellow]"
+                )
 
         raise typer.Exit(130)
 
     except typer.Exit:
         raise
+
+    except Exception as exc:
+        if jsonl:
+            _emit_system_execution_event(
+                event=ExecutionEventKind.ERROR,
+                system=event_system,
+                execution_id=(
+                    handle.execution_id
+                    if handle is not None
+                    else None
+                ),
+                message=str(exc),
+                details={
+                    "phase": "execution",
+                },
+            )
+        else:
+            console.print(
+                "[red]System execution failed:[/red] "
+                f"{exc}"
+            )
+
+        if handle is not None:
+            try:
+                orchestrator.stop(
+                    handle,
+                    timeout_seconds=(
+                        stop_timeout
+                    ),
+                )
+            except Exception:
+                pass
+
+        raise typer.Exit(1)
+
 
     except Exception as exc:
         console.print(
