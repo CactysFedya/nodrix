@@ -7,6 +7,7 @@ from pathlib import Path
 from nodrix.system import (
     ApplicationInstance,
     BackendExecutionState,
+    ExecutionHealthState,
     Graph,
     LocalBackend,
     NodeInstance,
@@ -292,3 +293,176 @@ def test_local_backend_is_public_through_plyctl() -> None:
     from plyctl import LocalBackend as PublicLocalBackend
 
     assert PublicLocalBackend is LocalBackend
+
+
+class ObservableRuntime(FakeRuntime):
+    def __init__(self, manifest, manifest_path, run_root):
+        super().__init__(manifest, manifest_path, run_root)
+        self.snapshot_data = {
+            "status": "running",
+            "nodes": {
+                "source": {
+                    "health": {
+                        "state": "running",
+                        "ready": True,
+                    },
+                },
+                "sink": {
+                    "health": {
+                        "state": "running",
+                        "ready": True,
+                    },
+                },
+            },
+            "applications": {
+                "camera": {
+                    "status": "ok",
+                    "running": True,
+                },
+            },
+            "resources": {
+                "cache": {
+                    "status": "ok",
+                    "open": True,
+                },
+            },
+            "sessions": {
+                "ros": {
+                    "status": "ok",
+                    "open": True,
+                },
+            },
+        }
+
+    def run_sync(self):
+        self.stop_event.wait(5)
+        return {
+            "pipeline": self.manifest.metadata.name,
+            "status": "stopped",
+        }
+
+    def snapshot(self):
+        return self.snapshot_data
+
+
+def _wait_for_running(backend, handle):
+    deadline = time.monotonic() + 2
+    status = backend.inspect(handle)
+    while (
+        status.state is not BackendExecutionState.RUNNING
+        and time.monotonic() < deadline
+    ):
+        time.sleep(0.01)
+        status = backend.inspect(handle)
+    assert status.state is BackendExecutionState.RUNNING
+    return status
+
+
+def test_local_backend_exposes_healthy_runtime_observation(
+    tmp_path: Path,
+) -> None:
+    backend = LocalBackend(
+        working_directory=tmp_path,
+        runtime_factory=ObservableRuntime,
+    )
+    handle = backend.start(backend.prepare_plan(_simple_plan()))
+
+    status = _wait_for_running(backend, handle)
+
+    assert status.observation is not None
+    assert status.observation.ready is True
+    assert status.observation.health is ExecutionHealthState.HEALTHY
+    assert status.details["snapshot"]["resources"]["cache"]["open"] is True
+
+    backend.stop(handle, timeout_seconds=1)
+
+
+def test_local_backend_aggregates_unhealthy_component(
+    tmp_path: Path,
+) -> None:
+    backend = LocalBackend(
+        working_directory=tmp_path,
+        runtime_factory=ObservableRuntime,
+    )
+    prepared = backend.prepare_plan(_simple_plan())
+    prepared.payload.runtime.snapshot_data["nodes"]["source"]["health"] = {
+        "state": "failed",
+        "ready": False,
+        "error": "sensor failed",
+    }
+    handle = backend.start(prepared)
+
+    status = _wait_for_running(backend, handle)
+
+    assert status.observation is not None
+    assert status.observation.ready is False
+    assert status.observation.health is ExecutionHealthState.UNHEALTHY
+    assert "source" in (status.observation.message or "")
+
+    backend.stop(handle, timeout_seconds=1)
+
+
+def test_local_backend_preserves_unsupported_observation(
+    tmp_path: Path,
+) -> None:
+    backend = LocalBackend(
+        working_directory=tmp_path,
+        runtime_factory=FakeRuntime,
+    )
+    handle = backend.start(backend.prepare_plan(_simple_plan()))
+
+    status = backend.inspect(handle)
+
+    assert status.observation is None
+
+    backend.stop(handle, timeout_seconds=1)
+
+
+
+def test_local_backend_aggregates_degraded_component(
+    tmp_path: Path,
+) -> None:
+    backend = LocalBackend(
+        working_directory=tmp_path,
+        runtime_factory=ObservableRuntime,
+    )
+    prepared = backend.prepare_plan(_simple_plan())
+    prepared.payload.runtime.snapshot_data["applications"]["camera"] = {
+        "status": "warning",
+        "running": True,
+        "message": "camera latency is elevated",
+    }
+    handle = backend.start(prepared)
+
+    status = _wait_for_running(backend, handle)
+
+    assert status.observation is not None
+    assert status.observation.ready is True
+    assert status.observation.health is ExecutionHealthState.DEGRADED
+    assert "camera" in (status.observation.message or "")
+
+    backend.stop(handle, timeout_seconds=1)
+
+
+def test_local_backend_reports_snapshot_failure_as_unknown(
+    tmp_path: Path,
+) -> None:
+    class FailingSnapshotRuntime(ObservableRuntime):
+        def snapshot(self):
+            raise RuntimeError("snapshot unavailable")
+
+    backend = LocalBackend(
+        working_directory=tmp_path,
+        runtime_factory=FailingSnapshotRuntime,
+    )
+    handle = backend.start(backend.prepare_plan(_simple_plan()))
+
+    status = _wait_for_running(backend, handle)
+
+    assert status.observation is not None
+    assert status.observation.ready is None
+    assert status.observation.health is ExecutionHealthState.UNKNOWN
+    assert "snapshot unavailable" in (status.observation.message or "")
+    assert "observation_error" in status.details
+
+    backend.stop(handle, timeout_seconds=1)

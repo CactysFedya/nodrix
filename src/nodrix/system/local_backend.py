@@ -30,6 +30,8 @@ from .backend import (
     BackendExecutionState,
     BackendExecutionStatus,
     ExecutionBackend,
+    ExecutionHealthState,
+    ExecutionObservation,
     PreparedExecution,
 )
 from .execution_context import SystemExecutionContext
@@ -602,6 +604,206 @@ def lower_local_context(context: BackendContext) -> LocalLoweringResult:
     )
 
 
+def _health_token(value: Any) -> str:
+    if value is None:
+        return ""
+    raw = getattr(value, "value", value)
+    return str(raw).strip().lower().rsplit(".", 1)[-1]
+
+
+def _local_runtime_observation(
+    snapshot: Mapping[str, Any],
+    *,
+    state: BackendExecutionState,
+    error: BaseException | None,
+) -> ExecutionObservation:
+    if error is not None or state is BackendExecutionState.FAILED:
+        message = (
+            f"{type(error).__name__}: {error}"
+            if error is not None
+            else "local execution failed"
+        )
+        return ExecutionObservation(
+            ready=False,
+            health=ExecutionHealthState.UNHEALTHY,
+            message=message,
+        )
+
+    unhealthy_states = {
+        "error",
+        "failed",
+        "failure",
+        "unhealthy",
+        "crashed",
+        "dead",
+    }
+    degraded_states = {
+        "degraded",
+        "warning",
+        "warn",
+        "stale",
+    }
+    healthy_states = {
+        "ok",
+        "healthy",
+        "ready",
+        "running",
+        "active",
+        "open",
+        "completed",
+        "stopped",
+        "closed",
+        "idle",
+        "created",
+        "configured",
+    }
+    not_ready_states = {
+        "completed",
+        "stopped",
+        "closed",
+        "idle",
+        "created",
+        "configured",
+    }
+    ranks = {
+        ExecutionHealthState.UNKNOWN: 0,
+        ExecutionHealthState.HEALTHY: 1,
+        ExecutionHealthState.DEGRADED: 2,
+        ExecutionHealthState.UNHEALTHY: 3,
+    }
+
+    health = ExecutionHealthState.UNKNOWN
+    readiness: list[bool | None] = []
+    problems: list[str] = []
+    not_ready: list[str] = []
+
+    def merge(candidate: ExecutionHealthState) -> None:
+        nonlocal health
+        if ranks[candidate] > ranks[health]:
+            health = candidate
+
+    runtime_status = _health_token(snapshot.get("status"))
+    if runtime_status in unhealthy_states:
+        merge(ExecutionHealthState.UNHEALTHY)
+        readiness.append(False)
+        problems.append(f"runtime: {runtime_status}")
+    elif runtime_status in degraded_states:
+        merge(ExecutionHealthState.DEGRADED)
+        readiness.append(None)
+        problems.append(f"runtime: {runtime_status}")
+    elif runtime_status in healthy_states:
+        merge(ExecutionHealthState.HEALTHY)
+        runtime_ready = runtime_status not in not_ready_states
+        readiness.append(runtime_ready)
+        if not runtime_ready:
+            not_ready.append("runtime")
+    else:
+        readiness.append(None)
+
+    for group_name in ("nodes", "applications", "resources", "sessions"):
+        group = snapshot.get(group_name)
+        if not isinstance(group, Mapping):
+            continue
+
+        for name, value in group.items():
+            label = f"{group_name.rstrip('s')} {name}"
+            if not isinstance(value, Mapping):
+                readiness.append(None)
+                continue
+
+            nested = value.get("health")
+            record = nested if isinstance(nested, Mapping) else value
+            token = _health_token(
+                record.get("status", record.get("state"))
+            )
+
+            ready: bool | None = None
+            explicit_ready = record.get("ready")
+            if isinstance(explicit_ready, bool):
+                ready = explicit_ready
+            else:
+                for key in ("running", "open"):
+                    candidate = record.get(key)
+                    if isinstance(candidate, bool):
+                        ready = candidate
+                        break
+
+            if ready is None:
+                if token in unhealthy_states or token in not_ready_states:
+                    ready = False
+                elif token in healthy_states:
+                    ready = True
+
+            readiness.append(ready)
+            if ready is False:
+                not_ready.append(label)
+
+            explicitly_healthy = record.get("healthy")
+            if explicitly_healthy is False or token in unhealthy_states:
+                component_health = ExecutionHealthState.UNHEALTHY
+            elif token in degraded_states:
+                component_health = ExecutionHealthState.DEGRADED
+            elif explicitly_healthy is True or token in healthy_states:
+                component_health = ExecutionHealthState.HEALTHY
+            else:
+                component_health = ExecutionHealthState.UNKNOWN
+
+            merge(component_health)
+
+            if component_health in {
+                ExecutionHealthState.DEGRADED,
+                ExecutionHealthState.UNHEALTHY,
+            }:
+                reason = (
+                    record.get("message")
+                    or record.get("error")
+                    or token
+                    or component_health.value
+                )
+                problems.append(f"{label}: {reason}")
+
+    if state is BackendExecutionState.RUNNING:
+        if any(value is False for value in readiness):
+            ready = False
+        elif any(value is None for value in readiness):
+            ready = None
+        else:
+            ready = True
+    elif state in {
+        BackendExecutionState.STOPPING,
+        BackendExecutionState.STOPPED,
+        BackendExecutionState.COMPLETED,
+        BackendExecutionState.FAILED,
+    }:
+        ready = False
+    else:
+        ready = None
+
+    if (
+        state in {
+            BackendExecutionState.STOPPED,
+            BackendExecutionState.COMPLETED,
+        }
+        and health is ExecutionHealthState.UNKNOWN
+    ):
+        health = ExecutionHealthState.HEALTHY
+
+    if problems:
+        message = "; ".join(problems[:3])
+    elif state is BackendExecutionState.RUNNING and ready is False:
+        message = "not ready: " + ", ".join(not_ready[:3])
+    elif state is BackendExecutionState.RUNNING and ready is None:
+        message = "local runtime readiness is unknown"
+    else:
+        message = None
+
+    return ExecutionObservation(
+        ready=ready,
+        health=health,
+        message=message,
+    )
+
+
 class LocalBackend(ExecutionBackend):
     """Execute a local System scope through the existing HybridPipelineRuntime."""
 
@@ -847,6 +1049,42 @@ class LocalBackend(ExecutionBackend):
         if error is not None:
             details["error"] = f"{type(error).__name__}: {error}"
 
+        observation: ExecutionObservation | None = None
+        snapshotter = getattr(execution.runtime, "snapshot", None)
+        if callable(snapshotter):
+            try:
+                snapshot_value = snapshotter()
+                if not isinstance(snapshot_value, Mapping):
+                    raise TypeError(
+                        "runtime snapshot must return a mapping"
+                    )
+                snapshot = dict(snapshot_value)
+                details["snapshot"] = snapshot
+                observation = _local_runtime_observation(
+                    snapshot,
+                    state=state,
+                    error=error,
+                )
+            except Exception as exc:
+                observation_error = f"{type(exc).__name__}: {exc}"
+                details["observation_error"] = observation_error
+                observation = ExecutionObservation(
+                    ready=(
+                        False
+                        if state is BackendExecutionState.FAILED
+                        else None
+                    ),
+                    health=(
+                        ExecutionHealthState.UNHEALTHY
+                        if state is BackendExecutionState.FAILED
+                        else ExecutionHealthState.UNKNOWN
+                    ),
+                    message=(
+                        f"local runtime observation failed: "
+                        f"{observation_error}"
+                    ),
+                )
+
         return BackendExecutionStatus(
             backend=self.backend_id,
             execution_id=handle.execution_id,
@@ -857,6 +1095,7 @@ class LocalBackend(ExecutionBackend):
                 else f"{type(error).__name__}: {error}"
             ),
             details=details,
+            observation=observation,
         )
 
     def _stop(
@@ -887,12 +1126,14 @@ class LocalBackend(ExecutionBackend):
             execution.thread is not None
             and execution.thread.is_alive()
         ):
+            status = self._inspect(handle)
             return BackendExecutionStatus(
                 backend=self.backend_id,
                 execution_id=handle.execution_id,
                 state=BackendExecutionState.STOPPING,
                 message="local runtime is still stopping",
-                details={"thread_alive": True},
+                details=status.details,
+                observation=status.observation,
             )
 
         return self._inspect(handle)

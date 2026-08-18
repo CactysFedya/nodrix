@@ -142,6 +142,14 @@ class RuntimeExecutionMixin:
             "duration_seconds": float(duration_seconds or 0.0),
             "profile": self.manifest.runtime.profile,
             "nodes": {name: self._node_report(loaded, duration_seconds) for name, loaded in self.nodes.items()},
+            "resources": {
+                name: self._managed_resource_health(loaded)
+                for name, loaded in self.resources.items()
+            },
+            "sessions": {
+                name: self._session_health(loaded)
+                for name, loaded in self.sessions.items()
+            },
             "applications": {
                 name: self._application_health(loaded)
                 for name, loaded in self.applications.items()
