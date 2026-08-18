@@ -499,24 +499,46 @@ class SystemExecutionStatus:
 
 def _aggregate_state(
     statuses: tuple[ScopeExecutionStatus, ...],
+    systems: tuple[ChildSystemExecutionStatus, ...] = (),
 ) -> BackendExecutionState:
-    if not statuses:
+    states = (
+        tuple(
+            item.status.state
+            for item in statuses
+        )
+        + tuple(
+            item.status.state
+            for item in systems
+        )
+    )
+
+    if not states:
         return BackendExecutionState.COMPLETED
 
-    states = tuple(item.status.state for item in statuses)
     if BackendExecutionState.FAILED in states:
         return BackendExecutionState.FAILED
-    if all(state is BackendExecutionState.COMPLETED for state in states):
-        return BackendExecutionState.COMPLETED
+
     if all(
-        state in {BackendExecutionState.STOPPED, BackendExecutionState.COMPLETED}
+        state is BackendExecutionState.COMPLETED
+        for state in states
+    ):
+        return BackendExecutionState.COMPLETED
+
+    if all(
+        state in {
+            BackendExecutionState.STOPPED,
+            BackendExecutionState.COMPLETED,
+        }
         for state in states
     ):
         return BackendExecutionState.STOPPED
+
     if BackendExecutionState.STOPPING in states:
         return BackendExecutionState.STOPPING
+
     if BackendExecutionState.RUNNING in states:
         return BackendExecutionState.RUNNING
+
     return BackendExecutionState.PREPARED
 
 
@@ -593,13 +615,16 @@ class SystemOrchestrator:
                     message=str(exc),
                 )
             )
+
             return OrchestrationValidationReport(
                 scopes=scopes,
                 diagnostics=tuple(diagnostics),
             )
 
+        # Direct execution scopes of this System only.
         for scope in scopes:
             backend = self._bindings.get(scope)
+
             if backend is None:
                 diagnostics.append(
                     OrchestrationDiagnostic(
@@ -608,8 +633,8 @@ class SystemOrchestrator:
                         scope=scope,
                         path="bindings",
                         message=(
-                            "no execution backend is bound to this target/backend "
-                            "scope"
+                            "no execution backend is bound to this "
+                            "target/backend scope"
                         ),
                     )
                 )
@@ -623,7 +648,8 @@ class SystemOrchestrator:
                         scope=scope,
                         path="bindings.backend_id",
                         message=(
-                            f"bound backend advertises {backend.backend_id!r}; "
+                            f"bound backend advertises "
+                            f"{backend.backend_id!r}; "
                             f"plan requires {scope.backend!r}"
                         ),
                     )
@@ -635,7 +661,11 @@ class SystemOrchestrator:
                 scope,
                 execution_context=execution_context,
             )
-            report = backend.validate(context)
+
+            report = backend.validate(
+                context
+            )
+
             diagnostics.extend(
                 OrchestrationDiagnostic(
                     level=item.level,
@@ -646,6 +676,33 @@ class SystemOrchestrator:
                     source="backend",
                 )
                 for item in report.diagnostics
+            )
+
+        # Child Systems retain their execution boundary.
+        # They are validated recursively instead of being flattened
+        # into the parent scope set.
+        for child in plan.systems:
+            child_report = self.validate_plan(
+                child.plan,
+                execution_context=execution_context,
+            )
+
+            prefix = f"systems.{child.name}"
+
+            diagnostics.extend(
+                OrchestrationDiagnostic(
+                    level=item.level,
+                    code=item.code,
+                    scope=item.scope,
+                    path=(
+                        prefix
+                        if not item.path
+                        else f"{prefix}.{item.path}"
+                    ),
+                    message=item.message,
+                    source=item.source,
+                )
+                for item in child_report.diagnostics
             )
 
         return OrchestrationValidationReport(
@@ -665,22 +722,33 @@ class SystemOrchestrator:
         )
         report.raise_for_errors()
 
-        prepared_scopes: list[PreparedScopeExecution] = []
+        prepared_scopes: list[
+            PreparedScopeExecution
+        ] = []
+
         for scope in report.scopes:
             backend = self._bindings[scope]
+
             context = backend_context_for_scope(
                 plan,
                 scope,
                 execution_context=execution_context,
             )
+
             try:
-                prepared = backend.prepare(context)
+                prepared = backend.prepare(
+                    context
+                )
             except Exception as exc:
                 raise OrchestrationError(
                     "ORCH201",
-                    f"prepare failed for scope {scope.id}: {exc}",
+                    (
+                        "prepare failed for scope "
+                        f"{scope.id}: {exc}"
+                    ),
                     path=scope.id,
                 ) from exc
+
             prepared_scopes.append(
                 PreparedScopeExecution(
                     scope=scope,
@@ -689,10 +757,42 @@ class SystemOrchestrator:
                 )
             )
 
+        prepared_systems: list[
+            PreparedChildSystemExecution
+        ] = []
+
+        for child in plan.systems:
+            try:
+                child_execution = self.prepare_plan(
+                    child.plan,
+                    execution_context=execution_context,
+                )
+            except Exception as exc:
+                raise OrchestrationError(
+                    "ORCH203",
+                    (
+                        "prepare failed for child System "
+                        f"{child.name!r}: {exc}"
+                    ),
+                    path=f"systems.{child.name}",
+                ) from exc
+
+            prepared_systems.append(
+                PreparedChildSystemExecution(
+                    instance=child,
+                    execution=child_execution,
+                )
+            )
+
         return PreparedSystemExecution(
             plan=plan,
             execution_context=execution_context,
-            scopes=tuple(prepared_scopes),
+            scopes=tuple(
+                prepared_scopes
+            ),
+            systems=tuple(
+                prepared_systems
+            ),
         )
 
     def start(
@@ -701,37 +801,88 @@ class SystemOrchestrator:
         *,
         rollback_timeout_seconds: float | None = None,
     ) -> SystemExecutionHandle:
-        if rollback_timeout_seconds is not None and rollback_timeout_seconds < 0:
-            raise ValueError("rollback_timeout_seconds cannot be negative")
+        if (
+            rollback_timeout_seconds is not None
+            and rollback_timeout_seconds < 0
+        ):
+            raise ValueError(
+                "rollback_timeout_seconds cannot be negative"
+            )
 
-        running: list[RunningScopeExecution] = []
+        running_scopes: list[
+            RunningScopeExecution
+        ] = []
+
+        running_systems: list[
+            RunningChildSystemExecution
+        ] = []
+
+        def rollback() -> list[str]:
+            errors: list[str] = []
+
+            # Children started after direct scopes,
+            # therefore children stop first.
+            for child in reversed(
+                running_systems
+            ):
+                try:
+                    self.stop(
+                        child.handle,
+                        timeout_seconds=(
+                            rollback_timeout_seconds
+                        ),
+                    )
+                except Exception as exc:
+                    errors.append(
+                        f"systems.{child.name}: {exc}"
+                    )
+
+            for started in reversed(
+                running_scopes
+            ):
+                try:
+                    started.backend.stop(
+                        started.handle,
+                        timeout_seconds=(
+                            rollback_timeout_seconds
+                        ),
+                    )
+                except Exception as exc:
+                    errors.append(
+                        f"{started.scope.id}: {exc}"
+                    )
+
+            return errors
+
+        # Start direct scopes of this System.
         for item in prepared.scopes:
             try:
-                handle = item.backend.start(item.prepared)
+                handle = item.backend.start(
+                    item.prepared
+                )
             except Exception as exc:
-                rollback_errors: list[str] = []
-                for started in reversed(running):
-                    try:
-                        started.backend.stop(
-                            started.handle,
-                            timeout_seconds=rollback_timeout_seconds,
-                        )
-                    except Exception as rollback_exc:
-                        rollback_errors.append(
-                            f"{started.scope.id}: {rollback_exc}"
-                        )
+                rollback_errors = rollback()
+
                 suffix = (
-                    "; rollback errors: " + "; ".join(rollback_errors)
+                    "; rollback errors: "
+                    + "; ".join(
+                        rollback_errors
+                    )
                     if rollback_errors
                     else ""
                 )
+
                 raise OrchestrationError(
                     "ORCH202",
-                    f"start failed for scope {item.scope.id}: {exc}{suffix}",
+                    (
+                        "start failed for scope "
+                        f"{item.scope.id}: "
+                        f"{exc}{suffix}"
+                    ),
                     path=item.scope.id,
                 ) from exc
 
-            running.append(
+            running_scopes.append(
                 RunningScopeExecution(
                     scope=item.scope,
                     backend=item.backend,
@@ -739,28 +890,114 @@ class SystemOrchestrator:
                 )
             )
 
-        return SystemExecutionHandle(
-            execution_id=f"system-{uuid4().hex[:12]}",
-            prepared=prepared,
-            scopes=tuple(running),
-        )
-
-    def inspect(self, handle: SystemExecutionHandle) -> SystemExecutionStatus:
-        statuses: list[ScopeExecutionStatus] = []
-        for running in handle.scopes:
+        # Then start nested child Systems in declaration order.
+        for child in prepared.systems:
             try:
-                status = running.backend.inspect(running.handle)
+                child_handle = self.start(
+                    child.execution,
+                    rollback_timeout_seconds=(
+                        rollback_timeout_seconds
+                    ),
+                )
             except Exception as exc:
-                status = _failed_status(running, exc)
-            statuses.append(
-                ScopeExecutionStatus(scope=running.scope, status=status)
+                rollback_errors = rollback()
+
+                suffix = (
+                    "; rollback errors: "
+                    + "; ".join(
+                        rollback_errors
+                    )
+                    if rollback_errors
+                    else ""
+                )
+
+                raise OrchestrationError(
+                    "ORCH204",
+                    (
+                        "start failed for child System "
+                        f"{child.name!r}: "
+                        f"{exc}{suffix}"
+                    ),
+                    path=f"systems.{child.name}",
+                ) from exc
+
+            running_systems.append(
+                RunningChildSystemExecution(
+                    instance=child.instance,
+                    handle=child_handle,
+                )
             )
 
-        frozen = tuple(statuses)
+        return SystemExecutionHandle(
+            execution_id=(
+                f"system-{uuid4().hex[:12]}"
+            ),
+            prepared=prepared,
+            scopes=tuple(
+                running_scopes
+            ),
+            systems=tuple(
+                running_systems
+            ),
+        )
+
+    def inspect(
+        self,
+        handle: SystemExecutionHandle,
+    ) -> SystemExecutionStatus:
+        statuses: list[
+            ScopeExecutionStatus
+        ] = []
+
+        for running in handle.scopes:
+            try:
+                status = running.backend.inspect(
+                    running.handle
+                )
+            except Exception as exc:
+                status = _failed_status(
+                    running,
+                    exc,
+                )
+
+            statuses.append(
+                ScopeExecutionStatus(
+                    scope=running.scope,
+                    status=status,
+                )
+            )
+
+        system_statuses: list[
+            ChildSystemExecutionStatus
+        ] = []
+
+        for child in handle.systems:
+            child_status = self.inspect(
+                child.handle
+            )
+
+            system_statuses.append(
+                ChildSystemExecutionStatus(
+                    instance=child.instance,
+                    status=child_status,
+                )
+            )
+
+        frozen_scopes = tuple(
+            statuses
+        )
+        frozen_systems = tuple(
+            system_statuses
+        )
+
         return SystemExecutionStatus(
             execution_id=handle.execution_id,
-            state=_aggregate_state(frozen),
-            scopes=frozen,
+            state=_aggregate_state(
+                frozen_scopes,
+                frozen_systems,
+            ),
+            scopes=frozen_scopes,
+            systems=frozen_systems,
         )
 
     def stop(
@@ -769,29 +1006,92 @@ class SystemOrchestrator:
         *,
         timeout_seconds: float | None = None,
     ) -> SystemExecutionStatus:
-        if timeout_seconds is not None and timeout_seconds < 0:
-            raise ValueError("timeout_seconds cannot be negative")
+        if (
+            timeout_seconds is not None
+            and timeout_seconds < 0
+        ):
+            raise ValueError(
+                "timeout_seconds cannot be negative"
+            )
 
-        by_scope: dict[ExecutionScope, BackendExecutionStatus] = {}
-        for running in reversed(handle.scopes):
+        # Child Systems were started after direct scopes.
+        # Stop them first, in reverse declaration order.
+        stopped_systems_reverse: list[
+            ChildSystemExecutionStatus
+        ] = []
+
+        for child in reversed(
+            handle.systems
+        ):
+            try:
+                child_status = self.stop(
+                    child.handle,
+                    timeout_seconds=timeout_seconds,
+                )
+            except Exception:
+                # Preserve cleanup of remaining siblings/scopes.
+                # alpha5c will enrich failure diagnostics.
+                child_status = SystemExecutionStatus(
+                    execution_id=(
+                        child.handle.execution_id
+                    ),
+                    state=(
+                        BackendExecutionState.FAILED
+                    ),
+                )
+
+            stopped_systems_reverse.append(
+                ChildSystemExecutionStatus(
+                    instance=child.instance,
+                    status=child_status,
+                )
+            )
+
+        systems = tuple(
+            reversed(
+                stopped_systems_reverse
+            )
+        )
+
+        by_scope: dict[
+            ExecutionScope,
+            BackendExecutionStatus,
+        ] = {}
+
+        for running in reversed(
+            handle.scopes
+        ):
             try:
                 status = running.backend.stop(
                     running.handle,
                     timeout_seconds=timeout_seconds,
                 )
             except Exception as exc:
-                status = _failed_status(running, exc)
-            by_scope[running.scope] = status
+                status = _failed_status(
+                    running,
+                    exc,
+                )
+
+            by_scope[
+                running.scope
+            ] = status
 
         statuses = tuple(
             ScopeExecutionStatus(
                 scope=running.scope,
-                status=by_scope[running.scope],
+                status=by_scope[
+                    running.scope
+                ],
             )
             for running in handle.scopes
         )
+
         return SystemExecutionStatus(
             execution_id=handle.execution_id,
-            state=_aggregate_state(statuses),
+            state=_aggregate_state(
+                statuses,
+                systems,
+            ),
             scopes=statuses,
+            systems=systems,
         )
