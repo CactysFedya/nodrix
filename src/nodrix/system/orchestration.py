@@ -22,8 +22,9 @@ from .backend import (
     BackendExecutionHandle,
     BackendExecutionState,
     BackendExecutionStatus,
-    ExecutionObservation,
     ExecutionBackend,
+    ExecutionHealthState,
+    ExecutionObservation,
     PreparedExecution,
 )
 from .execution_context import (
@@ -582,6 +583,178 @@ def _aggregate_state(
     return BackendExecutionState.PREPARED
 
 
+def _aggregate_observation(
+    statuses: tuple[ScopeExecutionStatus, ...],
+    systems: tuple[ChildSystemExecutionStatus, ...],
+    *,
+    state: BackendExecutionState,
+    failure_message: str | None = None,
+) -> ExecutionObservation | None:
+    """Aggregate readiness and health without hiding missing coverage."""
+
+    entries: tuple[
+        tuple[str, ExecutionObservation | None],
+        ...,
+    ] = (
+        tuple(
+            (
+                f"scopes.{item.scope.id}",
+                item.status.observation,
+            )
+            for item in statuses
+        )
+        + tuple(
+            (
+                f"systems.{item.name}",
+                item.status.observation,
+            )
+            for item in systems
+        )
+    )
+
+    observed = tuple(
+        observation
+        for _, observation in entries
+        if observation is not None
+    )
+    if not observed:
+        return None
+
+    if state in {
+        BackendExecutionState.STOPPING,
+        BackendExecutionState.STOPPED,
+        BackendExecutionState.COMPLETED,
+        BackendExecutionState.FAILED,
+    }:
+        ready: bool | None = False
+    elif state is not BackendExecutionState.RUNNING:
+        ready = None
+    elif any(
+        observation is not None
+        and observation.ready is False
+        for _, observation in entries
+    ):
+        ready = False
+    elif any(
+        observation is None
+        or observation.ready is None
+        for _, observation in entries
+    ):
+        ready = None
+    else:
+        ready = True
+
+    if state is BackendExecutionState.FAILED:
+        health = ExecutionHealthState.UNHEALTHY
+    elif any(
+        observation.health
+        is ExecutionHealthState.UNHEALTHY
+        for observation in observed
+    ):
+        health = ExecutionHealthState.UNHEALTHY
+    elif any(
+        observation.health
+        is ExecutionHealthState.DEGRADED
+        for observation in observed
+    ):
+        health = ExecutionHealthState.DEGRADED
+    elif any(
+        observation is None
+        or observation.health
+        is ExecutionHealthState.UNKNOWN
+        for _, observation in entries
+    ):
+        health = ExecutionHealthState.UNKNOWN
+    else:
+        health = ExecutionHealthState.HEALTHY
+
+    message: str | None = None
+    if (
+        state is BackendExecutionState.FAILED
+        and failure_message
+    ):
+        message = failure_message
+
+    if (
+        message is None
+        and health is ExecutionHealthState.UNHEALTHY
+    ):
+        for entry_path, observation in entries:
+            if (
+                observation is not None
+                and observation.health
+                is ExecutionHealthState.UNHEALTHY
+            ):
+                reason = (
+                    observation.message
+                    or "unhealthy"
+                )
+                message = f"{entry_path}: {reason}"
+                break
+
+    if (
+        message is None
+        and health is ExecutionHealthState.DEGRADED
+    ):
+        for entry_path, observation in entries:
+            if (
+                observation is not None
+                and observation.health
+                is ExecutionHealthState.DEGRADED
+            ):
+                reason = (
+                    observation.message
+                    or "degraded"
+                )
+                message = f"{entry_path}: {reason}"
+                break
+
+    if message is None and ready is False:
+        for entry_path, observation in entries:
+            if (
+                observation is not None
+                and observation.ready is False
+            ):
+                reason = (
+                    observation.message
+                    or "not ready"
+                )
+                message = f"{entry_path}: {reason}"
+                break
+
+    if (
+        message is None
+        and (
+            health is ExecutionHealthState.UNKNOWN
+            or ready is None
+        )
+    ):
+        for entry_path, observation in entries:
+            if observation is None:
+                message = (
+                    "observation unavailable: "
+                    f"{entry_path}"
+                )
+                break
+            if (
+                observation.health
+                is ExecutionHealthState.UNKNOWN
+                or observation.ready is None
+            ):
+                reason = (
+                    observation.message
+                    or "observation is unknown"
+                )
+                message = f"{entry_path}: {reason}"
+                break
+
+    return ExecutionObservation(
+        ready=ready,
+        health=health,
+        message=message,
+    )
+
+
 def _failure_context(
     statuses: tuple[ScopeExecutionStatus, ...],
     systems: tuple[ChildSystemExecutionStatus, ...],
@@ -1124,6 +1297,13 @@ class SystemOrchestrator:
                 frozen_systems,
             )
 
+        observation = _aggregate_observation(
+            frozen_scopes,
+            frozen_systems,
+            state=state,
+            failure_message=message,
+        )
+
         return SystemExecutionStatus(
             execution_id=handle.execution_id,
             state=state,
@@ -1131,6 +1311,7 @@ class SystemOrchestrator:
             systems=frozen_systems,
             message=message,
             details=details,
+            observation=observation,
         )
 
     def stop(
@@ -1232,6 +1413,13 @@ class SystemOrchestrator:
                 systems,
             )
 
+        observation = _aggregate_observation(
+            statuses,
+            systems,
+            state=state,
+            failure_message=message,
+        )
+
         return SystemExecutionStatus(
             execution_id=handle.execution_id,
             state=state,
@@ -1239,4 +1427,5 @@ class SystemOrchestrator:
             systems=systems,
             message=message,
             details=details,
+            observation=observation,
         )

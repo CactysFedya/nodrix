@@ -9,6 +9,8 @@ from nodrix.system import (
     BackendExecutionState,
     BackendExecutionStatus,
     ExecutionBackend,
+    ExecutionHealthState,
+    ExecutionObservation,
     Graph,
     NodeInstance,
     OrchestrationError,
@@ -37,6 +39,10 @@ class HierarchyBackend(
         fail_start_system: str | None = None,
         fail_inspect_system: str | None = None,
         fail_stop_system: str | None = None,
+        observations: dict[
+            str,
+            ExecutionObservation | None,
+        ] | None = None,
     ) -> None:
         super().__init__(
             "local",
@@ -57,6 +63,9 @@ class HierarchyBackend(
         )
         self.fail_stop_system = (
             fail_stop_system
+        )
+        self.observations = dict(
+            observations or {}
         )
         self.states: dict[
             str,
@@ -151,6 +160,9 @@ class HierarchyBackend(
             state=self.states[
                 handle.execution_id
             ],
+            observation=self.observations.get(
+                system
+            ),
         )
 
     def _stop(
@@ -190,6 +202,9 @@ class HierarchyBackend(
             backend=self.backend_id,
             execution_id=handle.execution_id,
             state=BackendExecutionState.STOPPED,
+            observation=self.observations.get(
+                system
+            ),
             details={
                 "timeout_seconds": timeout_seconds,
             },
@@ -942,3 +957,182 @@ def test_later_child_start_failure_rolls_back_started_child_then_parent() -> Non
         ("child-a", "stop"),
         ("parent", "stop"),
     ]
+
+
+def test_inspect_aggregates_nested_degraded_observation() -> None:
+    plan = _parent_and_child_plan()
+    backend = HierarchyBackend(
+        [],
+        observations={
+            "robot": ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+            "livox-mid360": ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.DEGRADED,
+                message="lidar temperature is elevated",
+            ),
+        },
+    )
+    orchestrator = _orchestrator(backend)
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(plan)
+    )
+
+    status = orchestrator.inspect(handle)
+
+    assert status.observation is not None
+    assert status.observation.ready is True
+    assert (
+        status.observation.health
+        is ExecutionHealthState.DEGRADED
+    )
+    assert "systems.lidar" in (
+        status.observation.message or ""
+    )
+    assert (
+        status.child("lidar").status.observation
+        is not None
+    )
+
+
+def test_inspect_marks_partial_observation_as_unknown() -> None:
+    plan = _parent_and_child_plan()
+    backend = HierarchyBackend(
+        [],
+        observations={
+            "robot": ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        },
+    )
+    orchestrator = _orchestrator(backend)
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(plan)
+    )
+
+    status = orchestrator.inspect(handle)
+
+    assert status.observation is not None
+    assert status.observation.ready is None
+    assert (
+        status.observation.health
+        is ExecutionHealthState.UNKNOWN
+    )
+    assert "systems.lidar" in (
+        status.observation.message or ""
+    )
+
+
+def test_inspect_aggregates_nested_unhealthy_observation() -> None:
+    plan = _parent_and_child_plan()
+    backend = HierarchyBackend(
+        [],
+        observations={
+            "robot": ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+            "livox-mid360": ExecutionObservation(
+                ready=False,
+                health=ExecutionHealthState.UNHEALTHY,
+                message="lidar is unavailable",
+            ),
+        },
+    )
+    orchestrator = _orchestrator(backend)
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(plan)
+    )
+
+    status = orchestrator.inspect(handle)
+
+    assert status.observation is not None
+    assert status.observation.ready is False
+    assert (
+        status.observation.health
+        is ExecutionHealthState.UNHEALTHY
+    )
+    assert "systems.lidar" in (
+        status.observation.message or ""
+    )
+
+
+def test_inspect_preserves_absent_system_observation() -> None:
+    plan = _parent_and_child_plan()
+    backend = HierarchyBackend([])
+    orchestrator = _orchestrator(backend)
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(plan)
+    )
+
+    status = orchestrator.inspect(handle)
+
+    assert status.observation is None
+
+
+def test_stop_aggregates_observation_and_clears_readiness() -> None:
+    plan = _parent_and_child_plan()
+    backend = HierarchyBackend(
+        [],
+        observations={
+            "robot": ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+            "livox-mid360": ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        },
+    )
+    orchestrator = _orchestrator(backend)
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(plan)
+    )
+
+    status = orchestrator.stop(
+        handle,
+        timeout_seconds=1,
+    )
+
+    assert status.observation is not None
+    assert status.observation.ready is False
+    assert (
+        status.observation.health
+        is ExecutionHealthState.HEALTHY
+    )
+
+
+
+def test_failed_child_overrides_partial_healthy_observation() -> None:
+    plan = _parent_and_child_plan()
+    backend = HierarchyBackend(
+        [],
+        observations={
+            "robot": ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        },
+    )
+    orchestrator = _orchestrator(backend)
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(plan)
+    )
+    child_handle = handle.child("lidar").handle
+    backend.states[
+        child_handle.scopes[0].handle.execution_id
+    ] = BackendExecutionState.FAILED
+
+    status = orchestrator.inspect(handle)
+
+    assert status.state is BackendExecutionState.FAILED
+    assert status.observation is not None
+    assert status.observation.ready is False
+    assert (
+        status.observation.health
+        is ExecutionHealthState.UNHEALTHY
+    )
