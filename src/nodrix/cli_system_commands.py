@@ -30,11 +30,12 @@ from .system import (
     BackendExecutionState,
     DefinitionCatalog,
     LocalBackend,
+    SystemOrchestrator,
     dump_system,
     dump_system_schema,
-    load_system,
     load_system_details,
     pipeline_manifest_to_system,
+    plan_execution_scopes,
     plan_system,
     validate_system,
 )
@@ -609,31 +610,190 @@ def _render_backend_validation(report) -> None:
     console.print(table)
 
 
-def _render_run_status(system_name: str, status) -> None:
+def _execution_state_color(
+    state: BackendExecutionState,
+) -> str:
+    if state in {
+        BackendExecutionState.COMPLETED,
+        BackendExecutionState.STOPPED,
+    }:
+        return "green"
+
+    if state is BackendExecutionState.FAILED:
+        return "red"
+
+    return "yellow"
+
+
+def _render_orchestration_validation(
+    report,
+) -> None:
+    if not report.diagnostics:
+        return
+
+    table = Table(
+        title="SYSTEM ORCHESTRATION DIAGNOSTICS",
+        box=None,
+        show_edge=False,
+        pad_edge=False,
+    )
+
+    table.add_column("LEVEL")
+    table.add_column("CODE")
+    table.add_column("SCOPE")
+    table.add_column("PATH")
+    table.add_column("MESSAGE")
+
+    for item in report.diagnostics:
+        scope = (
+            item.scope.id
+            if item.scope is not None
+            else "-"
+        )
+
+        table.add_row(
+            item.level.upper(),
+            item.code,
+            scope,
+            item.path or "-",
+            item.message,
+            style=(
+                "red"
+                if item.level == "error"
+                else "yellow"
+            ),
+        )
+
+    console.print(table)
+
+
+def _render_system_run_status(
+    system_name: str,
+    status,
+    *,
+    indent: int = 0,
+) -> None:
+    prefix = "  " * indent
     state = status.state.value.upper()
-    color = (
-        "green"
-        if status.state in {
-            BackendExecutionState.COMPLETED,
-            BackendExecutionState.STOPPED,
-        }
-        else "red"
-        if status.state is BackendExecutionState.FAILED
-        else "yellow"
+    color = _execution_state_color(
+        status.state
     )
-    suffix = f" · {status.message}" if status.message else ""
+
+    suffix = (
+        f" · {status.message}"
+        if status.message
+        else ""
+    )
+
     console.print(
-        f"[{color}]{state}[/{color}] "
+        f"{prefix}[{color}]{state}[/{color}] "
         f"[bold]{system_name}[/bold] · "
-        f"{status.backend}:{status.execution_id}{suffix}"
+        f"{status.execution_id} · "
+        f"scopes={len(status.scopes)} · "
+        f"systems={len(status.systems)}"
+        f"{suffix}"
     )
+
+    for item in status.scopes:
+        scope_state = (
+            item.status.state.value.upper()
+        )
+        scope_color = _execution_state_color(
+            item.status.state
+        )
+        scope_suffix = (
+            f" · {item.status.message}"
+            if item.status.message
+            else ""
+        )
+
+        console.print(
+            f"{prefix}  "
+            f"[{scope_color}]"
+            f"{scope_state}"
+            f"[/{scope_color}] "
+            f"{item.scope.id} · "
+            f"{item.status.backend}:"
+            f"{item.status.execution_id}"
+            f"{scope_suffix}"
+        )
+
+    for child in status.systems:
+        _render_system_run_status(
+            f"{system_name}/{child.name}",
+            child.status,
+            indent=indent + 1,
+        )
+
+
+def _hierarchical_execution_scopes(
+    plan,
+):
+    """Return unique executable scopes used anywhere in a System plan tree."""
+
+    result = []
+    seen = set()
+
+    def visit(current) -> None:
+        for scope in plan_execution_scopes(
+            current
+        ):
+            if scope in seen:
+                continue
+
+            seen.add(scope)
+            result.append(scope)
+
+        for child in current.systems:
+            visit(child.plan)
+
+    visit(plan)
+
+    return tuple(result)
+
+
+def _local_orchestration_bindings(
+    plan,
+    *,
+    project,
+    working_directory: Path,
+    run_root: Path | None,
+    stop_timeout: float,
+):
+    """Create LocalBackend bindings for every unique local execution scope."""
+
+    bindings = {}
+
+    for scope in _hierarchical_execution_scopes(
+        plan
+    ):
+        if scope.backend != "local":
+            # Unsupported/missing backend bindings remain absent.
+            # SystemOrchestrator will report ORCH101 honestly.
+            continue
+
+        bindings[scope] = LocalBackend(
+            project=project,
+            working_directory=(
+                working_directory
+            ),
+            run_root=run_root,
+            stop_timeout_seconds=(
+                stop_timeout
+            ),
+            scope_name=scope.target,
+        )
+
+    return bindings
 
 
 @system_app.command("run")
 def system_run(
     path: Annotated[
         Path | None,
-        typer.Argument(help="System YAML/JSON document"),
+        typer.Argument(
+            help="System YAML/JSON document"
+        ),
     ] = None,
     project: Annotated[
         Path | None,
@@ -641,8 +801,19 @@ def system_run(
             "--project",
             "-p",
             help=(
-                "Optional local/package SDK project used for typed "
-                "definitions and execution"
+                "Optional local/package SDK project used "
+                "for typed definitions and execution"
+            ),
+        ),
+    ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help=(
+                "Project Profile (nodrix.profile/v1) used "
+                "for System Config and execution context; "
+                "not a RuntimePreset"
             ),
         ),
     ] = None,
@@ -650,7 +821,10 @@ def system_run(
         Path | None,
         typer.Option(
             "--run-root",
-            help="Optional runtime output root passed to the LocalBackend",
+            help=(
+                "Optional runtime output root passed "
+                "to LocalBackend instances"
+            ),
         ),
     ] = None,
     stop_timeout: Annotated[
@@ -658,155 +832,307 @@ def system_run(
         typer.Option(
             "--stop-timeout",
             min=0.0,
-            help="Seconds to wait for a local runtime to stop after Ctrl+C",
+            help=(
+                "Seconds to wait for execution scopes "
+                "to stop after Ctrl+C"
+            ),
         ),
     ] = 10.0,
     warnings_as_errors: Annotated[
         bool,
         typer.Option(
             "--warnings-as-errors",
-            help="Refuse execution when planner warnings are present",
+            help=(
+                "Refuse execution when planner "
+                "warnings are present"
+            ),
         ),
     ] = False,
 ) -> None:
-    """Plan and execute a System through the local execution backend.
-
-    Nodrix 2.6 intentionally runs one backend scope here. Systems that resolve
-    to non-local or multiple backends are rejected until a multi-backend
-    orchestrator is introduced.
-    """
+    """Plan and execute one canonical System hierarchy."""
 
     try:
-        resolved_path, effective_project = _resolve_system_cli_inputs(path, project)
-        system = load_system(resolved_path)
+        (
+            resolved_path,
+            effective_project,
+        ) = _resolve_system_cli_inputs(
+            path,
+            project,
+        )
+
+        (
+            details,
+            execution_context,
+        ) = _load_system_cli_planning_inputs(
+            resolved_path,
+            profile=profile,
+        )
+
+        system = details.system
+
         catalog = (
-            _catalog_for_project(effective_project)
+            _catalog_for_project(
+                effective_project
+            )
             if effective_project is not None
             else None
         )
-        plan = plan_system(system, catalog=catalog)
-    except Exception as exc:
-        console.print(f"[red]System run failed:[/red] {exc}")
-        raise typer.Exit(1)
 
-    backend_names = _plan_backend_names(plan)
-    if backend_names != ("local",):
-        found = ", ".join(backend_names) if backend_names else "<none>"
+        child_definitions = dict(
+            details
+            .resolution
+            .child_system_definitions
+        )
+
+        def resolve_child_system(
+            revision,
+        ):
+            return child_definitions.get(
+                revision.canonical
+            )
+
+        plan = plan_system(
+            system,
+            catalog=catalog,
+            execution_context=(
+                execution_context
+            ),
+            system_resolver=(
+                resolve_child_system
+                if system.systems
+                else None
+            ),
+        )
+
+    except Exception as exc:
         console.print(
             "[red]System run failed:[/red] "
-            "RUN101: Nodrix 2.6 system run supports exactly one 'local' "
-            f"backend; plan resolves to: {found}"
+            f"{exc}"
         )
         raise typer.Exit(1)
 
-    if warnings_as_errors and plan.diagnostics:
+    if (
+        warnings_as_errors
+        and plan.diagnostics
+    ):
         console.print(
             "[red]System run refused:[/red] "
-            "RUN102: planner warnings are present and "
-            "--warnings-as-errors was set"
+            "RUN102: planner warnings are present "
+            "and --warnings-as-errors was set"
         )
-        _render_system_plan(plan)
+
+        _render_system_plan(
+            plan
+        )
+
         raise typer.Exit(1)
 
     if plan.diagnostics:
         console.print(
-            f"[yellow]Planner warnings:[/yellow] {len(plan.diagnostics)}"
+            "[yellow]Planner warnings:"
+            "[/yellow] "
+            f"{len(plan.diagnostics)}"
         )
+
         for item in plan.diagnostics:
             console.print(
-                f"[yellow]{item.code}[/yellow] "
-                f"{item.path or '-'} · {item.message}"
+                f"[yellow]{item.code}"
+                f"[/yellow] "
+                f"{item.path or '-'} · "
+                f"{item.message}"
             )
 
-    execution_root = find_workspace(resolved_path.parent) or resolved_path.parent
-    backend = LocalBackend(
-        project=effective_project,
-        working_directory=execution_root,
-        run_root=run_root,
-        stop_timeout_seconds=stop_timeout,
+    execution_root = (
+        find_workspace(
+            resolved_path.parent
+        )
+        or resolved_path.parent
     )
 
-    report = backend.validate_plan(plan)
+    bindings = (
+        _local_orchestration_bindings(
+            plan,
+            project=effective_project,
+            working_directory=(
+                execution_root
+            ),
+            run_root=run_root,
+            stop_timeout=stop_timeout,
+        )
+    )
+
+    orchestrator = SystemOrchestrator(
+        bindings
+    )
+
+    report = orchestrator.validate_plan(
+        plan,
+        execution_context=(
+            execution_context
+        ),
+    )
+
     if report.diagnostics:
-        _render_backend_validation(report)
+        _render_orchestration_validation(
+            report
+        )
 
     if not report.valid:
         console.print(
             "[red]System run failed:[/red] "
-            "RUN103: LocalBackend rejected the execution plan"
+            "RUN103: SystemOrchestrator rejected "
+            "the execution plan"
         )
         raise typer.Exit(1)
 
     try:
-        prepared = backend.prepare_plan(plan)
+        prepared = orchestrator.prepare_plan(
+            plan,
+            execution_context=(
+                execution_context
+            ),
+        )
+
     except Exception as exc:
-        console.print(f"[red]System prepare failed:[/red] {exc}")
+        console.print(
+            "[red]System prepare failed:[/red] "
+            f"{exc}"
+        )
         raise typer.Exit(1)
 
-    manifest_path = prepared.metadata.get("manifest_path")
     console.print(
-        f"[green]PREPARED[/green] [bold]{system.name}[/bold] · backend=local"
-        + (f" · {manifest_path}" if manifest_path else "")
+        "[green]PREPARED[/green] "
+        f"[bold]{system.name}[/bold] · "
+        f"scopes={len(prepared.scopes)} · "
+        f"systems={len(prepared.systems)}"
     )
 
     handle = None
+
     try:
-        handle = backend.start(prepared)
+        handle = orchestrator.start(
+            prepared,
+            rollback_timeout_seconds=(
+                stop_timeout
+            ),
+        )
+
         console.print(
-            f"[green]STARTED[/green] [bold]{system.name}[/bold] · "
-            f"local:{handle.execution_id}"
+            "[green]STARTED[/green] "
+            f"[bold]{system.name}[/bold] · "
+            f"{handle.execution_id} · "
+            f"scopes={len(handle.scopes)} · "
+            f"systems={len(handle.systems)}"
         )
 
         previous_state = None
+
         while True:
-            status = backend.inspect(handle)
-            if status.state is not previous_state:
-                _render_run_status(system.name, status)
-                previous_state = status.state
+            status = orchestrator.inspect(
+                handle
+            )
+
+            if (
+                status.state
+                is not previous_state
+            ):
+                _render_system_run_status(
+                    system.name,
+                    status,
+                )
+                previous_state = (
+                    status.state
+                )
 
             if status.terminal:
-                if status.state is BackendExecutionState.FAILED:
+                if (
+                    status.state
+                    is BackendExecutionState.FAILED
+                ):
+                    # FAILED is terminal from the observer's
+                    # perspective, but already-started scopes
+                    # must still receive cleanup.
+                    try:
+                        orchestrator.stop(
+                            handle,
+                            timeout_seconds=(
+                                stop_timeout
+                            ),
+                        )
+                    except Exception:
+                        pass
+
                     raise typer.Exit(1)
+
                 return
 
             time.sleep(0.1)
 
     except KeyboardInterrupt:
         if handle is None:
-            console.print("[yellow]Interrupted before execution started.[/yellow]")
+            console.print(
+                "[yellow]Interrupted before "
+                "execution started.[/yellow]"
+            )
             raise typer.Exit(130)
 
         console.print(
-            f"[yellow]Stopping[/yellow] [bold]{system.name}[/bold] · "
-            f"local:{handle.execution_id}"
+            "[yellow]Stopping[/yellow] "
+            f"[bold]{system.name}[/bold] · "
+            f"{handle.execution_id}"
         )
+
         try:
-            status = backend.stop(
+            status = orchestrator.stop(
                 handle,
-                timeout_seconds=stop_timeout,
+                timeout_seconds=(
+                    stop_timeout
+                ),
             )
         except Exception as exc:
-            console.print(f"[red]System stop failed:[/red] {exc}")
+            console.print(
+                "[red]System stop failed:[/red] "
+                f"{exc}"
+            )
             raise typer.Exit(130)
 
-        _render_run_status(system.name, status)
-        if status.state is BackendExecutionState.STOPPING:
+        _render_system_run_status(
+            system.name,
+            status,
+        )
+
+        if (
+            status.state
+            is BackendExecutionState.STOPPING
+        ):
             console.print(
-                "[yellow]Runtime is still stopping after the requested "
-                "timeout.[/yellow]"
+                "[yellow]Runtime is still stopping "
+                "after the requested timeout."
+                "[/yellow]"
             )
+
         raise typer.Exit(130)
 
     except typer.Exit:
         raise
 
     except Exception as exc:
-        console.print(f"[red]System execution failed:[/red] {exc}")
+        console.print(
+            "[red]System execution failed:[/red] "
+            f"{exc}"
+        )
+
         if handle is not None:
             try:
-                backend.stop(handle, timeout_seconds=stop_timeout)
+                orchestrator.stop(
+                    handle,
+                    timeout_seconds=(
+                        stop_timeout
+                    ),
+                )
             except Exception:
                 pass
+
         raise typer.Exit(1)
 
 

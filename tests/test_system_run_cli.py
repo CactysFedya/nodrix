@@ -610,3 +610,181 @@ def test_system_run_profile_uses_exact_profile_bound_plan(
     assert "RUN_MARKER" not in serialized
     assert "profile-value" not in serialized
     assert '"field"' not in serialized
+
+
+def _write_hierarchical_run_systems(
+    root: Path,
+) -> tuple[Path, Path]:
+    child_path = (
+        root / "livox-mid360.yaml"
+    )
+
+    _write_local_system(
+        child_path,
+        name="livox-mid360",
+    )
+
+    parent_path = (
+        root / "rpi5-mapping.yaml"
+    )
+
+    parent_path.write_text(
+        yaml.safe_dump(
+            {
+                "apiVersion": (
+                    "nodrix.system/v1"
+                ),
+                "kind": "System",
+                "name": "rpi5-mapping",
+                "systems": [
+                    {
+                        "name": "lidar",
+                        "uses": (
+                            "./livox-mid360.yaml"
+                        ),
+                    },
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    return (
+        parent_path,
+        child_path,
+    )
+
+
+def test_system_run_executes_child_system_hierarchy(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        parent_path,
+        _,
+    ) = _write_hierarchical_run_systems(
+        tmp_path
+    )
+
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.COMPLETED
+        ),
+    ]
+
+    monkeypatch.setattr(
+        system_cli,
+        "LocalBackend",
+        FakeLocalBackend,
+    )
+    monkeypatch.setattr(
+        system_cli.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "run",
+            str(parent_path),
+        ],
+    )
+
+    assert (
+        result.exit_code == 0
+    ), result.output
+
+    assert "PREPARED" in result.output
+    assert "STARTED" in result.output
+    assert "rpi5-mapping" in result.output
+    assert "lidar" in result.output
+    assert "systems=1" in result.output
+    assert "COMPLETED" in result.output
+
+    # Composition-only parent creates no backend scope.
+    # Its child System owns the executable local scope.
+    assert (
+        len(
+            FakeLocalBackend.instances
+        )
+        == 1
+    )
+
+    backend = (
+        FakeLocalBackend.instances[0]
+    )
+
+    assert (
+        backend
+        .prepared_context
+        .plan
+        .system
+        == "livox-mid360"
+    )
+
+
+def test_system_run_executes_child_system_standalone(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    (
+        _,
+        child_path,
+    ) = _write_hierarchical_run_systems(
+        tmp_path
+    )
+
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.COMPLETED
+        ),
+    ]
+
+    monkeypatch.setattr(
+        system_cli,
+        "LocalBackend",
+        FakeLocalBackend,
+    )
+    monkeypatch.setattr(
+        system_cli.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "run",
+            str(child_path),
+        ],
+    )
+
+    assert (
+        result.exit_code == 0
+    ), result.output
+
+    assert "livox-mid360" in result.output
+    assert "systems=0" in result.output
+    assert "COMPLETED" in result.output
+
+    assert (
+        len(
+            FakeLocalBackend.instances
+        )
+        == 1
+    )
+
+    assert (
+        FakeLocalBackend
+        .instances[0]
+        .prepared_context
+        .plan
+        .system
+        == "livox-mid360"
+    )
