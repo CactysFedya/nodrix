@@ -89,6 +89,14 @@ from .orchestration import (
     backend_context_for_scope,
     plan_execution_scopes,
 )
+from .execution_events import (
+    EXECUTION_EVENT_API_VERSION,
+    EXECUTION_EVENT_KIND,
+    ExecutionEvent,
+    ExecutionEventKind,
+    dumps_execution_event,
+    system_execution_status_to_canonical,
+)
 from .planning import (
     SYSTEM_EXECUTION_PLAN_SCHEMA,
     PlannedApplication,
@@ -125,6 +133,12 @@ __all__ = [
     "BackendExecutionStatus",
     "ExecutionHealthState",
     "ExecutionObservation",
+    "EXECUTION_EVENT_API_VERSION",
+    "EXECUTION_EVENT_KIND",
+    "ExecutionEvent",
+    "ExecutionEventKind",
+    "dumps_execution_event",
+    "system_execution_status_to_canonical",
     "BackendValidationError",
     "BackendValidationReport",
     "ExecutionBackend",
