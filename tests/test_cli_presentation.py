@@ -675,3 +675,119 @@ def test_system_execution_fingerprint_ignores_dynamic_details() -> None:
             second
         )
     )
+
+
+def test_system_execution_status_renders_stable_scope_failure_context() -> None:
+    failed_scope = _scope_status(
+        "pi5:local",
+        "failed",
+        message="RuntimeError: boom",
+    )
+
+    failed_scope.status.details = {
+        "error": "RuntimeError: boom",
+        "failure_source": "scope",
+        "scope": "pi5:local",
+        "backend": "local",
+        "thread_alive": False,
+        "report": {
+            "cpu_percent": 42.0,
+        },
+    }
+
+    root = _system_status(
+        "failed",
+        execution_id="system-root",
+        scopes=(
+            failed_scope,
+        ),
+        message="RuntimeError: boom",
+    )
+
+    output = _plain(
+        render_system_execution_status(
+            "mapping",
+            root,
+        )
+    )
+
+    assert output.count(
+        "RuntimeError: boom"
+    ) == 1
+
+    assert "source: scope" in output
+    assert "scope: pi5:local" in output
+    assert "backend: local" in output
+
+    assert "thread_alive" not in output
+    assert "cpu_percent" not in output
+
+
+def test_system_execution_status_renders_leaf_system_failure_context() -> None:
+    status = _system_status(
+        "failed",
+        execution_id="system-leaf",
+        message="ValueError: invalid configuration",
+    )
+
+    status.details = {
+        "exception_type": "ValueError",
+        "failure_source": "system",
+        "system": "mapping",
+        "thread_alive": False,
+    }
+
+    output = _plain(
+        render_system_execution_status(
+            "mapping",
+            status,
+        )
+    )
+
+    assert (
+        output.count(
+            "ValueError: invalid configuration"
+        )
+        == 1
+    )
+
+    # exception_type is already encoded by the message and must not repeat.
+    assert "exception: ValueError" not in output
+
+    assert "source: system" in output
+    assert "system: mapping" in output
+    assert "thread_alive" not in output
+
+
+def test_system_execution_fingerprint_tracks_visible_failure_context() -> None:
+    first = _system_status(
+        "failed",
+        execution_id="system-root",
+        message="RuntimeError: boom",
+    )
+    second = _system_status(
+        "failed",
+        execution_id="system-root",
+        message="RuntimeError: boom",
+    )
+
+    first.details = {
+        "failure_source": "scope",
+        "scope": "robot:local",
+        "thread_alive": False,
+    }
+
+    second.details = {
+        "failure_source": "scope",
+        "scope": "workstation:local",
+        "thread_alive": True,
+    }
+
+    assert (
+        system_execution_status_fingerprint(
+            first
+        )
+        != system_execution_status_fingerprint(
+            second
+        )
+    )

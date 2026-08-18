@@ -1150,6 +1150,113 @@ def _execution_has_failed_child(status: Any) -> bool:
 
 
 
+
+def _execution_visible_details(
+    status: Any,
+) -> tuple[tuple[str, str], ...]:
+    """Return stable execution details suitable for human presentation.
+
+    The list is intentionally conservative. Arbitrary runtime telemetry and
+    backend-specific report payloads are not exposed as canonical CLI state.
+    """
+
+    raw = getattr(
+        status,
+        "details",
+        {},
+    )
+
+    if not isinstance(
+        raw,
+        Mapping,
+    ):
+        return ()
+
+    details = dict(raw)
+
+    message = getattr(
+        status,
+        "message",
+        None,
+    )
+    message_text = (
+        str(message)
+        if message is not None
+        else None
+    )
+
+    result: list[
+        tuple[str, str]
+    ] = []
+
+    def add(
+        label: str,
+        value: object,
+    ) -> None:
+        if value is None:
+            return
+
+        rendered = str(value).strip()
+        if not rendered:
+            return
+
+        if (
+            message_text is not None
+            and rendered == message_text
+        ):
+            return
+
+        item = (
+            label,
+            rendered,
+        )
+
+        if item not in result:
+            result.append(item)
+
+    exception_type = details.get(
+        "exception_type"
+    )
+
+    if (
+        exception_type is not None
+        and (
+            message_text is None
+            or not message_text.startswith(
+                f"{exception_type}:"
+            )
+        )
+    ):
+        add(
+            "exception",
+            exception_type,
+        )
+
+    add(
+        "error",
+        details.get("error"),
+    )
+    add(
+        "source",
+        details.get(
+            "failure_source"
+        ),
+    )
+    add(
+        "scope",
+        details.get("scope"),
+    )
+    add(
+        "backend",
+        details.get("backend"),
+    )
+    add(
+        "system",
+        details.get("system"),
+    )
+
+    return tuple(result)
+
 def system_execution_status_fingerprint(
     status: Any,
 ) -> tuple[Any, ...]:
@@ -1168,6 +1275,9 @@ def system_execution_status_fingerprint(
                 item.status.state
             ),
             item.status.message,
+            _execution_visible_details(
+                item.status
+            ),
         )
         for item in getattr(
             status,
@@ -1232,6 +1342,9 @@ def system_execution_status_fingerprint(
             status,
             "message",
             None,
+        ),
+        _execution_visible_details(
+            status
         ),
         scopes,
         tuple(systems),
@@ -1422,6 +1535,41 @@ def render_system_execution_status(
                     )
                     lines.append("\n")
 
+                scope_details = (
+                    _execution_visible_details(
+                        scope_status
+                    )
+                )
+
+                for label, value in scope_details:
+                    detail_prefix = (
+                        child_prefix
+                        + (
+                            "   "
+                            if last
+                            else "│  "
+                        )
+                    )
+
+                    lines.append(
+                        detail_prefix,
+                        style="dim",
+                    )
+                    lines.append(
+                        f"{label}: ",
+                        style="dim",
+                    )
+                    lines.append(
+                        value,
+                        style=(
+                            "red"
+                            if scope_state
+                            == "failed"
+                            else "dim"
+                        ),
+                    )
+                    lines.append("\n")
+
                 continue
 
             child_definition = getattr(
@@ -1461,16 +1609,13 @@ def render_system_execution_status(
             None,
         )
 
-        # Aggregated parent failures usually repeat a lower-level reason.
-        # Show the message at the lowest informative System boundary instead
-        # of printing the same exception on every ancestor.
-        if (
-            message
-            and not _execution_has_failed_child(
-                item_status
-            )
+        # Aggregated parent failures usually repeat lower-level context.
+        # Present the reason and stable details at the lowest informative
+        # System boundary instead of repeating them on every ancestor.
+        if not _execution_has_failed_child(
+            item_status
         ):
-            message_prefix = (
+            detail_prefix = (
                 prefix
                 + (
                     "   "
@@ -1480,15 +1625,40 @@ def render_system_execution_status(
                     else "   "
                 )
             )
-            lines.append(
-                message_prefix,
-                style="dim",
-            )
-            lines.append(
-                str(message),
-                style="red",
-            )
-            lines.append("\n")
+
+            if message:
+                lines.append(
+                    detail_prefix,
+                    style="dim",
+                )
+                lines.append(
+                    str(message),
+                    style="red",
+                )
+                lines.append("\n")
+
+            for label, value in (
+                _execution_visible_details(
+                    item_status
+                )
+            ):
+                lines.append(
+                    detail_prefix,
+                    style="dim",
+                )
+                lines.append(
+                    f"{label}: ",
+                    style="dim",
+                )
+                lines.append(
+                    value,
+                    style=(
+                        "red"
+                        if state == "failed"
+                        else "dim"
+                    ),
+                )
+                lines.append("\n")
 
     append_system(
         system_name,
