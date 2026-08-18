@@ -68,18 +68,18 @@ all = [
 ]
 dev = [
   "build>=1.2",
-  "cibuildwheel>=3.4.1,<4",
+  "cibuildwheel>=3.4.1,<5",
   "pytest>=8.0",
   "pytest-timeout>=2.4",
   "ruff>=0.12",
-  "twine>=6.1,<7",
+  "twine>=6.1,<8",
 ]
 docs = [
-  "myst-parser>=4,<5",
-  "sphinx>=8,<9",
+  "myst-parser>=4,<6",
+  "sphinx>=8,<10",
   "sphinx-copybutton>=0.5,<1",
   "sphinx-rtd-theme>=3,<4",
-  "sphinxcontrib-mermaid>=1,<2",
+  "sphinxcontrib-mermaid>=1,<3",
 ]
 
 [project.urls]
