@@ -77,7 +77,7 @@ def _execution_state(
 def _status_details(
     status: SystemExecutionStatus,
 ) -> dict[str, object]:
-    return {
+    details: dict[str, object] = {
         "scope_count": len(status.scopes),
         "scopes": tuple(
             {
@@ -91,6 +91,40 @@ def _status_details(
             for item in status.scopes
         ),
     }
+
+    if status.message is not None:
+        details["message"] = status.message
+
+    if status.details:
+        details["status_details"] = dict(
+            status.details
+        )
+
+    if status.systems:
+        details["system_count"] = len(
+            status.systems
+        )
+
+        details["systems"] = tuple(
+            {
+                "ordinal": item.ordinal,
+                "name": item.name,
+                "system": item.instance.plan.system,
+                "revision": item.revision,
+                "execution_id": item.status.execution_id,
+                "state": item.status.state.value,
+                "message": item.status.message,
+                "status_details": dict(
+                    item.status.details
+                ),
+                "details": _status_details(
+                    item.status
+                ),
+            }
+            for item in status.systems
+        )
+
+    return details
 
 
 def _validate_system_plan_record(

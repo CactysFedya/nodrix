@@ -13,12 +13,18 @@ from nodrix.system import (
     Graph,
     NodeInstance,
     PreparedExecution,
+    SystemInstance,
     SystemModel,
     SystemOrchestrator,
     Target,
+    plan_system,
 )
 from nodrix.system.canonical import (
     plan_canonical_system,
+    system_plan_record,
+)
+from nodrix.system.definition import (
+    system_definition_record,
 )
 from nodrix.system.canonical_runtime import (
     SYSTEM_ORCHESTRATOR_EXECUTOR,
@@ -409,3 +415,206 @@ def test_clock_must_return_timezone_aware_datetime() -> None:
             system_plan(),
             clock=fixed_clock(naive),
         )
+
+
+def test_canonical_execution_preserves_nested_system_tree() -> None:
+    driver = SystemModel(
+        name="driver",
+        targets=(
+            Target(
+                name="pi5",
+                kind="host",
+                properties={
+                    "backend": "local",
+                },
+            ),
+        ),
+        graphs=(
+            Graph(
+                name="driver",
+                nodes=(
+                    NodeInstance(
+                        name="worker",
+                        uses="demo.driver",
+                        target="pi5",
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    driver_revision = (
+        system_definition_record(
+            driver
+        ).revision
+    )
+
+    lidar = SystemModel(
+        name="lidar",
+        systems=(
+            SystemInstance(
+                name="driver",
+                uses=(
+                    driver_revision.canonical
+                ),
+            ),
+        ),
+    )
+
+    lidar_revision = (
+        system_definition_record(
+            lidar
+        ).revision
+    )
+
+    robot = SystemModel(
+        name="robot",
+        systems=(
+            SystemInstance(
+                name="lidar",
+                uses=(
+                    lidar_revision.canonical
+                ),
+            ),
+        ),
+    )
+
+    definitions = {
+        driver_revision.canonical: driver,
+        lidar_revision.canonical: lidar,
+    }
+
+    domain_plan = plan_system(
+        robot,
+        system_resolver=(
+            lambda requested: (
+                definitions.get(
+                    requested.canonical
+                )
+            )
+        ),
+    )
+
+    plan = system_plan_record(
+        domain_plan
+    )
+
+    backend = RuntimeBackend()
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("pi5", "local"): backend,
+        }
+    )
+
+    started = datetime(
+        2026,
+        8,
+        18,
+        6,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    execution = start_canonical_system_execution(
+        orchestrator,
+        plan,
+        clock=fixed_clock(started),
+    )
+
+    record = inspect_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=fixed_clock(
+            started
+            + timedelta(seconds=1)
+        ),
+    )
+
+    # There remains exactly one canonical top-level ExecutionRecord.
+    assert (
+        record.execution_id
+        == execution.execution_id
+    )
+
+    assert (
+        record.details["scope_count"]
+        == 0
+    )
+
+    assert (
+        record.details["system_count"]
+        == 1
+    )
+
+    lidar_entry = (
+        record.details[
+            "systems"
+        ][0]
+    )
+
+    assert (
+        lidar_entry["name"]
+        == "lidar"
+    )
+    assert (
+        lidar_entry["system"]
+        == "lidar"
+    )
+    assert (
+        lidar_entry["state"]
+        == "running"
+    )
+
+    assert (
+        lidar_entry["execution_id"]
+        != record.execution_id
+    )
+
+    lidar_details = (
+        lidar_entry["details"]
+    )
+
+    assert (
+        lidar_details["scope_count"]
+        == 0
+    )
+    assert (
+        lidar_details["system_count"]
+        == 1
+    )
+
+    driver_entry = (
+        lidar_details[
+            "systems"
+        ][0]
+    )
+
+    assert (
+        driver_entry["name"]
+        == "driver"
+    )
+    assert (
+        driver_entry["system"]
+        == "driver"
+    )
+    assert (
+        driver_entry["state"]
+        == "running"
+    )
+
+    assert (
+        driver_entry["execution_id"]
+        != lidar_entry["execution_id"]
+    )
+    assert (
+        driver_entry["execution_id"]
+        != record.execution_id
+    )
+
+    assert (
+        driver_entry[
+            "details"
+        ]["scope_count"]
+        == 1
+    )

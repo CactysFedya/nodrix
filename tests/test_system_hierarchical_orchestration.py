@@ -35,6 +35,8 @@ class HierarchyBackend(
         ],
         *,
         fail_start_system: str | None = None,
+        fail_inspect_system: str | None = None,
+        fail_stop_system: str | None = None,
     ) -> None:
         super().__init__(
             "local",
@@ -49,6 +51,12 @@ class HierarchyBackend(
         self.events = events
         self.fail_start_system = (
             fail_start_system
+        )
+        self.fail_inspect_system = (
+            fail_inspect_system
+        )
+        self.fail_stop_system = (
+            fail_stop_system
         )
         self.states: dict[
             str,
@@ -129,6 +137,14 @@ class HierarchyBackend(
             )
         )
 
+        if (
+            system
+            == self.fail_inspect_system
+        ):
+            raise RuntimeError(
+                f"cannot inspect {system}"
+            )
+
         return BackendExecutionStatus(
             backend=self.backend_id,
             execution_id=handle.execution_id,
@@ -157,6 +173,14 @@ class HierarchyBackend(
                 "stop",
             )
         )
+
+        if (
+            system
+            == self.fail_stop_system
+        ):
+            raise RuntimeError(
+                f"cannot stop {system}"
+            )
 
         self.states[
             handle.execution_id
@@ -570,4 +594,351 @@ def test_child_start_failure_rolls_back_parent_scope() -> None:
         ("robot", "start"),
         ("livox-mid360", "start"),
         ("robot", "stop"),
+    ]
+
+
+def _three_level_plan():
+    driver = _work_system(
+        "driver"
+    )
+
+    driver_revision = (
+        system_definition_record(
+            driver
+        ).revision
+    )
+
+    lidar = SystemModel(
+        name="lidar",
+        systems=(
+            SystemInstance(
+                name="driver",
+                uses=(
+                    driver_revision.canonical
+                ),
+            ),
+        ),
+    )
+
+    lidar_revision = (
+        system_definition_record(
+            lidar
+        ).revision
+    )
+
+    robot = SystemModel(
+        name="robot",
+        systems=(
+            SystemInstance(
+                name="lidar",
+                uses=(
+                    lidar_revision.canonical
+                ),
+            ),
+        ),
+    )
+
+    definitions = {
+        driver_revision.canonical: driver,
+        lidar_revision.canonical: lidar,
+    }
+
+    return plan_system(
+        robot,
+        system_resolver=(
+            lambda requested: (
+                definitions.get(
+                    requested.canonical
+                )
+            )
+        ),
+    )
+
+
+def test_deep_child_failure_propagates_to_root() -> None:
+    plan = _three_level_plan()
+
+    events: list[
+        tuple[str, str]
+    ] = []
+
+    backend = HierarchyBackend(
+        events
+    )
+
+    orchestrator = _orchestrator(
+        backend
+    )
+
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(
+            plan
+        )
+    )
+
+    driver_handle = (
+        handle
+        .child("lidar")
+        .handle
+        .child("driver")
+        .handle
+    )
+
+    backend.states[
+        driver_handle
+        .scopes[0]
+        .handle
+        .execution_id
+    ] = BackendExecutionState.FAILED
+
+    status = orchestrator.inspect(
+        handle
+    )
+
+    lidar_status = (
+        status
+        .child("lidar")
+        .status
+    )
+
+    driver_status = (
+        lidar_status
+        .child("driver")
+        .status
+    )
+
+    assert (
+        driver_status.state
+        is BackendExecutionState.FAILED
+    )
+
+    assert (
+        lidar_status.state
+        is BackendExecutionState.FAILED
+    )
+
+    assert (
+        status.state
+        is BackendExecutionState.FAILED
+    )
+
+
+def test_child_inspect_exception_is_preserved() -> None:
+    plan = _parent_and_child_plan(
+        parent_has_work=False
+    )
+
+    events: list[
+        tuple[str, str]
+    ] = []
+
+    backend = HierarchyBackend(
+        events,
+        fail_inspect_system=(
+            "livox-mid360"
+        ),
+    )
+
+    orchestrator = _orchestrator(
+        backend
+    )
+
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(
+            plan
+        )
+    )
+
+    status = orchestrator.inspect(
+        handle
+    )
+
+    child = (
+        status
+        .child("lidar")
+        .status
+    )
+
+    assert (
+        status.state
+        is BackendExecutionState.FAILED
+    )
+
+    assert (
+        child.state
+        is BackendExecutionState.FAILED
+    )
+
+    assert (
+        child.message
+        == "cannot inspect livox-mid360"
+    )
+
+    assert (
+        child.details[
+            "exception_type"
+        ]
+        == "RuntimeError"
+    )
+
+
+def test_child_stop_exception_is_preserved() -> None:
+    plan = _parent_and_child_plan(
+        parent_has_work=False
+    )
+
+    events: list[
+        tuple[str, str]
+    ] = []
+
+    backend = HierarchyBackend(
+        events,
+        fail_stop_system=(
+            "livox-mid360"
+        ),
+    )
+
+    orchestrator = _orchestrator(
+        backend
+    )
+
+    handle = orchestrator.start(
+        orchestrator.prepare_plan(
+            plan
+        )
+    )
+
+    status = orchestrator.stop(
+        handle
+    )
+
+    child = (
+        status
+        .child("lidar")
+        .status
+    )
+
+    assert (
+        status.state
+        is BackendExecutionState.FAILED
+    )
+
+    assert (
+        child.state
+        is BackendExecutionState.FAILED
+    )
+
+    assert (
+        child.message
+        == "cannot stop livox-mid360"
+    )
+
+    assert (
+        child.details[
+            "exception_type"
+        ]
+        == "RuntimeError"
+    )
+
+
+def test_later_child_start_failure_rolls_back_started_child_then_parent() -> None:
+    first = _work_system(
+        "child-a"
+    )
+    second = _work_system(
+        "child-b"
+    )
+
+    first_revision = (
+        system_definition_record(
+            first
+        ).revision
+    )
+    second_revision = (
+        system_definition_record(
+            second
+        ).revision
+    )
+
+    parent = SystemModel(
+        name="parent",
+        graphs=(
+            Graph(
+                name="parent",
+                nodes=(
+                    NodeInstance(
+                        name="supervisor",
+                        uses="demo.supervisor",
+                    ),
+                ),
+            ),
+        ),
+        systems=(
+            SystemInstance(
+                name="a",
+                uses=(
+                    first_revision.canonical
+                ),
+            ),
+            SystemInstance(
+                name="b",
+                uses=(
+                    second_revision.canonical
+                ),
+            ),
+        ),
+    )
+
+    definitions = {
+        first_revision.canonical: first,
+        second_revision.canonical: second,
+    }
+
+    plan = plan_system(
+        parent,
+        system_resolver=(
+            lambda requested: (
+                definitions.get(
+                    requested.canonical
+                )
+            )
+        ),
+    )
+
+    events: list[
+        tuple[str, str]
+    ] = []
+
+    backend = HierarchyBackend(
+        events,
+        fail_start_system="child-b",
+    )
+
+    orchestrator = _orchestrator(
+        backend
+    )
+
+    prepared = orchestrator.prepare_plan(
+        plan
+    )
+
+    with pytest.raises(
+        OrchestrationError
+    ) as exc_info:
+        orchestrator.start(
+            prepared,
+            rollback_timeout_seconds=1.0,
+        )
+
+    assert (
+        exc_info.value.code
+        == "ORCH204"
+    )
+
+    assert events[-5:] == [
+        ("parent", "start"),
+        ("child-a", "start"),
+        ("child-b", "start"),
+        ("child-a", "stop"),
+        ("parent", "stop"),
     ]

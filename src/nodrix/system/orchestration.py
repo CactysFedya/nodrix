@@ -13,7 +13,7 @@ milestones.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Mapping
+from typing import Any, Mapping
 from uuid import uuid4
 
 from ..errors import NodrixError
@@ -470,6 +470,32 @@ class SystemExecutionStatus:
     state: BackendExecutionState
     scopes: tuple[ScopeExecutionStatus, ...] = ()
     systems: tuple[ChildSystemExecutionStatus, ...] = ()
+    message: str | None = None
+    details: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if (
+            self.message is not None
+            and not isinstance(self.message, str)
+        ):
+            raise TypeError(
+                "SystemExecutionStatus.message must be "
+                "a string or None"
+            )
+
+        if not isinstance(
+            self.details,
+            Mapping,
+        ):
+            raise TypeError(
+                "SystemExecutionStatus.details must be a mapping"
+            )
+
+        object.__setattr__(
+            self,
+            "details",
+            dict(self.details),
+        )
 
     def child(
         self,
@@ -542,6 +568,63 @@ def _aggregate_state(
     return BackendExecutionState.PREPARED
 
 
+def _failure_context(
+    statuses: tuple[ScopeExecutionStatus, ...],
+    systems: tuple[ChildSystemExecutionStatus, ...],
+) -> tuple[str | None, dict[str, Any]]:
+    for item in statuses:
+        if (
+            item.status.state
+            is BackendExecutionState.FAILED
+        ):
+            details = dict(
+                item.status.details
+            )
+
+            details.update(
+                {
+                    "failure_source": "scope",
+                    "scope": item.scope.id,
+                    "backend": item.status.backend,
+                    "execution_id": (
+                        item.status.execution_id
+                    ),
+                }
+            )
+
+            return (
+                item.status.message,
+                details,
+            )
+
+    for item in systems:
+        if (
+            item.status.state
+            is BackendExecutionState.FAILED
+        ):
+            details = dict(
+                item.status.details
+            )
+
+            details.update(
+                {
+                    "failure_source": "system",
+                    "system": item.name,
+                    "revision": item.revision,
+                    "execution_id": (
+                        item.status.execution_id
+                    ),
+                }
+            )
+
+            return (
+                item.status.message,
+                details,
+            )
+
+    return None, {}
+
+
 def _failed_status(
     running: RunningScopeExecution,
     exc: BaseException,
@@ -552,6 +635,20 @@ def _failed_status(
         state=BackendExecutionState.FAILED,
         message=str(exc),
         details={"exception_type": type(exc).__name__},
+    )
+
+
+def _failed_system_status(
+    handle: SystemExecutionHandle,
+    exc: BaseException,
+) -> SystemExecutionStatus:
+    return SystemExecutionStatus(
+        execution_id=handle.execution_id,
+        state=BackendExecutionState.FAILED,
+        message=str(exc),
+        details={
+            "exception_type": type(exc).__name__,
+        },
     )
 
 
@@ -972,9 +1069,15 @@ class SystemOrchestrator:
         ] = []
 
         for child in handle.systems:
-            child_status = self.inspect(
-                child.handle
-            )
+            try:
+                child_status = self.inspect(
+                    child.handle
+                )
+            except Exception as exc:
+                child_status = _failed_system_status(
+                    child.handle,
+                    exc,
+                )
 
             system_statuses.append(
                 ChildSystemExecutionStatus(
@@ -990,14 +1093,30 @@ class SystemOrchestrator:
             system_statuses
         )
 
-        return SystemExecutionStatus(
-            execution_id=handle.execution_id,
-            state=_aggregate_state(
+        state = _aggregate_state(
+            frozen_scopes,
+            frozen_systems,
+        )
+
+        message: str | None = None
+        details: dict[str, Any] = {}
+
+        if (
+            state
+            is BackendExecutionState.FAILED
+        ):
+            message, details = _failure_context(
                 frozen_scopes,
                 frozen_systems,
-            ),
+            )
+
+        return SystemExecutionStatus(
+            execution_id=handle.execution_id,
+            state=state,
             scopes=frozen_scopes,
             systems=frozen_systems,
+            message=message,
+            details=details,
         )
 
     def stop(
@@ -1028,16 +1147,12 @@ class SystemOrchestrator:
                     child.handle,
                     timeout_seconds=timeout_seconds,
                 )
-            except Exception:
-                # Preserve cleanup of remaining siblings/scopes.
-                # alpha5c will enrich failure diagnostics.
-                child_status = SystemExecutionStatus(
-                    execution_id=(
-                        child.handle.execution_id
-                    ),
-                    state=(
-                        BackendExecutionState.FAILED
-                    ),
+            except Exception as exc:
+                # Preserve cleanup of remaining siblings/scopes while
+                # retaining the failed child execution reason.
+                child_status = _failed_system_status(
+                    child.handle,
+                    exc,
                 )
 
             stopped_systems_reverse.append(
@@ -1086,12 +1201,28 @@ class SystemOrchestrator:
             for running in handle.scopes
         )
 
-        return SystemExecutionStatus(
-            execution_id=handle.execution_id,
-            state=_aggregate_state(
+        state = _aggregate_state(
+            statuses,
+            systems,
+        )
+
+        message: str | None = None
+        details: dict[str, Any] = {}
+
+        if (
+            state
+            is BackendExecutionState.FAILED
+        ):
+            message, details = _failure_context(
                 statuses,
                 systems,
-            ),
+            )
+
+        return SystemExecutionStatus(
+            execution_id=handle.execution_id,
+            state=state,
             scopes=statuses,
             systems=systems,
+            message=message,
+            details=details,
         )
