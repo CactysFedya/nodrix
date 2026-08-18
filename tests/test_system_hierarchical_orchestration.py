@@ -15,12 +15,22 @@ from nodrix.system import (
     NodeInstance,
     OrchestrationError,
     PreparedExecution,
+    ResourceInstance,
+    SystemBoundaryBindings,
     SystemInstance,
+    SystemExecutionContext,
+    SystemExecutionContextOverride,
     SystemModel,
     SystemOrchestrator,
+    SystemLink,
+    SystemPort,
+    SystemPortBinding,
+    SystemResourceBinding,
+    SystemResourceRequirement,
     Target,
     plan_execution_scopes,
     plan_system,
+    child_system_execution_context,
 )
 from nodrix.system.definition import (
     system_definition_record,
@@ -50,6 +60,10 @@ class HierarchyBackend(
                 target_kinds={
                     "local",
                     "host",
+                },
+                features={
+                    "system_interfaces",
+                    "system_resources",
                 },
             ),
         )
@@ -296,6 +310,178 @@ def _orchestrator(
     )
 
 
+def test_prepare_passes_parent_resource_through_child_backend_boundary() -> None:
+    child = SystemModel(
+        name="driver",
+        resource_requirements=(
+            SystemResourceRequirement(
+                name="device",
+                uses="livox.device",
+            ),
+        ),
+        resources=(
+            ResourceInstance(
+                name="internal-device",
+                uses="livox.device",
+            ),
+        ),
+        bindings=SystemBoundaryBindings(
+            resources=(
+                SystemResourceBinding(
+                    resource="device",
+                    instance="internal-device",
+                ),
+            ),
+        ),
+    )
+    revision = system_definition_record(child).revision
+    parent = SystemModel(
+        name="robot",
+        resources=(
+            ResourceInstance(
+                name="mid360",
+                uses="livox.device",
+                parameters={"address": "192.168.1.42"},
+            ),
+        ),
+        systems=(
+            SystemInstance(
+                name="driver",
+                uses=revision.canonical,
+                resources={"device": "mid360"},
+            ),
+        ),
+    )
+    plan = plan_system(
+        parent,
+        system_resolver=lambda requested: (
+            child if requested == revision else None
+        ),
+    )
+    backend = HierarchyBackend([])
+    prepared = _orchestrator(backend).prepare_plan(plan)
+
+    child_execution = prepared.child("driver").execution
+    assert child_execution.inherited_resources == (
+        plan.child("driver").resource_bindings[0],
+    )
+    context = child_execution.scopes[0].prepared.context
+    assert context.inherited_resources[0].child_resource == "internal-device"
+    assert context.inherited_resources[0].parameters == {
+        "address": "192.168.1.42"
+    }
+
+
+def test_prepare_routes_link_through_nested_system_boundaries() -> None:
+    source = SystemModel(
+        name="source",
+        outputs=(SystemPort(name="cloud", type_id="cloud/v1"),),
+        graphs=(
+            Graph(
+                name="main",
+                nodes=(NodeInstance(name="source", uses="demo.source"),),
+            ),
+        ),
+        bindings=SystemBoundaryBindings(
+            outputs=(
+                SystemPortBinding(
+                    port="cloud",
+                    endpoint="main/source.cloud",
+                ),
+            ),
+        ),
+    )
+    source_revision = system_definition_record(source).revision
+    source_stack = SystemModel(
+        name="source-stack",
+        outputs=(SystemPort(name="cloud", type_id="cloud/v1"),),
+        systems=(
+            SystemInstance(name="leaf", uses=source_revision.canonical),
+        ),
+        bindings=SystemBoundaryBindings(
+            outputs=(
+                SystemPortBinding(
+                    port="cloud",
+                    endpoint="system:leaf.cloud",
+                ),
+            ),
+        ),
+    )
+    stack_revision = system_definition_record(source_stack).revision
+    sink = SystemModel(
+        name="sink",
+        inputs=(SystemPort(name="cloud", type_id="cloud/v1"),),
+        graphs=(
+            Graph(
+                name="main",
+                nodes=(NodeInstance(name="sink", uses="demo.sink"),),
+            ),
+        ),
+        bindings=SystemBoundaryBindings(
+            inputs=(
+                SystemPortBinding(
+                    port="cloud",
+                    endpoint="main/sink.cloud",
+                ),
+            ),
+        ),
+    )
+    sink_revision = system_definition_record(sink).revision
+    root = SystemModel(
+        name="robot",
+        systems=(
+            SystemInstance(name="source-stack", uses=stack_revision.canonical),
+            SystemInstance(name="sink", uses=sink_revision.canonical),
+        ),
+        links=(
+            SystemLink(
+                **{
+                    "from": "system:source-stack.cloud",
+                    "to": "system:sink.cloud",
+                }
+            ),
+        ),
+    )
+    definitions = {
+        source_revision: source,
+        stack_revision: source_stack,
+        sink_revision: sink,
+    }
+    plan = plan_system(
+        root,
+        system_resolver=definitions.get,
+    )
+    prepared = _orchestrator(HierarchyBackend([])).prepare_plan(plan)
+
+    source_context = (
+        prepared
+        .child("source-stack")
+        .execution
+        .child("leaf")
+        .execution
+        .scopes[0]
+        .prepared
+        .context
+    )
+    sink_context = (
+        prepared
+        .child("sink")
+        .execution
+        .scopes[0]
+        .prepared
+        .context
+    )
+    assert source_context.system_outbound_links[0].local_endpoint == (
+        "main/source.cloud"
+    )
+    assert source_context.system_outbound_links[0].remote_endpoint == (
+        "main/sink.cloud"
+    )
+    assert sink_context.system_inbound_links[0].local_endpoint == (
+        "main/sink.cloud"
+    )
+
+
 def test_parent_scopes_do_not_flatten_child_scopes() -> None:
     plan = _parent_and_child_plan(
         parent_has_work=False
@@ -429,6 +615,54 @@ def test_prepare_plan_recurses_without_creating_parent_scope() -> None:
             "prepare",
         ),
     ]
+
+
+def test_prepare_plan_passes_derived_context_to_child_boundary() -> None:
+    events: list[tuple[str, str]] = []
+    backend = HierarchyBackend(events)
+    orchestrator = _orchestrator(backend)
+    context = SystemExecutionContext(
+        variables={"MODE": "root"},
+        systems={
+            "lidar": SystemExecutionContextOverride(
+                variables={"MODE": "lidar"},
+            ),
+        },
+    )
+
+    # Re-plan so the exact root and child context digests are bound.
+    child = _work_system("livox-mid360")
+    revision = system_definition_record(child).revision
+    parent = SystemModel(
+        name="robot",
+        systems=(
+            SystemInstance(
+                name="lidar",
+                uses=revision.canonical,
+            ),
+        ),
+    )
+    plan = plan_system(
+        parent,
+        execution_context=context,
+        system_resolver=(
+            lambda requested: child
+            if requested == revision
+            else None
+        ),
+    )
+
+    prepared = orchestrator.prepare_plan(
+        plan,
+        execution_context=context,
+    )
+    expected = child_system_execution_context(context, "lidar")
+    child_execution = prepared.child("lidar").execution
+
+    assert child_execution.execution_context == expected
+    assert child_execution.scopes[0].prepared.context.execution_context == (
+        expected
+    )
 
 
 def test_start_creates_distinct_parent_and_child_execution_ids() -> None:

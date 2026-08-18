@@ -486,8 +486,8 @@ def _plan_jsonable(plan) -> dict:
     )
 
 
-def _render_system_plan(plan) -> None:
-    console.print(render_system_plan_view(plan))
+def _render_system_plan(plan, *, explain: bool = False) -> None:
+    console.print(render_system_plan_view(plan, explain=explain))
 
 
 @system_app.command("plan")
@@ -523,6 +523,16 @@ def system_plan(
         typer.Option(
             "--warnings-as-errors",
             help="Return a non-zero exit code when planner warnings are present",
+        ),
+    ] = False,
+    explain: Annotated[
+        bool,
+        typer.Option(
+            "--explain",
+            help=(
+                "Show public System contracts and their recursively resolved "
+                "internal bindings"
+            ),
         ),
     ] = False,
 ) -> None:
@@ -590,7 +600,7 @@ def system_plan(
             )
         )
     else:
-        _render_system_plan(plan)
+        _render_system_plan(plan, explain=explain)
 
     if warnings_as_errors and plan.diagnostics:
         raise typer.Exit(1)

@@ -9,7 +9,9 @@ from pydantic import Field
 from ._base import Metadata, SystemBaseModel
 from .contracts import (
     SystemBoundaryBindings,
+    SystemParameter,
     SystemPort,
+    SystemResourceRequirement,
 )
 from .dependencies import SystemDependency
 from .graph import Graph, SystemLink
@@ -43,6 +45,14 @@ class SystemModel(SystemBaseModel):
 
     inputs: tuple[SystemPort, ...] = ()
     outputs: tuple[SystemPort, ...] = ()
+    parameters: tuple[SystemParameter, ...] = ()
+    resource_requirements: tuple[
+        SystemResourceRequirement,
+        ...,
+    ] = Field(
+        default=(),
+        alias="resourceRequirements",
+    )
     bindings: SystemBoundaryBindings = Field(
         default_factory=SystemBoundaryBindings
     )
@@ -67,6 +77,21 @@ class SystemModel(SystemBaseModel):
 
     def output(self, name: str) -> SystemPort:
         for item in self.outputs:
+            if item.name == name:
+                return item
+        raise KeyError(name)
+
+    def parameter(self, name: str) -> SystemParameter:
+        for item in self.parameters:
+            if item.name == name:
+                return item
+        raise KeyError(name)
+
+    def resource_requirement(
+        self,
+        name: str,
+    ) -> SystemResourceRequirement:
+        for item in self.resource_requirements:
             if item.name == name:
                 return item
         raise KeyError(name)

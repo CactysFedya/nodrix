@@ -22,17 +22,15 @@ dead/duplicate code.
 - **2.19 — иерархическая композиция System:** pinned child Definitions,
   recursive planning, lifecycle и rollback, observation, human status и
   versioned JSONL events.
+- **2.20 — зависимости и readiness:** sibling dependencies, compiled startup
+  topology, bounded readiness waits, startup events и rollback в обратном
+  фактическом порядке.
+- **2.21 — полноценные интерфейсы System:** типизированные ports, рекурсивные
+  child endpoints, parameter/context/resource bindings, SDK validation, явные
+  backend capabilities, transport-backed links LocalBackend и Plan explain.
 
 ## Последовательность реализации
 
-- **2.20 — зависимости и readiness:** sibling `SystemDependency`, условия
-  `started`/`ready`/`healthy`, deadline каждой связи, поиск циклов, compiled
-  deterministic DAG, независимые ветки запуска, bounded polling, propagation
-  ошибок, rollback в обратном фактическом порядке и startup events.
-- **2.21 — полноценные интерфейсы System:** inputs/outputs, parent-to-child и
-  sibling bindings, передача параметров/context/resources, required и optional
-  ports, проверка типов и направлений, локальные links и явные transport
-  boundaries без скрытого flattening.
 - **2.22 — канонический System Run:** versioned run directory с source и
   resolved System, точным Plan/Context, журналом событий, атомарным live/final
   status, environment provenance, redaction, logs и recovery metadata.

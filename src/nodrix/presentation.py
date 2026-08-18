@@ -1096,6 +1096,77 @@ def _system_plan_tree(
     return lines
 
 
+def _system_interface_tree(plan: Any) -> Text:
+    """Explain public contracts and their compiled internal realizations."""
+
+    lines = Text()
+
+    def append_plan(current: Any, prefix: str) -> None:
+        lines.append(prefix + "● ", style="cyan")
+        lines.append(str(current.system), style="bold")
+        lines.append("\n")
+
+        for port in current.inputs:
+            try:
+                binding = current.bindings.input(port.name)
+                realization = (
+                    f" → {binding.endpoint} "
+                    f"[{binding.target} · {binding.backend}]"
+                )
+            except KeyError:
+                realization = " → unbound"
+            lines.append(prefix + "  IN  ", style="dim")
+            lines.append(str(port.name), style="bold")
+            lines.append(f"  {port.type_id}{realization}\n", style="dim")
+
+        for port in current.outputs:
+            try:
+                binding = current.bindings.output(port.name)
+                realization = (
+                    f" ← {binding.endpoint} "
+                    f"[{binding.target} · {binding.backend}]"
+                )
+            except KeyError:
+                realization = " ← unbound"
+            lines.append(prefix + "  OUT ", style="dim")
+            lines.append(str(port.name), style="bold")
+            lines.append(f"  {port.type_id}{realization}\n", style="dim")
+
+        for parameter in current.parameters:
+            try:
+                binding = current.bindings.parameter(parameter.name)
+                targets = ", ".join(binding.targets)
+            except KeyError:
+                targets = "unbound"
+            state = "configured" if parameter.configured else "default"
+            lines.append(prefix + "  PAR ", style="dim")
+            lines.append(str(parameter.name), style="bold")
+            lines.append(
+                f"  {parameter.type} = {parameter.value!r} "
+                f"({state}) → {targets}\n",
+                style="dim",
+            )
+
+        for requirement in current.resource_requirements:
+            try:
+                binding = current.bindings.resource(requirement.name)
+                realization = (
+                    f" → {binding.instance} "
+                    f"[{binding.target} · {binding.backend}]"
+                )
+            except KeyError:
+                realization = " → unbound"
+            lines.append(prefix + "  RES ", style="dim")
+            lines.append(str(requirement.name), style="bold")
+            lines.append(f"  {requirement.uses}{realization}\n", style="dim")
+
+        for child in current.systems:
+            append_plan(child.plan, prefix + "  ")
+
+    append_plan(plan, "")
+    return lines
+
+
 
 def _execution_state_value(value: object) -> str:
     state = getattr(value, "value", value)
@@ -1827,7 +1898,7 @@ def render_system_execution_status(
 
     return Group(lines)
 
-def render_system_plan(plan: Any) -> Group:
+def render_system_plan(plan: Any, *, explain: bool = False) -> Group:
     """Render a nodrix.system execution plan as a readable architecture tree."""
 
     header = Text()
@@ -1843,6 +1914,15 @@ def render_system_plan(plan: Any) -> Group:
                 Text(""),
                 _section("SYSTEMS"),
                 _system_plan_tree(plan),
+            ]
+        )
+
+    if explain:
+        sections.extend(
+            [
+                Text(""),
+                _section("RESOLVED INTERFACES"),
+                _system_interface_tree(plan),
             ]
         )
 

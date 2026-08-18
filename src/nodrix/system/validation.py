@@ -4,8 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from types import UnionType
-from typing import Any, Iterable, Mapping, Union, get_args, get_origin
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Iterable,
+    Literal,
+    Mapping,
+    Union,
+    get_args,
+    get_origin,
+)
 
+from ..model import RevisionRef
 from ..sdk.definitions import (
     DependencyDefinition,
     NodeDefinition,
@@ -13,9 +24,25 @@ from ..sdk.definitions import (
     ResourceDefinition,
 )
 from .catalog import DefinitionCatalog
-from .graph import split_local_endpoint, split_system_endpoint
+from .contracts import (
+    SystemParameter,
+    SystemParameterTargetKind,
+    SystemParameterType,
+    parse_system_parameter_target,
+)
+from .graph import (
+    SystemEndpointKind,
+    parse_system_endpoint,
+    split_local_endpoint,
+)
 from .instances import NodeInstance, ResourceInstance
 from .model import SystemModel
+
+
+SystemValidationResolver = Callable[
+    [RevisionRef],
+    SystemModel | None,
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +100,7 @@ def _validate_parameters(
     values: Mapping[str, object],
     definitions: tuple[ParameterDefinition, ...],
     diagnostics: list[SystemDiagnostic],
+    bound: set[str] | frozenset[str] = frozenset(),
 ) -> None:
     known = {item.name: item for item in definitions}
     for name in sorted(set(values) - set(known)):
@@ -85,7 +113,11 @@ def _validate_parameters(
             )
         )
     for name, definition in known.items():
-        if definition.required and name not in values:
+        if (
+            definition.required
+            and name not in values
+            and name not in bound
+        ):
             diagnostics.append(
                 SystemDiagnostic(
                     "error",
@@ -146,6 +178,105 @@ def _resource_type_compatible(required: Any, provided: Any) -> bool:
     return required_runtime == provided_runtime
 
 
+def _annotation_accepts_runtime_type(
+    annotation: Any,
+    runtime_type: type[Any],
+) -> bool | None:
+    """Return whether an SDK annotation accepts a portable runtime category."""
+
+    if annotation in (Any, object):
+        return True
+    origin = get_origin(annotation)
+    if origin is Annotated:
+        arguments = get_args(annotation)
+        return (
+            _annotation_accepts_runtime_type(arguments[0], runtime_type)
+            if arguments
+            else None
+        )
+    if origin in (Union, UnionType):
+        results = tuple(
+            _annotation_accepts_runtime_type(option, runtime_type)
+            for option in get_args(annotation)
+        )
+        if True in results:
+            return True
+        return None if None in results else False
+    if origin is Literal:
+        return False
+
+    target = origin or annotation
+    if target is float and runtime_type is int:
+        return True
+    if runtime_type is bool and target is int:
+        return False
+    try:
+        if isinstance(target, type):
+            return issubclass(runtime_type, target)
+    except TypeError:
+        return None
+    return None
+
+
+def _system_parameter_type_compatible(
+    contract: SystemParameter,
+    annotation: Any,
+) -> bool | None:
+    """Check that every value allowed by a System contract fits an SDK target."""
+
+    if contract.value_type is SystemParameterType.ANY:
+        return True if annotation in (Any, object) else False
+
+    runtime_types: dict[
+        SystemParameterType,
+        tuple[type[Any], ...],
+    ] = {
+        SystemParameterType.STRING: (str,),
+        SystemParameterType.INTEGER: (int,),
+        SystemParameterType.NUMBER: (int, float),
+        SystemParameterType.BOOLEAN: (bool,),
+        SystemParameterType.OBJECT: (dict,),
+        SystemParameterType.ARRAY: (list,),
+    }
+    results = tuple(
+        _annotation_accepts_runtime_type(annotation, runtime_type)
+        for runtime_type in runtime_types[contract.value_type]
+    )
+    if False in results:
+        return False
+    if None in results:
+        return None
+
+    if contract.nullable:
+        nullable = _annotation_accepts_runtime_type(
+            annotation,
+            type(None),
+        )
+        if nullable is not True:
+            return nullable
+    return True
+
+
+def _system_parameter_contract_compatible(
+    source: SystemParameter,
+    target: SystemParameter,
+) -> bool:
+    """Return whether every portable source value is accepted by a child."""
+
+    if source.nullable and not target.nullable:
+        return False
+    if target.value_type is SystemParameterType.ANY:
+        return True
+    if source.value_type is SystemParameterType.ANY:
+        return False
+    if source.value_type is target.value_type:
+        return True
+    return (
+        source.value_type is SystemParameterType.INTEGER
+        and target.value_type is SystemParameterType.NUMBER
+    )
+
+
 def _message_contract_version(type_id: str) -> tuple[str, int] | None:
     stem, marker, version = type_id.rpartition("/v")
     if not marker or not stem:
@@ -190,12 +321,14 @@ def _validate_node_definition(
     resources: Mapping[str, ResourceInstance],
     catalog: DefinitionCatalog,
     diagnostics: list[SystemDiagnostic],
+    bound_parameters: set[str] | frozenset[str] = frozenset(),
 ) -> None:
     _validate_parameters(
         path=path,
         values=node.parameters,
         definitions=definition.parameters,
         diagnostics=diagnostics,
+        bound=bound_parameters,
     )
 
     dependencies = _node_resource_dependencies(definition)
@@ -276,12 +409,14 @@ def _validate_resource_definition(
     path: str,
     definition: ResourceDefinition,
     diagnostics: list[SystemDiagnostic],
+    bound_parameters: set[str] | frozenset[str] = frozenset(),
 ) -> None:
     _validate_parameters(
         path=path,
         values=resource.parameters,
         definitions=definition.parameters,
         diagnostics=diagnostics,
+        bound=bound_parameters,
     )
 
 
@@ -299,12 +434,17 @@ def validate_system(
     system: SystemModel,
     *,
     catalog: DefinitionCatalog | None = None,
+    system_resolver: SystemValidationResolver | None = None,
 ) -> SystemValidationReport:
     diagnostics: list[SystemDiagnostic] = []
 
     categories = {
         "inputs": system.inputs,
         "outputs": system.outputs,
+        "parameters": system.parameters,
+        "resourceRequirements": (
+            system.resource_requirements
+        ),
         "systems": system.systems,
         "resources": system.resources,
         "applications": system.applications,
@@ -337,6 +477,194 @@ def validate_system(
         item.name: item
         for item in system.outputs
     }
+    resource_requirements = {
+        item.name: item
+        for item in system.resource_requirements
+    }
+    system_parameters = {
+        item.name: item
+        for item in system.parameters
+    }
+    system_parameter_names = set(system_parameters)
+    parameter_target_bindings: dict[
+        tuple[str, str | None, str],
+        set[str],
+    ] = {}
+    seen_parameter_bindings: set[str] = set()
+    seen_parameter_targets: set[str] = set()
+
+    for index, binding in enumerate(
+        system.bindings.parameters
+    ):
+        path = f"bindings.parameters[{index}]"
+        if binding.parameter in seen_parameter_bindings:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS058",
+                    f"{path}.parameter",
+                    f"duplicate binding for System parameter "
+                    f"{binding.parameter!r}",
+                )
+            )
+        seen_parameter_bindings.add(binding.parameter)
+
+        if binding.parameter not in system_parameter_names:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS059",
+                    f"{path}.parameter",
+                    f"unknown System parameter {binding.parameter!r}",
+                )
+            )
+
+        for target_index, raw_target in enumerate(binding.targets):
+            if raw_target in seen_parameter_targets:
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS060",
+                        f"{path}.targets[{target_index}]",
+                        "internal parameter target is bound more than once: "
+                        f"{raw_target!r}",
+                    )
+                )
+            seen_parameter_targets.add(raw_target)
+            target = parse_system_parameter_target(raw_target)
+            key = (
+                target.kind.value,
+                target.scope,
+                target.instance,
+            )
+            parameter_target_bindings.setdefault(
+                key,
+                set(),
+            ).add(target.parameter)
+
+    child_definitions: dict[str, SystemModel] = {}
+
+    for index, instance in enumerate(system.systems):
+        path = f"systems[{index}]"
+
+        for slot, resource_name in instance.resources.items():
+            if resource_name not in resource_names:
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS065",
+                        f"{path}.resources.{slot}",
+                        f"unknown parent ResourceInstance {resource_name!r}",
+                    )
+                )
+
+        if system_resolver is None:
+            continue
+
+        child = system_resolver(instance.revision)
+        if child is None or not isinstance(child, SystemModel):
+            continue
+
+        child_definitions[instance.name] = child
+        child_parameters = {
+            item.name: item
+            for item in child.parameters
+        }
+        child_resources = {
+            item.name: item
+            for item in child.resource_requirements
+        }
+        bound_child_parameters = parameter_target_bindings.get(
+            (
+                SystemParameterTargetKind.SYSTEM.value,
+                None,
+                instance.name,
+            ),
+            set(),
+        )
+
+        for name in sorted(
+            set(instance.parameters) - set(child_parameters)
+        ):
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS171",
+                    f"{path}.parameters.{name}",
+                    "parameter is not declared by the child System Definition",
+                )
+            )
+
+        for name, contract in child_parameters.items():
+            if (
+                contract.required
+                and name not in instance.parameters
+                and name not in bound_child_parameters
+            ):
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS172",
+                        f"{path}.parameters.{name}",
+                        "required child System parameter is not configured",
+                    )
+                )
+            if (
+                name in instance.parameters
+                and not contract.accepts(
+                    instance.parameters[name]
+                )
+            ):
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS173",
+                        f"{path}.parameters.{name}",
+                        "child System parameter does not match declared type "
+                        f"{contract.value_type.value!r}",
+                    )
+                )
+
+        for name in sorted(
+            set(instance.resources) - set(child_resources)
+        ):
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS174",
+                    f"{path}.resources.{name}",
+                    "resource slot is not declared by the child System Definition",
+                )
+            )
+
+        for name, requirement in child_resources.items():
+            if not requirement.optional and name not in instance.resources:
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS175",
+                        f"{path}.resources.{name}",
+                        "required child System resource is not bound",
+                    )
+                )
+                continue
+
+            parent_name = instance.resources.get(name)
+            parent_resource = resource_map.get(parent_name or "")
+            if (
+                parent_resource is not None
+                and parent_resource.uses != requirement.uses
+            ):
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS176",
+                        f"{path}.resources.{name}",
+                        "bound parent ResourceInstance has incompatible "
+                        f"definition {parent_resource.uses!r}; expected "
+                        f"{requirement.uses!r}",
+                    )
+                )
 
     dependency_edges: set[tuple[str, str]] = set()
 
@@ -395,15 +723,6 @@ def validate_system(
             )
 
         dependency_edges.add(edge)
-    input_ports = {
-        item.name: item
-        for item in system.inputs
-    }
-    output_ports = {
-        item.name: item
-        for item in system.outputs
-    }
-
     def validate_target(path: str, target: str | None) -> None:
         if target is not None and target not in target_names:
             diagnostics.append(
@@ -445,6 +764,16 @@ def validate_system(
                     path=path,
                     definition=definition,
                     diagnostics=diagnostics,
+                    bound_parameters=(
+                        parameter_target_bindings.get(
+                            (
+                                SystemParameterTargetKind.RESOURCE.value,
+                                None,
+                                resource.name,
+                            ),
+                            set(),
+                        )
+                    ),
                 )
 
     for index, application in enumerate(system.applications):
@@ -510,6 +839,16 @@ def validate_system(
                         resources=resource_map,
                         catalog=catalog,
                         diagnostics=diagnostics,
+                        bound_parameters=(
+                            parameter_target_bindings.get(
+                                (
+                                    SystemParameterTargetKind.NODE.value,
+                                    graph.name,
+                                    node.name,
+                                ),
+                                set(),
+                            )
+                        ),
                     )
 
         for connection_index, connection in enumerate(graph.connections):
@@ -603,6 +942,246 @@ def validate_system(
                         )
                     )
 
+    for binding_index, binding in enumerate(
+        system.bindings.parameters
+    ):
+        for target_index, raw_target in enumerate(binding.targets):
+            path = (
+                f"bindings.parameters[{binding_index}]"
+                f".targets[{target_index}]"
+            )
+            target = parse_system_parameter_target(raw_target)
+
+            if target.kind is SystemParameterTargetKind.SYSTEM:
+                child_instance = next(
+                    (
+                        item
+                        for item in system.systems
+                        if item.name == target.instance
+                    ),
+                    None,
+                )
+                if child_instance is None:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS075",
+                            path,
+                            f"unknown SystemInstance {target.instance!r}",
+                        )
+                    )
+                    continue
+                if target.parameter in child_instance.parameters:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS178",
+                            path,
+                            "bound parameter target also has an explicit "
+                            "instance value",
+                        )
+                    )
+                child_definition = child_definitions.get(
+                    target.instance
+                )
+                if child_definition is None:
+                    continue
+                child_parameter = next(
+                    (
+                        item
+                        for item in child_definition.parameters
+                        if item.name == target.parameter
+                    ),
+                    None,
+                )
+                if child_parameter is None:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS177",
+                            path,
+                            "child System Definition has no parameter "
+                            f"{target.parameter!r}",
+                        )
+                    )
+                    continue
+                system_parameter = system_parameters.get(
+                    binding.parameter
+                )
+                if (
+                    system_parameter is not None
+                    and not _system_parameter_contract_compatible(
+                        system_parameter,
+                        child_parameter,
+                    )
+                ):
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS179",
+                            path,
+                            "System parameter type "
+                            f"{system_parameter.value_type.value!r} is not "
+                            "accepted by child System parameter type "
+                            f"{child_parameter.value_type.value!r}",
+                        )
+                    )
+                continue
+
+            if target.kind is SystemParameterTargetKind.APPLICATION:
+                application = next(
+                    (
+                        item
+                        for item in system.applications
+                        if item.name == target.instance
+                    ),
+                    None,
+                )
+                if application is None:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS071",
+                            path,
+                            f"unknown ApplicationInstance {target.instance!r}",
+                        )
+                    )
+                elif target.parameter in application.parameters:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS178",
+                            path,
+                            "bound parameter target also has an explicit "
+                            "instance value",
+                        )
+                    )
+                continue
+
+            if target.kind is SystemParameterTargetKind.RESOURCE:
+                resource = resource_map.get(target.instance)
+                if resource is None:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS072",
+                            path,
+                            f"unknown ResourceInstance {target.instance!r}",
+                        )
+                    )
+                    continue
+                if target.parameter in resource.parameters:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS178",
+                            path,
+                            "bound parameter target also has an explicit "
+                            "instance value",
+                        )
+                    )
+                definition = (
+                    catalog.resources.get(resource.uses)
+                    if catalog is not None
+                    else None
+                )
+            else:
+                graph_name = target.scope
+                if graph_name not in graph_names:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS073",
+                            path,
+                            f"unknown Graph {graph_name!r}",
+                        )
+                    )
+                    continue
+                node = graph_node_maps.get(
+                    graph_name or "",
+                    {},
+                ).get(target.instance)
+                if node is None:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS074",
+                            path,
+                            f"unknown NodeInstance {target.instance!r} "
+                            f"in Graph {graph_name!r}",
+                        )
+                    )
+                    continue
+                if target.parameter in node.parameters:
+                    diagnostics.append(
+                        SystemDiagnostic(
+                            "error",
+                            "SYS178",
+                            path,
+                            "bound parameter target also has an explicit "
+                            "instance value",
+                        )
+                    )
+                definition = (
+                    catalog.nodes.get(node.uses)
+                    if catalog is not None
+                    else None
+                )
+
+            if definition is None:
+                continue
+            definition_parameter = next(
+                (
+                    item
+                    for item in definition.parameters
+                    if item.name == target.parameter
+                ),
+                None,
+            )
+            if definition_parameter is None:
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS177",
+                        path,
+                        f"referenced definition has no parameter "
+                        f"{target.parameter!r}",
+                    )
+                )
+                continue
+
+            system_parameter = system_parameters.get(
+                binding.parameter
+            )
+            if system_parameter is None:
+                continue
+            compatible = _system_parameter_type_compatible(
+                system_parameter,
+                definition_parameter.annotation,
+            )
+            if compatible is False:
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS179",
+                        path,
+                        "System parameter type "
+                        f"{system_parameter.value_type.value!r} is not "
+                        "accepted by SDK parameter annotation "
+                        f"{_type_name(definition_parameter.annotation)}",
+                    )
+                )
+            elif compatible is None:
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "warning",
+                        "SYS180",
+                        path,
+                        "SDK parameter annotation could not be verified "
+                        "against the portable System parameter type",
+                    )
+                )
+
     def resolve_system_endpoint(
         path: str,
         value: str,
@@ -610,8 +1189,11 @@ def validate_system(
         direction: str,
         missing_port_code: str,
     ) -> tuple[str, str | None]:
-        graph_name, instance_name, port_name = split_system_endpoint(value)
-        if graph_name is None:
+        endpoint = parse_system_endpoint(value)
+        instance_name = endpoint.instance
+        port_name = endpoint.port
+
+        if endpoint.kind is SystemEndpointKind.APPLICATION:
             if instance_name not in application_names:
                 diagnostics.append(
                     SystemDiagnostic(
@@ -623,6 +1205,50 @@ def validate_system(
                 )
                 return "invalid", None
             return "application", None
+
+        if endpoint.kind is SystemEndpointKind.SYSTEM:
+            if instance_name not in system_names:
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS044",
+                        path,
+                        f"unknown child SystemInstance {instance_name!r}",
+                    )
+                )
+                return "invalid", None
+
+            child = child_definitions.get(instance_name)
+            if child is None:
+                return "system", None
+
+            is_source = direction == "source"
+            ports = child.outputs if is_source else child.inputs
+            port = next(
+                (
+                    item
+                    for item in ports
+                    if item.name == port_name
+                ),
+                None,
+            )
+            if port is None:
+                expected = "output" if is_source else "input"
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        missing_port_code,
+                        path,
+                        f"child System Definition {child.name!r} has no "
+                        f"{expected} port {port_name!r}",
+                    )
+                )
+                return "system", None
+
+            return "system", port.type_id
+
+        graph_name = endpoint.scope
+        assert graph_name is not None
 
         if graph_name not in graph_names:
             diagnostics.append(
@@ -828,6 +1454,63 @@ def validate_system(
                         "type compatibility cannot be verified",
                     )
                 )
+
+    seen_resource_bindings: set[str] = set()
+
+    for index, binding in enumerate(
+        system.bindings.resources
+    ):
+        path = f"bindings.resources[{index}]"
+
+        if binding.resource in seen_resource_bindings:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS055",
+                    f"{path}.resource",
+                    "duplicate binding for System resource requirement "
+                    f"{binding.resource!r}",
+                )
+            )
+        seen_resource_bindings.add(binding.resource)
+
+        requirement = resource_requirements.get(
+            binding.resource
+        )
+        if requirement is None:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS056",
+                    f"{path}.resource",
+                    "unknown System resource requirement "
+                    f"{binding.resource!r}",
+                )
+            )
+
+        resource = resource_map.get(binding.instance)
+        if resource is None:
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS057",
+                    f"{path}.instance",
+                    f"unknown internal ResourceInstance {binding.instance!r}",
+                )
+            )
+        elif (
+            requirement is not None
+            and resource.uses != requirement.uses
+        ):
+            diagnostics.append(
+                SystemDiagnostic(
+                    "error",
+                    "SYS157",
+                    path,
+                    "internal ResourceInstance has incompatible definition "
+                    f"{resource.uses!r}; expected {requirement.uses!r}",
+                )
+            )
 
     for index, link in enumerate(system.links):
         path = f"links[{index}]"

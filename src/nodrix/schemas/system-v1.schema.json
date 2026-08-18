@@ -351,6 +351,22 @@
           },
           "title": "Outputs",
           "type": "array"
+        },
+        "parameters": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SystemParameterBinding"
+          },
+          "title": "Parameters",
+          "type": "array"
+        },
+        "resources": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/SystemResourceBinding"
+          },
+          "title": "Resources",
+          "type": "array"
         }
       },
       "title": "SystemBoundaryBindings",
@@ -427,6 +443,18 @@
           "title": "Name",
           "type": "string"
         },
+        "parameters": {
+          "additionalProperties": true,
+          "title": "Parameters",
+          "type": "object"
+        },
+        "resources": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Resources",
+          "type": "object"
+        },
         "uses": {
           "minLength": 1,
           "title": "Uses",
@@ -498,6 +526,111 @@
       ],
       "title": "SystemLink",
       "type": "object"
+    },
+    "SystemParameter": {
+      "additionalProperties": false,
+      "description": "One configurable value accepted by a System Definition.",
+      "properties": {
+        "default": {
+          "default": null,
+          "title": "Default"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "nullable": {
+          "default": false,
+          "title": "Nullable",
+          "type": "boolean"
+        },
+        "required": {
+          "default": false,
+          "title": "Required",
+          "type": "boolean"
+        },
+        "type": {
+          "$ref": "#/$defs/SystemParameterType",
+          "default": "any"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "SystemParameter",
+      "type": "object"
+    },
+    "SystemParameterBinding": {
+      "additionalProperties": false,
+      "description": "Bind one public System parameter to explicit internal targets.",
+      "properties": {
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "parameter": {
+          "minLength": 1,
+          "title": "Parameter",
+          "type": "string"
+        },
+        "targets": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Targets",
+          "type": "array"
+        }
+      },
+      "required": [
+        "parameter",
+        "targets"
+      ],
+      "title": "SystemParameterBinding",
+      "type": "object"
+    },
+    "SystemParameterType": {
+      "description": "Portable scalar/container types accepted by a System parameter.",
+      "enum": [
+        "any",
+        "string",
+        "integer",
+        "number",
+        "boolean",
+        "object",
+        "array"
+      ],
+      "title": "SystemParameterType",
+      "type": "string"
     },
     "SystemPort": {
       "additionalProperties": false,
@@ -578,6 +711,87 @@
         "endpoint"
       ],
       "title": "SystemPortBinding",
+      "type": "object"
+    },
+    "SystemResourceBinding": {
+      "additionalProperties": false,
+      "description": "Expose one internal ResourceInstance through a System requirement.",
+      "properties": {
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "instance": {
+          "minLength": 1,
+          "title": "Instance",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "resource": {
+          "minLength": 1,
+          "title": "Resource",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resource",
+        "instance"
+      ],
+      "title": "SystemResourceBinding",
+      "type": "object"
+    },
+    "SystemResourceRequirement": {
+      "additionalProperties": false,
+      "description": "One externally bindable ResourceDefinition required by a System.",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "extensions": {
+          "additionalProperties": true,
+          "title": "Extensions",
+          "type": "object"
+        },
+        "metadata": {
+          "additionalProperties": true,
+          "title": "Metadata",
+          "type": "object"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "optional": {
+          "default": false,
+          "title": "Optional",
+          "type": "boolean"
+        },
+        "uses": {
+          "minLength": 1,
+          "title": "Uses",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "uses"
+      ],
+      "title": "SystemResourceRequirement",
       "type": "object"
     },
     "Target": {
@@ -714,10 +928,26 @@
       "title": "Outputs",
       "type": "array"
     },
+    "parameters": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SystemParameter"
+      },
+      "title": "Parameters",
+      "type": "array"
+    },
     "policies": {
       "additionalProperties": true,
       "title": "Policies",
       "type": "object"
+    },
+    "resourceRequirements": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/SystemResourceRequirement"
+      },
+      "title": "Resourcerequirements",
+      "type": "array"
     },
     "resources": {
       "default": [],

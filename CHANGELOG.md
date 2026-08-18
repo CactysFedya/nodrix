@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased — Complete System interfaces (2.21)
+
+- Added typed public System inputs, outputs, portable parameters, resource
+  requirements, and explicit bindings to applications, graphs, and arbitrarily
+  nested child Systems.
+- Added strict child parameter/resource validation, SDK annotation
+  compatibility checks, deterministic override fan-out, and per-child
+  execution-context inheritance without embedding operational secrets in Plans.
+- Preserved child execution boundaries while recursively resolving System
+  links to backend endpoints; added explicit backend capabilities and stable
+  failures instead of silently flattening or ignoring unsupported bindings.
+- Added LocalBackend lowering for transport-backed child-System links and an
+  explicit `LOCAL103` diagnostic for in-memory links across independent child
+  runtimes.
+- Added `plyctl system plan --explain`, public SDK exports, synchronized EN/RU
+  documentation, and fully commented interface examples in generated System
+  YAML.
+
 ## Unreleased — System dependencies and readiness (2.20)
 
 - Added strict backend-neutral sibling `SystemDependency` definitions with

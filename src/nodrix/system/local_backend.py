@@ -144,6 +144,21 @@ def _endpoint_alias(
     return f"{name}.{port}"
 
 
+def _external_endpoint_label(
+    value: str,
+    *,
+    system_path: tuple[str, ...],
+    local_owner: str,
+) -> str:
+    """Return a local placeholder carrying stable remote endpoint identity."""
+
+    graph, instance, port = split_system_endpoint(value)
+    owner = instance if graph is None else f"{graph}__{instance}"
+    remote = "__".join((*system_path, owner, port))
+    token = re.sub(r"[^A-Za-z0-9_]+", "_", remote)
+    return f"{local_owner}.__nodrix_remote__{token}"
+
+
 def _node_aliases(context: BackendContext) -> dict[str, str]:
     applications = {item.name for item in context.applications}
     by_name: dict[str, list[str]] = {}
@@ -439,7 +454,10 @@ def lower_local_context(context: BackendContext) -> LocalLoweringResult:
         } | {
             resource.backend for resource in context.plan.resources
         }
-        if owned_backends <= {context.backend}:
+        if (
+            owned_backends <= {context.backend}
+            and not context.system_links
+        ):
             return LocalLoweringResult(
                 manifest=legacy_manifest,
                 node_aliases={
@@ -542,6 +560,71 @@ def lower_local_context(context: BackendContext) -> LocalLoweringResult:
                     "uses": link.transport_uses,
                     "parameters": dict(link.parameters),
                 },
+            }
+        )
+
+    system_links_by_ordinal: dict[int, list[Any]] = {}
+    for system_link in context.system_links:
+        system_links_by_ordinal.setdefault(
+            system_link.ordinal,
+            [],
+        ).append(system_link)
+
+    for ordinal in sorted(system_links_by_ordinal):
+        sides = system_links_by_ordinal[ordinal]
+        outbound = next(
+            (item for item in sides if item.direction == "outbound"),
+            None,
+        )
+        inbound = next(
+            (item for item in sides if item.direction == "inbound"),
+            None,
+        )
+        representative = outbound or inbound
+        assert representative is not None
+        if representative.transport_uses is None:
+            raise ValueError(
+                "LocalBackend cannot lower an in-memory link across "
+                "independent child System runtimes"
+            )
+
+        if outbound is not None and inbound is not None:
+            source = _endpoint_alias(
+                outbound.local_endpoint,
+                aliases=aliases,
+            )
+            target = _endpoint_alias(
+                inbound.local_endpoint,
+                aliases=aliases,
+            )
+        elif outbound is not None:
+            source = _endpoint_alias(
+                outbound.local_endpoint,
+                aliases=aliases,
+            )
+            target = _external_endpoint_label(
+                outbound.remote_endpoint,
+                system_path=outbound.remote_system_path,
+                local_owner=source.split(".", 1)[0],
+            )
+        else:
+            assert inbound is not None
+            target = _endpoint_alias(
+                inbound.local_endpoint,
+                aliases=aliases,
+            )
+            source = _external_endpoint_label(
+                inbound.remote_endpoint,
+                system_path=inbound.remote_system_path,
+                local_owner=target.split(".", 1)[0],
+            )
+
+        links.append(
+            {
+                "from": source,
+                "to": target,
+                "uses": representative.transport_uses,
+                "parameters": dict(representative.link.parameters),
             }
         )
 
@@ -828,6 +911,7 @@ class LocalBackend(ExecutionBackend):
                         "resources",
                         "applications",
                         "system_links",
+                        "system_interfaces",
                         "readiness",
                         "health",
                     }
@@ -879,6 +963,21 @@ class LocalBackend(ExecutionBackend):
                     ),
                 )
             )
+
+        for system_link in context.system_links:
+            if system_link.transport_uses is None:
+                diagnostics.append(
+                    BackendDiagnostic(
+                        level="error",
+                        code="LOCAL103",
+                        path=f"system_links[{system_link.ordinal}].uses",
+                        message=(
+                            "LocalBackend keeps child Systems in independent "
+                            "runtime boundaries; their link requires an explicit "
+                            "transport provider"
+                        ),
+                    )
+                )
 
         session_names = _session_resource_names(context)
         for resource in context.resources:

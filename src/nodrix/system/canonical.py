@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 from nodrix.model import (
     RUN,
@@ -64,6 +65,50 @@ def system_plan_digest(
             "system_startup",
             None,
         )
+
+    def remove_empty_interface_fields(
+        plan_document: dict[str, Any],
+    ) -> None:
+        for field in (
+            "inputs",
+            "outputs",
+            "parameters",
+            "resource_requirements",
+        ):
+            if not plan_document.get(field):
+                plan_document.pop(field, None)
+
+        bindings = plan_document.get("bindings")
+        if (
+            isinstance(bindings, dict)
+            and not bindings.get("inputs")
+            and not bindings.get("outputs")
+            and not bindings.get("parameters")
+            and not bindings.get("resources")
+        ):
+            plan_document.pop("bindings", None)
+
+        systems = plan_document.get("systems")
+        if not isinstance(systems, list):
+            return
+        for instance in systems:
+            if not isinstance(instance, dict):
+                continue
+            if not instance.get("parameters"):
+                instance.pop("parameters", None)
+            if not instance.get("resources"):
+                instance.pop("resources", None)
+            if not instance.get("resource_bindings"):
+                instance.pop("resource_bindings", None)
+            child_plan = instance.get("plan")
+            if isinstance(child_plan, dict):
+                remove_empty_interface_fields(
+                    child_plan
+                )
+
+    # Preserve pre-2.21 Plan identity when interface contracts and instance
+    # values are absent. Nested child plans follow the same rule recursively.
+    remove_empty_interface_fields(document)
 
     encoded = json.dumps(
         document,

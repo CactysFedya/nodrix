@@ -10,9 +10,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import StrEnum
-from enum import Enum
-from typing import Any, Iterable, Mapping
+from enum import Enum, StrEnum
+from typing import Any, Iterable, Literal, Mapping
 
 from ..errors import NodrixError
 from .execution_context import (
@@ -21,6 +20,7 @@ from .execution_context import (
     validate_system_execution_context_binding,
 )
 from .planning import (
+    PlannedChildSystemResourceBinding,
     PlannedApplication,
     PlannedArtifact,
     PlannedConnection,
@@ -82,6 +82,30 @@ class BackendCapabilities:
 
 
 @dataclass(frozen=True, slots=True)
+class BackendSystemLink:
+    """One resolved side of a link crossing a child System boundary."""
+
+    link: PlannedLink
+    direction: Literal["inbound", "outbound"]
+    local_endpoint: str
+    remote_endpoint: str
+    local_system_path: tuple[str, ...] = ()
+    remote_system_path: tuple[str, ...] = ()
+
+    @property
+    def ordinal(self) -> int:
+        return self.link.ordinal
+
+    @property
+    def transport_required(self) -> bool:
+        return self.link.transport_required
+
+    @property
+    def transport_uses(self) -> str | None:
+        return self.link.transport_uses
+
+
+@dataclass(frozen=True, slots=True)
 class BackendContext:
     """The part of one SystemExecutionPlan owned by a backend.
 
@@ -98,6 +122,13 @@ class BackendContext:
         repr=False,
     )
     targets: tuple[PlannedTarget, ...] = ()
+    system_parameters: Mapping[str, Any] = field(
+        default_factory=dict
+    )
+    inherited_resources: tuple[
+        PlannedChildSystemResourceBinding,
+        ...,
+    ] = ()
     resources: tuple[PlannedResource, ...] = ()
     resource_order: tuple[str, ...] = ()
     applications: tuple[PlannedApplication, ...] = ()
@@ -106,9 +137,16 @@ class BackendContext:
     internal_links: tuple[PlannedLink, ...] = ()
     inbound_links: tuple[PlannedLink, ...] = ()
     outbound_links: tuple[PlannedLink, ...] = ()
+    system_inbound_links: tuple[BackendSystemLink, ...] = ()
+    system_outbound_links: tuple[BackendSystemLink, ...] = ()
     artifacts: tuple[PlannedArtifact, ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "system_parameters",
+            dict(self.system_parameters),
+        )
         try:
             validate_system_execution_context_binding(
                 self.plan.execution_context_sha256,
@@ -128,6 +166,12 @@ class BackendContext:
         backend: str,
         *,
         execution_context: SystemExecutionContext | None = None,
+        inherited_resources: tuple[
+            PlannedChildSystemResourceBinding,
+            ...,
+        ] = (),
+        system_inbound_links: tuple[BackendSystemLink, ...] = (),
+        system_outbound_links: tuple[BackendSystemLink, ...] = (),
     ) -> "BackendContext":
         backend = backend.strip()
         if not backend:
@@ -213,6 +257,17 @@ class BackendContext:
             plan=plan,
             backend=backend,
             execution_context=execution_context,
+            system_parameters={
+                parameter.name: parameter.value
+                for parameter in plan.parameters
+                if (
+                    parameter.configured
+                    or parameter.default is not None
+                )
+            },
+            inherited_resources=tuple(
+                inherited_resources
+            ),
             targets=targets,
             resources=resources,
             resource_order=resource_order,
@@ -222,6 +277,8 @@ class BackendContext:
             internal_links=internal_links,
             inbound_links=inbound_links,
             outbound_links=outbound_links,
+            system_inbound_links=system_inbound_links,
+            system_outbound_links=system_outbound_links,
             artifacts=artifacts,
         )
 
@@ -247,15 +304,36 @@ class BackendContext:
         return tuple(owned[key] for key in sorted(owned))
 
     @property
+    def system_links(self) -> tuple[BackendSystemLink, ...]:
+        owned: dict[
+            tuple[int, str, str],
+            BackendSystemLink,
+        ] = {}
+        for item in (
+            *self.system_inbound_links,
+            *self.system_outbound_links,
+        ):
+            key = (
+                item.ordinal,
+                item.local_endpoint,
+                item.remote_endpoint,
+            )
+            owned.setdefault(key, item)
+        return tuple(owned.values())
+
+    @property
     def is_empty(self) -> bool:
         return not any(
             (
                 self.targets,
+                self.system_parameters,
+                self.inherited_resources,
                 self.resources,
                 self.applications,
                 self.nodes,
                 self.connections,
                 self.links,
+                self.system_links,
                 self.artifacts,
             )
         )
@@ -272,7 +350,37 @@ class BackendContext:
             "internal_links": len(self.internal_links),
             "inbound_links": len(self.inbound_links),
             "outbound_links": len(self.outbound_links),
+            **(
+                {
+                    "system_inbound_links": len(
+                        self.system_inbound_links
+                    ),
+                    "system_outbound_links": len(
+                        self.system_outbound_links
+                    ),
+                }
+                if self.system_links
+                else {}
+            ),
             "artifacts": len(self.artifacts),
+            **(
+                {
+                    "system_parameters": len(
+                        self.system_parameters
+                    )
+                }
+                if self.system_parameters
+                else {}
+            ),
+            **(
+                {
+                    "inherited_resources": len(
+                        self.inherited_resources
+                    )
+                }
+                if self.inherited_resources
+                else {}
+            ),
         }
 
     def nodes_for_graph(self, graph: str) -> tuple[PlannedNode, ...]:
@@ -515,11 +623,20 @@ class ExecutionBackend(ABC):
         plan: SystemExecutionPlan,
         *,
         execution_context: SystemExecutionContext | None = None,
+        inherited_resources: tuple[
+            PlannedChildSystemResourceBinding,
+            ...,
+        ] = (),
+        system_inbound_links: tuple[BackendSystemLink, ...] = (),
+        system_outbound_links: tuple[BackendSystemLink, ...] = (),
     ) -> BackendContext:
         return BackendContext.from_plan(
             plan,
             self.backend_id,
             execution_context=execution_context,
+            inherited_resources=inherited_resources,
+            system_inbound_links=system_inbound_links,
+            system_outbound_links=system_outbound_links,
         )
 
     def validate_plan(
@@ -527,11 +644,20 @@ class ExecutionBackend(ABC):
         plan: SystemExecutionPlan,
         *,
         execution_context: SystemExecutionContext | None = None,
+        inherited_resources: tuple[
+            PlannedChildSystemResourceBinding,
+            ...,
+        ] = (),
+        system_inbound_links: tuple[BackendSystemLink, ...] = (),
+        system_outbound_links: tuple[BackendSystemLink, ...] = (),
     ) -> BackendValidationReport:
         return self.validate(
             self.context(
                 plan,
                 execution_context=execution_context,
+                inherited_resources=inherited_resources,
+                system_inbound_links=system_inbound_links,
+                system_outbound_links=system_outbound_links,
             )
         )
 
@@ -587,6 +713,63 @@ class ExecutionBackend(ABC):
                     )
                 )
 
+        if (
+            context.inherited_resources
+            and not self.capabilities.supports_feature(
+                "system_resources"
+            )
+        ):
+            diagnostics.append(
+                BackendDiagnostic(
+                    level="error",
+                    code="BACKEND104",
+                    path="inherited_resources",
+                    message=(
+                        f"backend {self.backend_id!r} does not support "
+                        "inherited child System resources"
+                    ),
+                )
+            )
+
+        if (
+            context.system_links
+            and not self.capabilities.supports_feature(
+                "system_interfaces"
+            )
+        ):
+            diagnostics.append(
+                BackendDiagnostic(
+                    level="error",
+                    code="BACKEND105",
+                    path="system_links",
+                    message=(
+                        f"backend {self.backend_id!r} does not support "
+                        "links across child System interfaces"
+                    ),
+                )
+            )
+
+        for system_link in context.system_links:
+            if (
+                system_link.transport_required
+                and not self.capabilities.supports_transport(
+                    system_link.transport_uses
+                )
+            ):
+                diagnostics.append(
+                    BackendDiagnostic(
+                        level="error",
+                        code="BACKEND103",
+                        path=(
+                            f"system_links[{system_link.ordinal}].uses"
+                        ),
+                        message=(
+                            f"backend {self.backend_id!r} does not support "
+                            f"transport {system_link.transport_uses!r}"
+                        ),
+                    )
+                )
+
         diagnostics.extend(self._validate(context))
         return BackendValidationReport(
             backend=self.backend_id,
@@ -608,11 +791,20 @@ class ExecutionBackend(ABC):
         plan: SystemExecutionPlan,
         *,
         execution_context: SystemExecutionContext | None = None,
+        inherited_resources: tuple[
+            PlannedChildSystemResourceBinding,
+            ...,
+        ] = (),
+        system_inbound_links: tuple[BackendSystemLink, ...] = (),
+        system_outbound_links: tuple[BackendSystemLink, ...] = (),
     ) -> PreparedExecution:
         return self.prepare(
             self.context(
                 plan,
                 execution_context=execution_context,
+                inherited_resources=inherited_resources,
+                system_inbound_links=system_inbound_links,
+                system_outbound_links=system_outbound_links,
             )
         )
 
@@ -767,6 +959,7 @@ __all__ = [
     "BackendExecutionHandle",
     "BackendExecutionState",
     "BackendExecutionStatus",
+    "BackendSystemLink",
     "ExecutionHealthState",
     "ExecutionObservation",
     "BackendValidationError",

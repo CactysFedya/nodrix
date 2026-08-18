@@ -6,6 +6,7 @@ Concept pages explain why Plyctl is structured this way.
 - [Runtime and data plane](runtime.md)
 - [Providers and extension boundaries](providers.md)
 - [System dependencies and readiness](system-dependencies.md)
+- [System interfaces and bindings](system-interfaces.md)
 
 ## Self-Describing YAML
 

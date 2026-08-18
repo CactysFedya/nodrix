@@ -589,9 +589,36 @@ def _system_scaffold(
 # targets: []         # Где могут исполняться части системы.
 # resources: []       # Общие зависимости и execution context.
 # applications: []    # Процессы, launch-файлы и другие applications.
+# inputs:              # Публичные типизированные входы System.
+#   - name: cloud
+#     type_id: spatial.point_cloud/v1
+# outputs: []          # Публичные типизированные выходы System.
+# parameters:          # Переносимые значения, задаваемые при инстанцировании.
+#   - name: voxel_size
+#     type: number     # any|string|integer|number|boolean|object|array
+#     default: 0.2
+# resourceRequirements: # Ресурсы, которые предоставляет родительская System.
+#   - name: lidar
+#     uses: livox.device
 # systems:             # Переиспользуемые дочерние System Definitions.
 #   - name: driver     # Имя instance внутри родительской System.
 #     uses: ./driver.yaml  # Путь или закреплённая revision Definition.
+#     parameters: {voxel_size: 0.2} # Значения публичных parameters ребёнка.
+#     resources: {lidar: mid360}    # Requirement ребёнка → Resource родителя.
+# bindings:            # Реализация публичного контракта внутри System.
+#   inputs:
+#     - port: cloud
+#       endpoint: system:mapper.cloud # application.port | graph/node.port | system:child.port
+#   parameters:
+#     - parameter: voxel_size
+#       targets: [node:mapping/voxel.voxel_size]
+#   resources:
+#     - resource: lidar
+#       instance: internal_lidar
+# links:               # Типизированные соединения между компонентами/System.
+#   - from: system:driver.cloud
+#     to: system:mapper.cloud
+#     # uses: ros2.topic # Обязательно для cross-target/backend границы.
 #
 # dependencies:        # Порядок запуска sibling System instances.
 #   - system: mapper   # Эта System будет запущена после условия ниже.
@@ -631,9 +658,36 @@ def _system_scaffold(
 # targets: []         # Where parts of the system can execute.
 # resources: []       # Shared dependencies and execution context.
 # applications: []    # Processes, launches or other applications.
+# inputs:              # Public typed System inputs.
+#   - name: cloud
+#     type_id: spatial.point_cloud/v1
+# outputs: []          # Public typed System outputs.
+# parameters:          # Portable values configured per System instance.
+#   - name: voxel_size
+#     type: number     # any|string|integer|number|boolean|object|array
+#     default: 0.2
+# resourceRequirements: # Resources supplied by the parent System.
+#   - name: lidar
+#     uses: livox.device
 # systems:             # Reusable child System Definitions.
 #   - name: driver     # Instance name inside this parent System.
 #     uses: ./driver.yaml  # Path or pinned Definition revision.
+#     parameters: {voxel_size: 0.2} # Values for child public parameters.
+#     resources: {lidar: mid360}    # Child requirement → parent Resource.
+# bindings:            # Realization of this System's public contract.
+#   inputs:
+#     - port: cloud
+#       endpoint: system:mapper.cloud # application.port | graph/node.port | system:child.port
+#   parameters:
+#     - parameter: voxel_size
+#       targets: [node:mapping/voxel.voxel_size]
+#   resources:
+#     - resource: lidar
+#       instance: internal_lidar
+# links:               # Typed connections between components/Systems.
+#   - from: system:driver.cloud
+#     to: system:mapper.cloud
+#     # uses: ros2.topic # Required across target/backend boundaries.
 #
 # dependencies:        # Startup order between sibling System instances.
 #   - system: mapper   # This System starts after the condition below.

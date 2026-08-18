@@ -4,6 +4,7 @@
 - [Runtime и data plane](runtime.md)
 - [Provider и границы расширения](providers.md)
 - [Зависимости System и readiness](system-dependencies.md)
+- [Интерфейсы и bindings System](system-interfaces.md)
 
 ## Самодокументируемый YAML
 

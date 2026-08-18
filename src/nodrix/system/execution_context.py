@@ -14,13 +14,47 @@ import json
 from copy import deepcopy
 from typing import Any, Mapping
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
-from .model import SystemBaseModel
+from ._base import SystemBaseModel
 
 
 class SystemExecutionContextBindingError(ValueError):
     """A materialized execution context does not match its exact Plan binding."""
+
+
+class SystemExecutionContextOverride(SystemBaseModel):
+    """One child-specific execution-context overlay.
+
+    Values live in the materialized execution context, not in a System
+    Definition or ExecutionPlan. ``inherit=False`` starts the child from an
+    empty context before applying this overlay.
+    """
+
+    inherit: bool = True
+    variables: Mapping[str, str] = Field(default_factory=dict)
+    sources: tuple[str, ...] = ()
+    runtime: Mapping[str, Any] = Field(default_factory=dict)
+    node_defaults: Mapping[str, Any] = Field(default_factory=dict)
+    edge_defaults: Mapping[str, Any] = Field(default_factory=dict)
+    stream_defaults: Mapping[str, Any] = Field(default_factory=dict)
+    systems: Mapping[str, "SystemExecutionContextOverride"] = Field(
+        default_factory=dict
+    )
+
+    @field_validator("systems")
+    @classmethod
+    def validate_system_names(
+        cls,
+        value: Mapping[str, "SystemExecutionContextOverride"],
+    ) -> Mapping[str, "SystemExecutionContextOverride"]:
+        for name in value:
+            if not name.strip() or "." in name or "/" in name:
+                raise ValueError(
+                    "execution context System name must be non-empty and "
+                    "cannot contain '.' or '/'"
+                )
+        return value
 
 
 class SystemExecutionContext(SystemBaseModel):
@@ -42,6 +76,109 @@ class SystemExecutionContext(SystemBaseModel):
     )
     stream_defaults: Mapping[str, Any] = Field(
         default_factory=dict
+    )
+    systems: Mapping[str, SystemExecutionContextOverride] = Field(
+        default_factory=dict
+    )
+
+    @field_validator("systems")
+    @classmethod
+    def validate_system_names(
+        cls,
+        value: Mapping[str, SystemExecutionContextOverride],
+    ) -> Mapping[str, SystemExecutionContextOverride]:
+        for name in value:
+            if not name.strip() or "." in name or "/" in name:
+                raise ValueError(
+                    "execution context System name must be non-empty and "
+                    "cannot contain '.' or '/'"
+                )
+        return value
+
+
+def _deep_merge(
+    base: Mapping[str, Any],
+    overlay: Mapping[str, Any],
+) -> dict[str, Any]:
+    result = deepcopy(dict(base))
+    for key, value in overlay.items():
+        current = result.get(key)
+        if isinstance(current, Mapping) and isinstance(value, Mapping):
+            result[key] = _deep_merge(current, value)
+        else:
+            result[key] = deepcopy(value)
+    return result
+
+
+def apply_system_execution_context_override(
+    context: SystemExecutionContext | None,
+    override: SystemExecutionContextOverride,
+) -> SystemExecutionContext:
+    """Apply one deterministic child overlay to a materialized context."""
+
+    if not isinstance(override, SystemExecutionContextOverride):
+        raise TypeError(
+            "override must be a SystemExecutionContextOverride"
+        )
+
+    base = (
+        context
+        if context is not None and override.inherit
+        else SystemExecutionContext()
+    )
+    sources = tuple(
+        dict.fromkeys(
+            (*base.sources, *override.sources)
+        )
+    )
+    systems = dict(base.systems)
+    systems.update(override.systems)
+
+    return SystemExecutionContext(
+        variables={
+            **base.variables,
+            **override.variables,
+        },
+        sources=sources,
+        runtime=_deep_merge(base.runtime, override.runtime),
+        node_defaults=_deep_merge(
+            base.node_defaults,
+            override.node_defaults,
+        ),
+        edge_defaults=_deep_merge(
+            base.edge_defaults,
+            override.edge_defaults,
+        ),
+        stream_defaults=_deep_merge(
+            base.stream_defaults,
+            override.stream_defaults,
+        ),
+        systems=systems,
+    )
+
+
+def child_system_execution_context(
+    context: SystemExecutionContext | None,
+    child: str,
+) -> SystemExecutionContext | None:
+    """Derive one child's context and consume only its override branch."""
+
+    if context is None:
+        return None
+
+    child = child.strip()
+    if not child:
+        raise ValueError("child must be non-empty")
+
+    inherited = context.model_copy(
+        update={"systems": {}},
+    )
+    override = context.systems.get(child)
+    if override is None:
+        return inherited
+    return apply_system_execution_context_override(
+        inherited,
+        override,
     )
 
 
@@ -111,12 +248,15 @@ def system_execution_context_document(
             "context must be a SystemExecutionContext"
         )
 
-    return deepcopy(
+    document = deepcopy(
         context.model_dump(
             mode="json",
             by_alias=True,
         )
     )
+    if not document.get("systems"):
+        document.pop("systems", None)
+    return document
 
 
 def system_execution_context_digest(
@@ -141,8 +281,11 @@ def system_execution_context_digest(
 
 __all__ = [
     "validate_system_execution_context_binding",
+    "apply_system_execution_context_override",
+    "child_system_execution_context",
     "SystemExecutionContextBindingError",
     "SystemExecutionContext",
+    "SystemExecutionContextOverride",
     "system_execution_context_digest",
     "system_execution_context_document",
 ]

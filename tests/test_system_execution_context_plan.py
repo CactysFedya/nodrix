@@ -213,6 +213,26 @@ def test_no_context_preserves_legacy_plan_digest_shape() -> None:
         "system_startup",
         None,
     )
+    legacy_document.pop(
+        "inputs",
+        None,
+    )
+    legacy_document.pop(
+        "outputs",
+        None,
+    )
+    legacy_document.pop(
+        "parameters",
+        None,
+    )
+    legacy_document.pop(
+        "resource_requirements",
+        None,
+    )
+    legacy_document.pop(
+        "bindings",
+        None,
+    )
 
     encoded = json.dumps(
         legacy_document,

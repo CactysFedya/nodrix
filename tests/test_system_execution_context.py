@@ -7,6 +7,9 @@ from nodrix.project_system import (
 )
 from nodrix.system.execution_context import (
     SystemExecutionContext,
+    SystemExecutionContextOverride,
+    apply_system_execution_context_override,
+    child_system_execution_context,
     system_execution_context_digest,
     system_execution_context_document,
 )
@@ -237,3 +240,74 @@ def test_empty_project_runtime_preset_produces_empty_runtime_defaults(
     assert context.node_defaults == {}
     assert context.edge_defaults == {}
     assert context.stream_defaults == {}
+
+
+def test_child_execution_context_inherits_and_deep_merges_override() -> None:
+    context = SystemExecutionContext(
+        variables={"ROS_DISTRO": "jazzy", "MODE": "base"},
+        sources=("/opt/ros/jazzy/setup.bash",),
+        runtime={"mode": "realtime", "limits": {"cpu": 2}},
+        systems={
+            "mapping": SystemExecutionContextOverride(
+                variables={"MODE": "mapping"},
+                sources=("/workspace/install/setup.bash",),
+                runtime={"limits": {"memory": "2G"}},
+                systems={
+                    "worker": SystemExecutionContextOverride(
+                        variables={"THREADS": "4"},
+                    ),
+                },
+            ),
+        },
+    )
+
+    child = child_system_execution_context(context, "mapping")
+
+    assert child is not None
+    assert child.variables == {
+        "ROS_DISTRO": "jazzy",
+        "MODE": "mapping",
+    }
+    assert child.sources == (
+        "/opt/ros/jazzy/setup.bash",
+        "/workspace/install/setup.bash",
+    )
+    assert child.runtime == {
+        "mode": "realtime",
+        "limits": {
+            "cpu": 2,
+            "memory": "2G",
+        },
+    }
+    assert set(child.systems) == {"worker"}
+
+
+def test_execution_context_override_can_disable_inheritance() -> None:
+    context = SystemExecutionContext(
+        variables={"SECRET": "parent"},
+        runtime={"mode": "realtime"},
+    )
+    isolated = apply_system_execution_context_override(
+        context,
+        SystemExecutionContextOverride(
+            inherit=False,
+            variables={"MODE": "isolated"},
+        ),
+    )
+
+    assert isolated.variables == {"MODE": "isolated"}
+    assert isolated.runtime == {}
+
+
+def test_empty_system_context_tree_preserves_previous_digest_shape() -> None:
+    context = SystemExecutionContext(
+        variables={"MODE": "mapping"},
+    )
+    document = system_execution_context_document(context)
+
+    assert "systems" not in document
+    assert system_execution_context_digest(context) == (
+        system_execution_context_digest(
+            context.model_copy(update={"systems": {}})
+        )
+    )

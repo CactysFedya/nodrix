@@ -14,6 +14,11 @@ from nodrix.system import (
     ResourceInstance,
     SystemLink,
     SystemModel,
+    SystemBoundaryBindings,
+    SystemParameter,
+    SystemParameterBinding,
+    SystemPort,
+    SystemPortBinding,
     Target,
     dump_system,
 )
@@ -154,6 +159,58 @@ def test_system_plan_json_returns_execution_plan(tmp_path: Path) -> None:
     assert payload["targets"][0]["implicit"] is True
     assert payload["summary"]["nodes"] == 2
     assert payload["graphs"][0]["topological_order"] == ["source", "sink"]
+
+
+def test_system_plan_explain_shows_resolved_interface_bindings(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "mapper.yaml"
+    dump_system(
+        SystemModel(
+            name="mapper",
+            inputs=(SystemPort(name="cloud", type_id="cloud/v1"),),
+            parameters=(
+                SystemParameter(
+                    name="voxel_size",
+                    type="number",
+                    default=0.2,
+                ),
+            ),
+            graphs=(
+                Graph(
+                    name="main",
+                    nodes=(NodeInstance(name="voxel", uses="demo.voxel"),),
+                ),
+            ),
+            bindings=SystemBoundaryBindings(
+                inputs=(
+                    SystemPortBinding(
+                        port="cloud",
+                        endpoint="main/voxel.cloud",
+                    ),
+                ),
+                parameters=(
+                    SystemParameterBinding(
+                        parameter="voxel_size",
+                        targets=("node:main/voxel.voxel_size",),
+                    ),
+                ),
+            ),
+        ),
+        path,
+    )
+
+    result = runner.invoke(
+        app,
+        ["system", "plan", str(path), "--explain"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "RESOLVED INTERFACES" in result.output
+    assert "IN  cloud" in result.output
+    assert "main/voxel.cloud" in result.output
+    assert "PAR voxel_size" in result.output
+    assert "node:main/voxel.voxel_size" in result.output
 
 
 def test_system_plan_reports_planning_error(tmp_path: Path) -> None:

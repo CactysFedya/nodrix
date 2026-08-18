@@ -76,6 +76,7 @@ concepts/runtime
 concepts/providers
 concepts/self-describing-yaml
 concepts/system-dependencies
+concepts/system-interfaces
 ```
 
 ```{toctree}

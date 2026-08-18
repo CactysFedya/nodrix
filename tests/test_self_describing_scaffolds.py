@@ -245,6 +245,10 @@ def test_created_system_is_self_describing(
         in text
     )
     assert "# dependencies:" in text
+    assert "# parameters:" in text
+    assert "# resourceRequirements:" in text
+    assert "endpoint: system:mapper.cloud" in text
+    assert "# links:" in text
     assert "#     condition: ready # started | ready | healthy" in text
     assert "#     timeoutSeconds: 30" in text
 
@@ -267,6 +271,9 @@ def test_created_russian_system_explains_dependency_fields(
 
     assert "# dependencies:" in text
     assert "Порядок запуска" in text
+    assert "Публичные типизированные входы" in text
+    assert "Requirement ребёнка" in text
+    assert "endpoint: system:mapper.cloud" in text
     assert "#     requires: driver" in text
     assert "#     condition: ready # started | ready | healthy" in text
     assert "Ограниченное ожидание без busy-loop" in text

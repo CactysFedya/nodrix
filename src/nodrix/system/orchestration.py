@@ -25,6 +25,7 @@ from .backend import (
     BackendExecutionHandle,
     BackendExecutionState,
     BackendExecutionStatus,
+    BackendSystemLink,
     ExecutionBackend,
     ExecutionHealthState,
     ExecutionObservation,
@@ -33,15 +34,18 @@ from .backend import (
 from .execution_context import (
     SystemExecutionContext,
     SystemExecutionContextBindingError,
+    child_system_execution_context,
     validate_system_execution_context_binding,
 )
 from .dependencies import SystemDependencyCondition
 from .planning import (
+    PlannedChildSystemResourceBinding,
     PlannedSystemDependency,
     PlannedSystemInstance,
     PlannedTarget,
     SystemExecutionPlan,
 )
+from .graph import SystemEndpointKind, parse_system_endpoint
 
 
 class OrchestrationError(NodrixError):
@@ -88,6 +92,92 @@ class ExecutionScope:
         return f"{self.target}:{self.backend}"
 
 
+@dataclass(frozen=True, slots=True)
+class _RoutedSystemLink:
+    binding: BackendSystemLink
+    remaining_system_path: tuple[str, ...]
+    target: str
+    backend: str
+
+
+def _resolve_system_link_endpoint(
+    plan: SystemExecutionPlan,
+    value: str,
+    *,
+    direction: str,
+) -> tuple[tuple[str, ...], str]:
+    """Resolve a public endpoint through arbitrarily nested child Systems."""
+
+    current = plan
+    current_value = value
+    system_path: list[str] = []
+
+    while True:
+        endpoint = parse_system_endpoint(current_value)
+        if endpoint.kind is not SystemEndpointKind.SYSTEM:
+            return tuple(system_path), current_value
+
+        child = current.child(endpoint.instance)
+        system_path.append(child.name)
+        if direction == "source":
+            binding = child.plan.bindings.output(endpoint.port)
+        else:
+            binding = child.plan.bindings.input(endpoint.port)
+        current = child.plan
+        current_value = binding.endpoint
+
+
+def _plan_system_link_routes(
+    plan: SystemExecutionPlan,
+) -> tuple[_RoutedSystemLink, ...]:
+    routes: list[_RoutedSystemLink] = []
+    for link in plan.links:
+        if link.boundary != "system":
+            continue
+
+        source_path, source_endpoint = _resolve_system_link_endpoint(
+            plan,
+            link.source,
+            direction="source",
+        )
+        target_path, target_endpoint = _resolve_system_link_endpoint(
+            plan,
+            link.target,
+            direction="target",
+        )
+        routes.extend(
+            (
+                _RoutedSystemLink(
+                    binding=BackendSystemLink(
+                        link=link,
+                        direction="outbound",
+                        local_endpoint=source_endpoint,
+                        remote_endpoint=target_endpoint,
+                        local_system_path=source_path,
+                        remote_system_path=target_path,
+                    ),
+                    remaining_system_path=source_path,
+                    target=link.source_target,
+                    backend=link.source_backend,
+                ),
+                _RoutedSystemLink(
+                    binding=BackendSystemLink(
+                        link=link,
+                        direction="inbound",
+                        local_endpoint=target_endpoint,
+                        remote_endpoint=source_endpoint,
+                        local_system_path=target_path,
+                        remote_system_path=source_path,
+                    ),
+                    remaining_system_path=target_path,
+                    target=link.target_target,
+                    backend=link.target_backend,
+                ),
+            )
+        )
+    return tuple(routes)
+
+
 def plan_execution_scopes(plan: SystemExecutionPlan) -> tuple[ExecutionScope, ...]:
     """Return deterministic ``(target, backend)`` scopes used by a plan.
 
@@ -118,6 +208,8 @@ def plan_execution_scopes(plan: SystemExecutionPlan) -> tuple[ExecutionScope, ..
         for connection in graph.connections:
             add(connection.placement_target, connection.backend)
     for link in plan.links:
+        if link.boundary == "system":
+            continue
         add(link.source_target, link.source_backend)
         add(link.target_target, link.target_backend)
     for artifact in plan.artifacts:
@@ -141,6 +233,12 @@ def backend_context_for_scope(
     scope: ExecutionScope,
     *,
     execution_context: SystemExecutionContext | None = None,
+    inherited_resources: tuple[
+        PlannedChildSystemResourceBinding,
+        ...,
+    ] = (),
+    system_inbound_links: tuple[BackendSystemLink, ...] = (),
+    system_outbound_links: tuple[BackendSystemLink, ...] = (),
 ) -> BackendContext:
     """Project one global SystemExecutionPlan into one orchestration scope."""
 
@@ -192,13 +290,31 @@ def backend_context_for_scope(
         )
 
     internal_links = tuple(
-        link for link in plan.links if is_source(link) and is_target(link)
+        link
+        for link in plan.links
+        if (
+            link.boundary != "system"
+            and is_source(link)
+            and is_target(link)
+        )
     )
     inbound_links = tuple(
-        link for link in plan.links if is_target(link) and not is_source(link)
+        link
+        for link in plan.links
+        if (
+            link.boundary != "system"
+            and is_target(link)
+            and not is_source(link)
+        )
     )
     outbound_links = tuple(
-        link for link in plan.links if is_source(link) and not is_target(link)
+        link
+        for link in plan.links
+        if (
+            link.boundary != "system"
+            and is_source(link)
+            and not is_target(link)
+        )
     )
     artifacts = tuple(
         item
@@ -215,6 +331,19 @@ def backend_context_for_scope(
         plan=plan,
         backend=scope.backend,
         execution_context=execution_context,
+        system_parameters={
+            parameter.name: parameter.value
+            for parameter in plan.parameters
+            if parameter.configured or parameter.default is not None
+        },
+        inherited_resources=tuple(
+            binding
+            for binding in inherited_resources
+            if (
+                binding.target == scope.target
+                and binding.backend == scope.backend
+            )
+        ),
         targets=(target,),
         resources=resources,
         resource_order=resource_order,
@@ -224,6 +353,8 @@ def backend_context_for_scope(
         internal_links=internal_links,
         inbound_links=inbound_links,
         outbound_links=outbound_links,
+        system_inbound_links=system_inbound_links,
+        system_outbound_links=system_outbound_links,
         artifacts=artifacts,
     )
 
@@ -343,6 +474,11 @@ class PreparedSystemExecution:
         default=None,
         repr=False,
     )
+    inherited_resources: tuple[
+        PlannedChildSystemResourceBinding,
+        ...,
+    ] = ()
+    system_links: tuple[BackendSystemLink, ...] = ()
     scopes: tuple[PreparedScopeExecution, ...] = ()
     systems: tuple[PreparedChildSystemExecution, ...] = ()
 
@@ -1026,9 +1162,18 @@ class SystemOrchestrator:
         plan: SystemExecutionPlan,
         *,
         execution_context: SystemExecutionContext | None = None,
+        inherited_resources: tuple[
+            PlannedChildSystemResourceBinding,
+            ...,
+        ] = (),
+        _system_link_routes: tuple[_RoutedSystemLink, ...] = (),
     ) -> OrchestrationValidationReport:
         scopes = self.scopes(plan)
         diagnostics: list[OrchestrationDiagnostic] = []
+        system_link_routes = (
+            *_system_link_routes,
+            *_plan_system_link_routes(plan),
+        )
 
         try:
             validate_system_execution_context_binding(
@@ -1089,6 +1234,27 @@ class SystemOrchestrator:
                 plan,
                 scope,
                 execution_context=execution_context,
+                inherited_resources=inherited_resources,
+                system_inbound_links=tuple(
+                    route.binding
+                    for route in system_link_routes
+                    if (
+                        not route.remaining_system_path
+                        and route.target == scope.target
+                        and route.backend == scope.backend
+                        and route.binding.direction == "inbound"
+                    )
+                ),
+                system_outbound_links=tuple(
+                    route.binding
+                    for route in system_link_routes
+                    if (
+                        not route.remaining_system_path
+                        and route.target == scope.target
+                        and route.backend == scope.backend
+                        and route.binding.direction == "outbound"
+                    )
+                ),
             )
 
             report = backend.validate(
@@ -1111,9 +1277,29 @@ class SystemOrchestrator:
         # They are validated recursively instead of being flattened
         # into the parent scope set.
         for child in plan.systems:
+            child_context = child_system_execution_context(
+                execution_context,
+                child.name,
+            )
             child_report = self.validate_plan(
                 child.plan,
-                execution_context=execution_context,
+                execution_context=child_context,
+                inherited_resources=child.resource_bindings,
+                _system_link_routes=tuple(
+                    _RoutedSystemLink(
+                        binding=route.binding,
+                        remaining_system_path=(
+                            route.remaining_system_path[1:]
+                        ),
+                        target=route.target,
+                        backend=route.backend,
+                    )
+                    for route in system_link_routes
+                    if (
+                        route.remaining_system_path
+                        and route.remaining_system_path[0] == child.name
+                    )
+                ),
             )
 
             prefix = f"systems.{child.name}"
@@ -1144,10 +1330,21 @@ class SystemOrchestrator:
         plan: SystemExecutionPlan,
         *,
         execution_context: SystemExecutionContext | None = None,
+        inherited_resources: tuple[
+            PlannedChildSystemResourceBinding,
+            ...,
+        ] = (),
+        _system_link_routes: tuple[_RoutedSystemLink, ...] = (),
     ) -> PreparedSystemExecution:
+        system_link_routes = (
+            *_system_link_routes,
+            *_plan_system_link_routes(plan),
+        )
         report = self.validate_plan(
             plan,
             execution_context=execution_context,
+            inherited_resources=inherited_resources,
+            _system_link_routes=_system_link_routes,
         )
         report.raise_for_errors()
 
@@ -1162,6 +1359,27 @@ class SystemOrchestrator:
                 plan,
                 scope,
                 execution_context=execution_context,
+                inherited_resources=inherited_resources,
+                system_inbound_links=tuple(
+                    route.binding
+                    for route in system_link_routes
+                    if (
+                        not route.remaining_system_path
+                        and route.target == scope.target
+                        and route.backend == scope.backend
+                        and route.binding.direction == "inbound"
+                    )
+                ),
+                system_outbound_links=tuple(
+                    route.binding
+                    for route in system_link_routes
+                    if (
+                        not route.remaining_system_path
+                        and route.target == scope.target
+                        and route.backend == scope.backend
+                        and route.binding.direction == "outbound"
+                    )
+                ),
             )
 
             try:
@@ -1191,10 +1409,30 @@ class SystemOrchestrator:
         ] = []
 
         for child in plan.systems:
+            child_context = child_system_execution_context(
+                execution_context,
+                child.name,
+            )
             try:
                 child_execution = self.prepare_plan(
                     child.plan,
-                    execution_context=execution_context,
+                    execution_context=child_context,
+                    inherited_resources=child.resource_bindings,
+                    _system_link_routes=tuple(
+                        _RoutedSystemLink(
+                            binding=route.binding,
+                            remaining_system_path=(
+                                route.remaining_system_path[1:]
+                            ),
+                            target=route.target,
+                            backend=route.backend,
+                        )
+                        for route in system_link_routes
+                        if (
+                            route.remaining_system_path
+                            and route.remaining_system_path[0] == child.name
+                        )
+                    ),
                 )
             except Exception as exc:
                 raise OrchestrationError(
@@ -1216,6 +1454,11 @@ class SystemOrchestrator:
         return PreparedSystemExecution(
             plan=plan,
             execution_context=execution_context,
+            inherited_resources=inherited_resources,
+            system_links=tuple(
+                route.binding
+                for route in system_link_routes
+            ),
             scopes=tuple(
                 prepared_scopes
             ),

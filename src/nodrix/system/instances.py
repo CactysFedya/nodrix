@@ -57,6 +57,8 @@ class SystemInstance(NamedSystemModel):
     """
 
     uses: str = Field(min_length=1)
+    parameters: Mapping[str, Any] = Field(default_factory=dict)
+    resources: Mapping[str, str] = Field(default_factory=dict)
     metadata: Metadata = Field(default_factory=dict)
     extensions: Mapping[str, Any] = Field(default_factory=dict)
 

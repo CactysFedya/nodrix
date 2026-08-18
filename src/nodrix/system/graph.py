@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any, Mapping
 
 from pydantic import Field, model_validator
@@ -21,22 +23,85 @@ def split_local_endpoint(value: str) -> tuple[str, str]:
     return node, port
 
 
-def split_system_endpoint(value: str) -> tuple[str | None, str, str]:
-    """Parse a System boundary endpoint.
+class SystemEndpointKind(StrEnum):
+    """Namespace of one endpoint visible at a System boundary."""
 
-    ``application.port`` refers to a system Application.
-    ``graph/node.port`` refers to a Node inside a named Graph.
+    APPLICATION = "application"
+    GRAPH = "graph"
+    SYSTEM = "system"
+
+
+@dataclass(frozen=True, slots=True)
+class SystemEndpoint:
+    """Parsed, backend-neutral System endpoint reference."""
+
+    kind: SystemEndpointKind
+    instance: str
+    port: str
+    scope: str | None = None
+
+
+def parse_system_endpoint(value: str) -> SystemEndpoint:
+    """Parse an Application, Graph node, or child System endpoint.
+
+    Canonical forms are:
+
+    - ``application.port``
+    - ``graph/node.port``
+    - ``system:instance.port``
     """
 
-    scope, slash, local = value.partition("/")
+    normalized = value.strip()
+    if normalized.startswith("system:"):
+        instance, port = split_local_endpoint(
+            normalized.removeprefix("system:")
+        )
+        return SystemEndpoint(
+            kind=SystemEndpointKind.SYSTEM,
+            instance=instance,
+            port=port,
+        )
+
+    scope, slash, local = normalized.partition("/")
     if slash:
         node, port = split_local_endpoint(local)
         if not scope:
-            raise ValueError(f"system endpoint has an empty Graph name: {value!r}")
-        return scope, node, port
+            raise ValueError(
+                f"system endpoint has an empty Graph name: {value!r}"
+            )
+        return SystemEndpoint(
+            kind=SystemEndpointKind.GRAPH,
+            scope=scope,
+            instance=node,
+            port=port,
+        )
 
-    instance, port = split_local_endpoint(value)
-    return None, instance, port
+    instance, port = split_local_endpoint(normalized)
+    return SystemEndpoint(
+        kind=SystemEndpointKind.APPLICATION,
+        instance=instance,
+        port=port,
+    )
+
+
+def split_system_endpoint(value: str) -> tuple[str | None, str, str]:
+    """Parse a System boundary endpoint.
+
+    ``application.port`` refers to a system Application,
+    ``graph/node.port`` to a Node inside a named Graph, and
+    ``system:instance.port`` to a direct child System port.
+
+    New code should prefer :func:`parse_system_endpoint`, which preserves the
+    endpoint kind without overloading the scope string. This tuple helper
+    remains for the 2.x public API.
+    """
+
+    endpoint = parse_system_endpoint(value)
+    if endpoint.kind is SystemEndpointKind.APPLICATION:
+        return None, endpoint.instance, endpoint.port
+    if endpoint.kind is SystemEndpointKind.SYSTEM:
+        return "system", endpoint.instance, endpoint.port
+    return endpoint.scope, endpoint.instance, endpoint.port
 
 
 class Connection(SystemBaseModel):
@@ -88,6 +153,18 @@ class SystemLink(SystemBaseModel):
 
     @model_validator(mode="after")
     def validate_endpoints(self) -> "SystemLink":
-        split_system_endpoint(self.source)
-        split_system_endpoint(self.target)
+        parse_system_endpoint(self.source)
+        parse_system_endpoint(self.target)
         return self
+
+
+__all__ = [
+    "Connection",
+    "Graph",
+    "SystemEndpoint",
+    "SystemEndpointKind",
+    "SystemLink",
+    "parse_system_endpoint",
+    "split_local_endpoint",
+    "split_system_endpoint",
+]

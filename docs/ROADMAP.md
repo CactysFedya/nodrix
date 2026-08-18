@@ -22,17 +22,15 @@ duplicate code is removed.
 - **2.19 — hierarchical System composition:** pinned child Definitions,
   recursive planning, lifecycle and rollback, observation, human status, and
   versioned JSONL events.
+- **2.20 — dependencies and readiness:** sibling dependencies, compiled
+  startup topology, bounded readiness waits, startup events, and reverse
+  actual-order rollback.
+- **2.21 — complete System interfaces:** typed ports, recursive child
+  endpoints, parameter/context/resource bindings, SDK validation, explicit
+  backend capabilities, transport-backed LocalBackend links, and Plan explain.
 
 ## Implementation sequence
 
-- **2.20 — dependencies and readiness:** sibling `SystemDependency`,
-  `started`/`ready`/`healthy`, per-edge deadlines, cycle detection, compiled
-  deterministic DAG, independent startup branches, bounded polling, failure
-  propagation, reverse-actual-order rollback, and observable startup events.
-- **2.21 — complete System interfaces:** inputs and outputs, parent-to-child
-  and sibling bindings, parameter/context/resource passing, required and
-  optional ports, type/direction validation, local links, and explicit
-  transport boundaries without hidden flattening.
 - **2.22 — canonical System Run:** versioned run directory containing source
   and resolved Systems, exact plan/context, event journal, atomic live/final
   status, environment provenance, redaction, logs, and recovery metadata.
