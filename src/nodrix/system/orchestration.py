@@ -30,7 +30,11 @@ from .execution_context import (
     SystemExecutionContextBindingError,
     validate_system_execution_context_binding,
 )
-from .planning import PlannedTarget, SystemExecutionPlan
+from .planning import (
+    PlannedSystemInstance,
+    PlannedTarget,
+    SystemExecutionPlan,
+)
 
 
 class OrchestrationError(NodrixError):
@@ -280,6 +284,52 @@ class PreparedScopeExecution:
 
 
 @dataclass(frozen=True, slots=True)
+class PreparedChildSystemExecution:
+    """Prepared execution of one child System instance."""
+
+    instance: PlannedSystemInstance
+    execution: "PreparedSystemExecution"
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.instance,
+            PlannedSystemInstance,
+        ):
+            raise TypeError(
+                "instance must be a PlannedSystemInstance"
+            )
+
+        if not isinstance(
+            self.execution,
+            PreparedSystemExecution,
+        ):
+            raise TypeError(
+                "execution must be a PreparedSystemExecution"
+            )
+
+        if (
+            self.execution.plan
+            != self.instance.plan
+        ):
+            raise ValueError(
+                "prepared child execution belongs to "
+                "a different child System plan"
+            )
+
+    @property
+    def ordinal(self) -> int:
+        return self.instance.ordinal
+
+    @property
+    def name(self) -> str:
+        return self.instance.name
+
+    @property
+    def revision(self) -> str:
+        return self.instance.revision
+
+
+@dataclass(frozen=True, slots=True)
 class PreparedSystemExecution:
     plan: SystemExecutionPlan
     execution_context: SystemExecutionContext | None = field(
@@ -287,6 +337,17 @@ class PreparedSystemExecution:
         repr=False,
     )
     scopes: tuple[PreparedScopeExecution, ...] = ()
+    systems: tuple[PreparedChildSystemExecution, ...] = ()
+
+    def child(
+        self,
+        name: str,
+    ) -> PreparedChildSystemExecution:
+        for child in self.systems:
+            if child.name == name:
+                return child
+
+        raise KeyError(name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,10 +358,67 @@ class RunningScopeExecution:
 
 
 @dataclass(frozen=True, slots=True)
+class RunningChildSystemExecution:
+    """Live handle for one nested child System execution."""
+
+    instance: PlannedSystemInstance
+    handle: "SystemExecutionHandle"
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.instance,
+            PlannedSystemInstance,
+        ):
+            raise TypeError(
+                "instance must be a PlannedSystemInstance"
+            )
+
+        if not isinstance(
+            self.handle,
+            SystemExecutionHandle,
+        ):
+            raise TypeError(
+                "handle must be a SystemExecutionHandle"
+            )
+
+        if (
+            self.handle.prepared.plan
+            != self.instance.plan
+        ):
+            raise ValueError(
+                "running child execution belongs to "
+                "a different child System plan"
+            )
+
+    @property
+    def ordinal(self) -> int:
+        return self.instance.ordinal
+
+    @property
+    def name(self) -> str:
+        return self.instance.name
+
+    @property
+    def revision(self) -> str:
+        return self.instance.revision
+
+
+@dataclass(frozen=True, slots=True)
 class SystemExecutionHandle:
     execution_id: str
     prepared: PreparedSystemExecution
     scopes: tuple[RunningScopeExecution, ...] = ()
+    systems: tuple[RunningChildSystemExecution, ...] = ()
+
+    def child(
+        self,
+        name: str,
+    ) -> RunningChildSystemExecution:
+        for child in self.systems:
+            if child.name == name:
+                return child
+
+        raise KeyError(name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,10 +428,58 @@ class ScopeExecutionStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class ChildSystemExecutionStatus:
+    """Observed lifecycle state of one nested child System."""
+
+    instance: PlannedSystemInstance
+    status: "SystemExecutionStatus"
+
+    def __post_init__(self) -> None:
+        if not isinstance(
+            self.instance,
+            PlannedSystemInstance,
+        ):
+            raise TypeError(
+                "instance must be a PlannedSystemInstance"
+            )
+
+        if not isinstance(
+            self.status,
+            SystemExecutionStatus,
+        ):
+            raise TypeError(
+                "status must be a SystemExecutionStatus"
+            )
+
+    @property
+    def ordinal(self) -> int:
+        return self.instance.ordinal
+
+    @property
+    def name(self) -> str:
+        return self.instance.name
+
+    @property
+    def revision(self) -> str:
+        return self.instance.revision
+
+
+@dataclass(frozen=True, slots=True)
 class SystemExecutionStatus:
     execution_id: str
     state: BackendExecutionState
     scopes: tuple[ScopeExecutionStatus, ...] = ()
+    systems: tuple[ChildSystemExecutionStatus, ...] = ()
+
+    def child(
+        self,
+        name: str,
+    ) -> ChildSystemExecutionStatus:
+        for child in self.systems:
+            if child.name == name:
+                return child
+
+        raise KeyError(name)
 
     @property
     def terminal(self) -> bool:
