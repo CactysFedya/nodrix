@@ -77,3 +77,25 @@ plyctl media record ...
 ```
 
 Часть команд зависит от optional capabilities.
+
+## Наблюдение за выполнением System
+
+`plyctl system run` отображает lifecycle и состояние наблюдения для каждой
+System и каждого execution scope. Вложенные System отображаются деревом.
+Строка дочерней System сохраняет имя instance и имя разрешённого definition,
+например `lidar → livox-mid360` под `rpi5-mapping`.
+
+Lifecycle и observation являются разными понятиями:
+
+- `state` описывает ход выполнения: prepared, running, stopping, stopped,
+  completed или failed;
+- `ready` принимает значение `yes`, `no` или `unknown`;
+- `health` принимает значение `healthy`, `degraded`, `unhealthy` или `unknown`;
+- `message` объясняет наиболее важную ошибку, деградацию или неопределённость.
+
+Изменение health или readiness выводится даже тогда, когда lifecycle остаётся
+в состоянии `RUNNING`. Если backend не предоставляет observation, CLI выводит
+`observation=unavailable`.
+
+Observation является живым состоянием выполнения и не сохраняется как поле
+декларативного System YAML.

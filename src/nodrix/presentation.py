@@ -1257,6 +1257,150 @@ def _execution_visible_details(
 
     return tuple(result)
 
+
+def _execution_observation_fingerprint(
+    status: Any,
+) -> tuple[Any, ...] | None:
+    """Return the presentation-relevant execution observation."""
+
+    observation = getattr(
+        status,
+        "observation",
+        None,
+    )
+    if observation is None:
+        return None
+
+    health = getattr(
+        observation,
+        "health",
+        None,
+    )
+    health_value = getattr(
+        health,
+        "value",
+        health,
+    )
+
+    return (
+        getattr(
+            observation,
+            "ready",
+            None,
+        ),
+        (
+            str(health_value)
+            if health_value is not None
+            else "unknown"
+        ),
+        getattr(
+            observation,
+            "message",
+            None,
+        ),
+    )
+
+
+def _append_execution_observation(
+    lines: Text,
+    status: Any,
+    *,
+    include_message: bool = True,
+) -> None:
+    """Append live readiness and health without changing lifecycle semantics."""
+
+    observation = getattr(
+        status,
+        "observation",
+        None,
+    )
+
+    if observation is None:
+        lines.append(
+            "  observation=unavailable",
+            style="dim",
+        )
+        return
+
+    ready = getattr(
+        observation,
+        "ready",
+        None,
+    )
+    ready_value = (
+        "yes"
+        if ready is True
+        else "no"
+        if ready is False
+        else "unknown"
+    )
+    ready_style = {
+        "yes": "green",
+        "no": "yellow",
+    }.get(
+        ready_value,
+        "dim",
+    )
+
+    health = getattr(
+        observation,
+        "health",
+        None,
+    )
+    health_value = str(
+        getattr(
+            health,
+            "value",
+            health,
+        )
+        or "unknown"
+    )
+    health_style = {
+        "healthy": "green",
+        "degraded": "yellow",
+        "unhealthy": "red",
+    }.get(
+        health_value,
+        "dim",
+    )
+
+    lines.append("  ")
+    lines.append(
+        f"ready={ready_value}",
+        style=ready_style,
+    )
+    lines.append(
+        " · ",
+        style="dim",
+    )
+    lines.append(
+        f"health={health_value}",
+        style=health_style,
+    )
+
+    message = getattr(
+        observation,
+        "message",
+        None,
+    )
+    status_message = getattr(
+        status,
+        "message",
+        None,
+    )
+
+    if (
+        include_message
+        and message
+        and message != status_message
+    ):
+        lines.append("  ")
+        lines.append(
+            str(message),
+            style=health_style,
+        )
+
+
 def system_execution_status_fingerprint(
     status: Any,
 ) -> tuple[Any, ...]:
@@ -1276,6 +1420,9 @@ def system_execution_status_fingerprint(
             ),
             item.status.message,
             _execution_visible_details(
+                item.status
+            ),
+            _execution_observation_fingerprint(
                 item.status
             ),
         )
@@ -1344,6 +1491,9 @@ def system_execution_status_fingerprint(
             None,
         ),
         _execution_visible_details(
+            status
+        ),
+        _execution_observation_fingerprint(
             status
         ),
         scopes,
@@ -1443,6 +1593,11 @@ def render_system_execution_status(
             f" · systems={len(systems)}",
             style="dim",
         )
+        _append_execution_observation(
+            lines,
+            item_status,
+            include_message=not connector,
+        )
         lines.append("\n")
 
         children: list[tuple[str, Any]] = [
@@ -1513,6 +1668,11 @@ def render_system_execution_status(
                     f"  {scope_status.backend}:"
                     f"{scope_status.execution_id}",
                     style="dim",
+                )
+                _append_execution_observation(
+                    lines,
+                    scope_status,
+                    include_message=False,
                 )
                 lines.append("\n")
 

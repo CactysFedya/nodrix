@@ -791,3 +791,93 @@ def test_system_execution_fingerprint_tracks_visible_failure_context() -> None:
             second
         )
     )
+
+
+def test_system_execution_status_renders_observation() -> None:
+    scope = _scope_status(
+        "pi5:local",
+        "running",
+    )
+    scope.status.observation = SimpleNamespace(
+        ready=True,
+        health=SimpleNamespace(
+            value="degraded"
+        ),
+        message="camera latency is elevated",
+    )
+
+    status = _system_status(
+        "running",
+        execution_id="system-root",
+        scopes=(scope,),
+    )
+    status.observation = (
+        scope.status.observation
+    )
+
+    output = _plain(
+        render_system_execution_status(
+            "mapping",
+            status,
+        )
+    )
+
+    assert "ready=yes" in output
+    assert "health=degraded" in output
+    assert (
+        output.count(
+            "camera latency is elevated"
+        )
+        == 1
+    )
+
+    unsupported = _system_status(
+        "running",
+        execution_id="system-unsupported",
+    )
+    unsupported_output = _plain(
+        render_system_execution_status(
+            "unsupported",
+            unsupported,
+        )
+    )
+
+    assert (
+        "observation=unavailable"
+        in unsupported_output
+    )
+
+
+def test_system_execution_fingerprint_tracks_observation_change() -> None:
+    first = _system_status(
+        "running",
+        execution_id="system-root",
+    )
+    first.observation = SimpleNamespace(
+        ready=True,
+        health=SimpleNamespace(
+            value="healthy"
+        ),
+        message=None,
+    )
+
+    second = _system_status(
+        "running",
+        execution_id="system-root",
+    )
+    second.observation = SimpleNamespace(
+        ready=False,
+        health=SimpleNamespace(
+            value="healthy"
+        ),
+        message=None,
+    )
+
+    assert (
+        system_execution_status_fingerprint(
+            first
+        )
+        != system_execution_status_fingerprint(
+            second
+        )
+    )

@@ -22,6 +22,8 @@ from nodrix.system import (
     BackendExecutionStatus,
     BackendValidationReport,
     ExecutionBackend,
+    ExecutionHealthState,
+    ExecutionObservation,
     Graph,
     NodeInstance,
     PreparedExecution,
@@ -102,6 +104,7 @@ class FakeLocalBackend(ExecutionBackend):
             state=template.state,
             message=template.message,
             details=template.details,
+            observation=template.observation,
         )
 
     def _stop(self, handle, *, timeout_seconds=None):
@@ -114,12 +117,18 @@ class FakeLocalBackend(ExecutionBackend):
         )
 
 
-def _status(state: BackendExecutionState, *, message: str | None = None):
+def _status(
+    state: BackendExecutionState,
+    *,
+    message: str | None = None,
+    observation: ExecutionObservation | None = None,
+) -> BackendExecutionStatus:
     return BackendExecutionStatus(
         backend="local",
         execution_id="template",
         state=state,
         message=message,
+        observation=observation,
     )
 
 
@@ -927,3 +936,118 @@ def test_system_run_renders_scope_transition_while_parent_stays_running(
         )
         == 3
     )
+
+
+def test_system_run_renders_observation_transition_without_state_change(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    path = tmp_path / "observation.yaml"
+    _write_local_system(
+        path,
+        name="observation-run",
+    )
+
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.RUNNING,
+            observation=ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        ),
+        _status(
+            BackendExecutionState.RUNNING,
+            observation=ExecutionObservation(
+                ready=True,
+                health=ExecutionHealthState.DEGRADED,
+                message="camera latency is elevated",
+            ),
+        ),
+        _status(
+            BackendExecutionState.COMPLETED,
+            observation=ExecutionObservation(
+                ready=False,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        ),
+    ]
+
+    monkeypatch.setattr(
+        system_cli,
+        "LocalBackend",
+        FakeLocalBackend,
+    )
+    monkeypatch.setattr(
+        system_cli.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "run",
+            str(path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    output = _plain(result.output)
+
+    assert "ready=yes" in output
+    assert "ready=no" in output
+    assert "health=healthy" in output
+    assert "health=degraded" in output
+    assert "camera latency is elevated" in output
+
+
+def test_system_run_renders_nested_system_observation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    parent_path, _ = _write_hierarchical_run_systems(
+        tmp_path
+    )
+
+    FakeLocalBackend.reset()
+    FakeLocalBackend.statuses = [
+        _status(
+            BackendExecutionState.COMPLETED,
+            observation=ExecutionObservation(
+                ready=False,
+                health=ExecutionHealthState.HEALTHY,
+            ),
+        ),
+    ]
+
+    monkeypatch.setattr(
+        system_cli,
+        "LocalBackend",
+        FakeLocalBackend,
+    )
+    monkeypatch.setattr(
+        system_cli.time,
+        "sleep",
+        lambda _: None,
+    )
+
+    result = runner.invoke(
+        app,
+        [
+            "system",
+            "run",
+            str(parent_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+
+    output = _plain(result.output)
+
+    assert "systems=1" in output
+    assert "lidar → livox-mid360" in output
+    assert "health=healthy" in output

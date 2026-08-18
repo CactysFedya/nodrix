@@ -83,3 +83,25 @@ plyctl media record ...
 ```
 
 These commands are capability-dependent. A missing optional dependency should produce a clear diagnostic rather than being treated as a core runtime failure.
+
+## System execution observation
+
+`plyctl system run` renders the lifecycle and observation state of every
+System and execution scope. Nested Systems are rendered as a tree. Each
+child line preserves both its instance and resolved definition identities, for
+example `lidar → livox-mid360` beneath `rpi5-mapping`.
+
+Lifecycle and observation are separate:
+
+- `state` describes execution progress: prepared, running, stopping, stopped,
+  completed, or failed;
+- `ready` is `yes`, `no`, or `unknown`;
+- `health` is `healthy`, `degraded`, `unhealthy`, or `unknown`;
+- `message` explains the most relevant failure, degradation, or uncertainty.
+
+A health or readiness change is rendered even when the lifecycle state remains
+`RUNNING`. If a backend does not expose observation, the CLI prints
+`observation=unavailable`.
+
+Observation is live execution state. It is not stored as a field in the System
+YAML definition.
