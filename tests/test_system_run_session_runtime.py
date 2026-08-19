@@ -9,6 +9,10 @@ import pytest
 from nodrix.run_events import RunEventJournal
 from nodrix.run_record import RunRecordStore
 from nodrix.run_session import RunStore
+from nodrix.run_snapshots import (
+    DEFINITION_SNAPSHOT,
+    PLAN_SNAPSHOT,
+)
 from nodrix.run_status import RunStatusStore
 from nodrix.system import (
     BackendCapabilities,
@@ -52,34 +56,15 @@ def _clock() -> datetime:
     return NOW
 
 
+def _system() -> SystemModel:
+    return SystemModel(name='persistent-runtime', targets=(Target(name='host', kind='host', properties={'backend': 'local'}),), graphs=(Graph(name='main', nodes=(NodeInstance(name='worker', uses='demo.worker', target='host'),)),))
+
+
+
 def _plan():
-    system = SystemModel(
-        name="persistent-runtime",
-        targets=(
-            Target(
-                name="host",
-                kind="host",
-                properties={
-                    "backend": "local",
-                },
-            ),
-        ),
-        graphs=(
-            Graph(
-                name="main",
-                nodes=(
-                    NodeInstance(
-                        name="worker",
-                        uses="demo.worker",
-                        target="host",
-                    ),
-                ),
-            ),
-        ),
-    )
 
     return plan_canonical_system(
-        system
+        _system()
     )
 
 
@@ -204,6 +189,7 @@ def test_run_directory_exists_before_backend_prepare(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=store,
             run_id=run_id,
             clock=_clock,
@@ -267,6 +253,7 @@ def test_prepare_failure_preserves_run_directory(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=store,
             run_id=run_id,
             clock=_clock,
@@ -414,6 +401,7 @@ def test_persistent_runtime_records_prepared_and_started_events(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -472,6 +460,7 @@ def test_inspect_does_not_append_polling_snapshots(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -527,6 +516,7 @@ def test_stop_records_stopping_and_finished_once(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -635,6 +625,7 @@ def test_event_persistence_failure_before_start_prevents_execution(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -686,6 +677,7 @@ def test_event_persistence_failure_after_start_does_not_block_stop(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -779,6 +771,7 @@ def test_persistent_runtime_has_running_live_status(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -833,6 +826,7 @@ def test_repeated_unchanged_inspection_does_not_rewrite_status(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -896,6 +890,7 @@ def test_stop_updates_live_status_to_terminal_state(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -961,6 +956,7 @@ def test_prepare_failure_leaves_failed_live_status(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -1041,6 +1037,7 @@ def test_status_storage_failure_does_not_control_execution(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -1105,6 +1102,7 @@ def test_terminal_stop_publishes_immutable_run_record(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -1196,6 +1194,7 @@ def test_terminal_reinspection_never_rewrites_run_json(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -1265,6 +1264,7 @@ def test_final_record_storage_failure_does_not_change_terminal_execution(
         start_canonical_system_execution(
             orchestrator,
             _plan(),
+            system_definition=_system(),
             run_store=RunStore(
                 root,
                 clock=_clock,
@@ -1328,4 +1328,366 @@ def test_final_record_storage_failure_does_not_change_terminal_execution(
         "synthetic final record failure"
         in item
         for item in errors
+    )
+
+
+def test_persistent_runtime_requires_exact_system_definition(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_missing_definition"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="system_definition",
+    ):
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+
+    # Invalid API/provenance input is rejected before a Run is created.
+    assert not (
+        root / run_id
+    ).exists()
+
+
+def test_definition_and_plan_snapshots_exist_before_backend_prepare(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_snapshots_before_prepare"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    original_prepare = (
+        orchestrator.prepare_plan
+    )
+
+    prepare_observed = False
+
+    def guarded_prepare(
+        domain_plan,
+        *args,
+        **kwargs,
+    ):
+        nonlocal prepare_observed
+
+        directory = (
+            root / run_id
+        )
+
+        assert (
+            directory
+            / "session.json"
+        ).is_file()
+
+        assert (
+            directory
+            / "definition.json"
+        ).is_file()
+
+        assert (
+            directory
+            / "plan.json"
+        ).is_file()
+
+        prepare_observed = True
+
+        return original_prepare(
+            domain_plan,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        orchestrator,
+        "prepare_plan",
+        guarded_prepare,
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert prepare_observed
+
+    assert (
+        execution.snapshot_store
+        is not None
+    )
+
+    definition = (
+        execution.snapshot_store.read(
+            DEFINITION_SNAPSHOT
+        )
+    )
+
+    exact_plan = (
+        execution.snapshot_store.read(
+            PLAN_SNAPSHOT
+        )
+    )
+
+    assert definition is not None
+    assert exact_plan is not None
+
+    assert (
+        definition["content"]["revision"]
+        == execution.plan.subject_revision.canonical
+    )
+
+    assert (
+        exact_plan["content"]["planId"]
+        == execution.plan.plan_id
+    )
+
+    assert (
+        exact_plan["content"]["payload"]
+        == execution.plan.payload.model_dump(
+            mode="json",
+            by_alias=True,
+        )
+    )
+
+
+def test_mismatched_system_definition_is_rejected_before_run_creation(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_wrong_definition"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    mismatched = SystemModel(
+        name=_system().name,
+        description=(
+            "different immutable revision"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="revision",
+    ):
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=mismatched,
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+
+    assert not (
+        root / run_id
+    ).exists()
+
+
+def test_snapshot_publication_failure_prevents_backend_prepare(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_snapshot_failure"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    prepare_called = False
+
+    original_prepare = (
+        orchestrator.prepare_plan
+    )
+
+    def guarded_prepare(
+        *args,
+        **kwargs,
+    ):
+        nonlocal prepare_called
+        prepare_called = True
+
+        return original_prepare(
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        orchestrator,
+        "prepare_plan",
+        guarded_prepare,
+    )
+
+    import nodrix.run_snapshots as snapshots
+
+    original_link = (
+        snapshots.os.link
+    )
+
+    calls = 0
+
+    def fail_plan_publication(
+        source,
+        destination,
+    ):
+        nonlocal calls
+        calls += 1
+
+        # definition.json succeeds; plan.json publication fails.
+        if calls == 2:
+            raise OSError(
+                "synthetic plan snapshot failure"
+            )
+
+        return original_link(
+            source,
+            destination,
+        )
+
+    monkeypatch.setattr(
+        snapshots.os,
+        "link",
+        fail_plan_publication,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="synthetic plan snapshot failure",
+    ):
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+
+    assert not prepare_called
+
+    directory = (
+        root / run_id
+    )
+
+    # Run identity survives; recovery can diagnose incomplete provenance.
+    assert (
+        directory
+        / "session.json"
+    ).is_file()
+
+    assert (
+        directory
+        / "definition.json"
+    ).is_file()
+
+    assert not (
+        directory
+        / "plan.json"
+    ).exists()
+
+    status = json.loads(
+        (
+            directory
+            / "status.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        status["state"]
+        == "failed"
+    )
+
+    assert (
+        status["details"]["stage"]
+        == "snapshot"
     )

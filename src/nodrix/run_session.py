@@ -253,8 +253,8 @@ stage was reached.
 | --- | --- |
 | `README.md` | This bilingual description of the Nodrix Run layout. |
 | `session.json` | Immutable Run session header: Run ID, creation time and exact Plan identity. Created before execution starts. |
-| `definition.json` | Exact canonical Definition snapshot used for this Run. |
-| `plan.json` | Exact resolved execution Plan used by the runtime. |
+| `definition.json` | Immutable canonical Definition snapshot whose revision is the exact System revision referenced by the Run Plan. |
+| `plan.json` | Immutable exact resolved Plan snapshot, including effective parameters, placement, bindings, nested Systems and execution topology. |
 | `status.json` | Current live status snapshot. Replaced atomically for fast reads and recoverable from durable Run history; it is not immutable historical evidence. |
 | `events.jsonl` | Append-only ordered Run event stream. Each record contains Run ID, sequence number and one versioned domain event. Existing events are never rewritten. |
 | `environment.json` | Captured execution environment with secrets and protected values redacted. |
@@ -282,8 +282,8 @@ execution завершился до достижения соответству�
 | --- | --- |
 | `README.md` | Это двуязычное описание стандартной структуры Run Nodrix. |
 | `session.json` | Неизменяемый заголовок Run: Run ID, время создания и идентичность точного Plan. Создаётся до начала execution. |
-| `definition.json` | Точный снимок канонической Definition, использованной для этого Run. |
-| `plan.json` | Точный разрешённый execution Plan, использованный runtime. |
+| `definition.json` | Неизменяемый снимок канонического Definition; его revision точно совпадает с ревизией System, на которую ссылается Plan данного Run. |
+| `plan.json` | Неизменяемый точный снимок resolved Plan, включая эффективные параметры, placement, bindings, вложенные Systems и execution topology. |
 | `status.json` | Текущий снимок состояния Run. Атомарно заменяется для быстрого чтения и может быть восстановлен из постоянной истории Run; сам по себе не является неизменяемой исторической записью. |
 | `events.jsonl` | Упорядоченный журнал событий Run только для добавления. Каждая запись содержит Run ID, номер последовательности и одно версионированное событие execution domain. Уже записанные события не переписываются. |
 | `environment.json` | Снимок окружения execution с удалёнными/скрытыми секретами и защищёнными значениями. |

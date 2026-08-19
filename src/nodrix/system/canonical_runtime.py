@@ -26,6 +26,11 @@ from nodrix.run_events import (
 from nodrix.run_record import (
     RunRecordStore,
 )
+from nodrix.run_snapshots import (
+    DEFINITION_SNAPSHOT,
+    PLAN_SNAPSHOT,
+    RunSnapshotStore,
+)
 from nodrix.run_session import (
     RunSession,
     RunStore,
@@ -44,7 +49,12 @@ from .orchestration import (
     SystemExecutionStatus,
     SystemOrchestrator,
 )
+from .model import SystemModel
 from .planning import SystemExecutionPlan
+from .run_snapshots import (
+    system_definition_snapshot,
+    system_plan_snapshot,
+)
 
 
 SYSTEM_ORCHESTRATOR_EXECUTOR = "nodrix.system.orchestrator"
@@ -226,6 +236,7 @@ class CanonicalSystemExecution:
     handle: SystemExecutionHandle
     started_at: datetime
     run_session: RunSession | None = None
+    snapshot_store: RunSnapshotStore | None = None
     event_journal: RunEventJournal | None = None
     status_store: RunStatusStore | None = None
     run_record_store: RunRecordStore | None = None
@@ -279,6 +290,36 @@ class CanonicalSystemExecution:
             ):
                 raise ValueError(
                     "RunSession belongs to a different PlanRecord"
+                )
+
+        if self.snapshot_store is not None:
+            if not isinstance(
+                self.snapshot_store,
+                RunSnapshotStore,
+            ):
+                raise TypeError(
+                    "snapshot_store must be a RunSnapshotStore or None"
+                )
+
+            if self.run_session is None:
+                raise ValueError(
+                    "snapshot_store requires run_session"
+                )
+
+            if (
+                self.snapshot_store.run_id
+                != self.run_session.run_id
+            ):
+                raise ValueError(
+                    "snapshot_store belongs to a different RunSession"
+                )
+
+            if (
+                self.snapshot_store.plan_id
+                != self.plan.plan_id
+            ):
+                raise ValueError(
+                    "snapshot_store belongs to a different PlanRecord"
                 )
 
         if self.event_journal is not None:
@@ -498,6 +539,7 @@ def start_canonical_system_execution(
     orchestrator: SystemOrchestrator,
     plan: PlanRecord,
     *,
+    system_definition: SystemModel | None = None,
     run_store: RunStore | None = None,
     run_id: str | None = None,
     clock: Clock = _utc_now,
@@ -515,6 +557,45 @@ def start_canonical_system_execution(
     domain_plan = _validate_system_plan_record(
         plan
     )
+
+    if (
+        system_definition is not None
+        and not isinstance(
+            system_definition,
+            SystemModel,
+        )
+    ):
+        raise TypeError(
+            "system_definition must be a SystemModel or None"
+        )
+
+    if (
+        run_store is not None
+        and system_definition is None
+    ):
+        raise ValueError(
+            "persistent canonical System execution "
+            "requires system_definition"
+        )
+
+    definition_snapshot_content = None
+    plan_snapshot_content = None
+
+    if system_definition is not None:
+        # Both serializers also verify that the supplied Definition and exact
+        # resolved Plan belong to the same canonical System revision.
+        definition_snapshot_content = (
+            system_definition_snapshot(
+                system_definition,
+                plan,
+            )
+        )
+
+        plan_snapshot_content = (
+            system_plan_snapshot(
+                plan
+            )
+        )
 
     if (
         run_store is not None
@@ -544,6 +625,14 @@ def start_canonical_system_execution(
             run_id=run_id,
         )
         if run_store is not None
+        else None
+    )
+
+    snapshot_store = (
+        RunSnapshotStore(
+            run_session
+        )
+        if run_session is not None
         else None
     )
 
@@ -615,6 +704,59 @@ def start_canonical_system_execution(
             ).to_dict(),
             recorded_at=observed_at,
         )
+
+    if snapshot_store is not None:
+        if (
+            definition_snapshot_content is None
+            or plan_snapshot_content is None
+        ):
+            raise RuntimeError(
+                "persistent Run snapshot content "
+                "was not prepared"
+            )
+
+        try:
+            snapshot_store.create(
+                DEFINITION_SNAPSHOT,
+                definition_snapshot_content,
+            )
+
+            snapshot_store.create(
+                PLAN_SNAPSHOT,
+                plan_snapshot_content,
+            )
+        except Exception as exc:
+            try:
+                persist_error(
+                    stage="snapshot",
+                    error=exc,
+                )
+            except Exception as event_exc:
+                exc.add_note(
+                    "failed to persist Run snapshot "
+                    f"error event: {event_exc}"
+                )
+
+            failed_at = _now(
+                clock
+            )
+
+            _write_run_status(
+                status_store,
+                status_persistence_errors,
+                state=ExecutionState.FAILED,
+                execution_id=None,
+                message=str(exc),
+                details={
+                    "stage": "snapshot",
+                    "errorType": (
+                        type(exc).__name__
+                    ),
+                },
+                observed_at=failed_at,
+            )
+
+            raise
 
     try:
         prepared = orchestrator.prepare_plan(
@@ -796,6 +938,7 @@ def start_canonical_system_execution(
         handle=handle,
         started_at=started_at,
         run_session=run_session,
+        snapshot_store=snapshot_store,
         event_journal=event_journal,
         status_store=status_store,
         run_record_store=run_record_store,
