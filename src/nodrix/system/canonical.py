@@ -83,6 +83,23 @@ def system_plan_digest(
             if not plan_document.get(field):
                 plan_document.pop(field, None)
 
+        parameters = plan_document.get("parameters")
+        if isinstance(parameters, list):
+            for parameter in parameters:
+                if not isinstance(parameter, dict):
+                    continue
+
+                explicit_null_default = (
+                    parameter.get("has_default") is True
+                    and parameter.get("default") is None
+                )
+
+                if not explicit_null_default:
+                    parameter.pop(
+                        "has_default",
+                        None,
+                    )
+
         bindings = plan_document.get("bindings")
         if (
             isinstance(bindings, dict)

@@ -338,7 +338,7 @@ def backend_context_for_scope(
         system_parameters={
             parameter.name: parameter.value
             for parameter in plan.parameters
-            if parameter.configured or parameter.default is not None
+            if parameter.configured or parameter.has_default
         },
         inherited_resources=tuple(
             binding

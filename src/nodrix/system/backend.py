@@ -263,7 +263,7 @@ class BackendContext:
                 for parameter in plan.parameters
                 if (
                     parameter.configured
-                    or parameter.default is not None
+                    or parameter.has_default
                 )
             },
             inherited_resources=tuple(

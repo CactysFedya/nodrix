@@ -96,6 +96,7 @@ class PlannedSystemParameter(SystemBaseModel):
     required: bool
     nullable: bool
     default: Any = None
+    has_default: bool = False
     value: Any = None
     configured: bool = False
     description: str | None = None
@@ -635,6 +636,7 @@ def plan_system(
             required=contract.required,
             nullable=contract.nullable,
             default=contract.default,
+            has_default=contract.has_default,
             value=(
                 parameter_values[contract.name]
                 if contract.name in parameter_values
@@ -666,7 +668,7 @@ def plan_system(
     effective_parameter_values = {
         item.name: item.value
         for item in planned_parameters
-        if item.configured or item.default is not None
+        if item.configured or item.has_default
     }
     parameter_overrides: dict[
         tuple[str, str | None, str],

@@ -288,6 +288,12 @@ class SystemParameter(NamedSystemModel):
     metadata: Metadata = Field(default_factory=dict)
     extensions: Mapping[str, Any] = Field(default_factory=dict)
 
+    @property
+    def has_default(self) -> bool:
+        """Return whether the Definition explicitly declares a default."""
+
+        return "default" in self.model_fields_set
+
     def accepts(self, value: Any) -> bool:
         if value is None:
             return self.nullable
@@ -311,7 +317,7 @@ class SystemParameter(NamedSystemModel):
 
     @model_validator(mode="after")
     def validate_default(self) -> "SystemParameter":
-        if self.default is not None and not self.accepts(self.default):
+        if self.has_default and not self.accepts(self.default):
             raise ValueError(
                 f"default does not match parameter type {self.value_type.value!r}"
             )

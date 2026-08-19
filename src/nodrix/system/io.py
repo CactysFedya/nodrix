@@ -204,6 +204,48 @@ def _prune_empty(value: Any) -> Any:
     return value
 
 
+def _restore_explicit_null_parameter_defaults(
+    system: SystemModel,
+    document: dict[str, Any],
+) -> None:
+    """Restore semantically meaningful explicit null parameter defaults.
+
+    General optional ``None`` values remain omitted from canonical System
+    documents. ``SystemParameter.default`` is different: an absent default
+    and an explicitly declared null default are distinct contracts.
+    """
+
+    parameters = document.get("parameters")
+    if not isinstance(parameters, list):
+        return
+
+    if len(parameters) != len(system.parameters):
+        raise TypeError(
+            "canonical parameter count does not match SystemModel"
+        )
+
+    for index, contract in enumerate(system.parameters):
+        if not (
+            contract.has_default
+            and contract.default is None
+        ):
+            continue
+
+        serialized = parameters[index]
+        if not isinstance(serialized, dict):
+            raise TypeError(
+                "canonical System parameter did not serialize to a mapping"
+            )
+
+        serialized["default"] = None
+
+        # Keep nested canonical mappings deterministic after restoration.
+        parameters[index] = {
+            key: serialized[key]
+            for key in sorted(serialized)
+        }
+
+
 def system_to_canonical(system: SystemModel) -> dict[str, Any]:
     """Return the normalized serializable representation of a System.
 
@@ -220,6 +262,11 @@ def system_to_canonical(system: SystemModel) -> dict[str, Any]:
     cleaned = _prune_empty(raw)
     if not isinstance(cleaned, dict):
         raise TypeError("SystemModel did not serialize to a mapping")
+
+    _restore_explicit_null_parameter_defaults(
+        system,
+        cleaned,
+    )
 
     canonical: dict[str, Any] = {}
     for key in _TOP_LEVEL_ORDER:
