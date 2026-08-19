@@ -20,3 +20,4 @@ a public or architectural contract.
 ## Accepted decisions
 
 - [ADR-0001: Run lifecycle, persistence, and recovery](0001-run-lifecycle-persistence-recovery.md)
+- [ADR-0002: Canonical Operation, planning, and execution contract](0002-canonical-operation-planning-execution.md)
