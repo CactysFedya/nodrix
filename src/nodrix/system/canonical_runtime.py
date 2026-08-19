@@ -20,8 +20,16 @@ from nodrix.model import (
     ExecutionState,
     PlanRecord,
 )
+from nodrix.run_environment import (
+    RunEnvironmentPolicy,
+    RunEnvironmentStore,
+)
 from nodrix.run_events import (
     RunEventJournal,
+)
+from nodrix.run_logs import (
+    RunLogPolicy,
+    RunLogStore,
 )
 from nodrix.run_record import (
     RunRecordStore,
@@ -237,6 +245,8 @@ class CanonicalSystemExecution:
     started_at: datetime
     run_session: RunSession | None = None
     snapshot_store: RunSnapshotStore | None = None
+    environment_store: RunEnvironmentStore | None = None
+    log_store: RunLogStore | None = None
     event_journal: RunEventJournal | None = None
     status_store: RunStatusStore | None = None
     run_record_store: RunRecordStore | None = None
@@ -320,6 +330,69 @@ class CanonicalSystemExecution:
             ):
                 raise ValueError(
                     "snapshot_store belongs to a different PlanRecord"
+                )
+
+        if self.environment_store is not None:
+            if not isinstance(
+                self.environment_store,
+                RunEnvironmentStore,
+            ):
+                raise TypeError(
+                    "environment_store must be a "
+                    "RunEnvironmentStore or None"
+                )
+
+            if self.run_session is None:
+                raise ValueError(
+                    "environment_store requires run_session"
+                )
+
+            if (
+                self.environment_store.run_id
+                != self.run_session.run_id
+            ):
+                raise ValueError(
+                    "environment_store belongs to "
+                    "a different RunSession"
+                )
+
+            if (
+                self.environment_store.plan_id
+                != self.plan.plan_id
+            ):
+                raise ValueError(
+                    "environment_store belongs to "
+                    "a different PlanRecord"
+                )
+
+        if self.log_store is not None:
+            if not isinstance(
+                self.log_store,
+                RunLogStore,
+            ):
+                raise TypeError(
+                    "log_store must be a RunLogStore or None"
+                )
+
+            if self.run_session is None:
+                raise ValueError(
+                    "log_store requires run_session"
+                )
+
+            if (
+                self.log_store.run_id
+                != self.run_session.run_id
+            ):
+                raise ValueError(
+                    "log_store belongs to a different RunSession"
+                )
+
+            if (
+                self.log_store.plan_id
+                != self.plan.plan_id
+            ):
+                raise ValueError(
+                    "log_store belongs to a different PlanRecord"
                 )
 
         if self.event_journal is not None:
@@ -540,6 +613,8 @@ def start_canonical_system_execution(
     plan: PlanRecord,
     *,
     system_definition: SystemModel | None = None,
+    environment_policy: RunEnvironmentPolicy | None = None,
+    log_policy: RunLogPolicy | None = None,
     run_store: RunStore | None = None,
     run_id: str | None = None,
     clock: Clock = _utc_now,
@@ -567,6 +642,29 @@ def start_canonical_system_execution(
     ):
         raise TypeError(
             "system_definition must be a SystemModel or None"
+        )
+
+    if (
+        environment_policy is not None
+        and not isinstance(
+            environment_policy,
+            RunEnvironmentPolicy,
+        )
+    ):
+        raise TypeError(
+            "environment_policy must be a "
+            "RunEnvironmentPolicy or None"
+        )
+
+    if (
+        log_policy is not None
+        and not isinstance(
+            log_policy,
+            RunLogPolicy,
+        )
+    ):
+        raise TypeError(
+            "log_policy must be a RunLogPolicy or None"
         )
 
     if (
@@ -631,6 +729,24 @@ def start_canonical_system_execution(
     snapshot_store = (
         RunSnapshotStore(
             run_session
+        )
+        if run_session is not None
+        else None
+    )
+
+    environment_store = (
+        RunEnvironmentStore(
+            run_session,
+            policy=environment_policy,
+        )
+        if run_session is not None
+        else None
+    )
+
+    log_store = (
+        RunLogStore(
+            run_session,
+            policy=log_policy,
         )
         if run_session is not None
         else None
@@ -749,6 +865,46 @@ def start_canonical_system_execution(
                 message=str(exc),
                 details={
                     "stage": "snapshot",
+                    "errorType": (
+                        type(exc).__name__
+                    ),
+                },
+                observed_at=failed_at,
+            )
+
+            raise
+
+    if environment_store is not None:
+        try:
+            environment_store.capture(
+                captured_at=_now(
+                    clock
+                ),
+            )
+        except Exception as exc:
+            try:
+                persist_error(
+                    stage="environment",
+                    error=exc,
+                )
+            except Exception as event_exc:
+                exc.add_note(
+                    "failed to persist Run environment "
+                    f"error event: {event_exc}"
+                )
+
+            failed_at = _now(
+                clock
+            )
+
+            _write_run_status(
+                status_store,
+                status_persistence_errors,
+                state=ExecutionState.FAILED,
+                execution_id=None,
+                message=str(exc),
+                details={
+                    "stage": "environment",
                     "errorType": (
                         type(exc).__name__
                     ),
@@ -939,6 +1095,8 @@ def start_canonical_system_execution(
         started_at=started_at,
         run_session=run_session,
         snapshot_store=snapshot_store,
+        environment_store=environment_store,
+        log_store=log_store,
         event_journal=event_journal,
         status_store=status_store,
         run_record_store=run_record_store,

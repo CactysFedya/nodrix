@@ -257,8 +257,8 @@ stage was reached.
 | `plan.json` | Immutable exact resolved Plan snapshot, including effective parameters, placement, bindings, nested Systems and execution topology. |
 | `status.json` | Current live status snapshot. Replaced atomically for fast reads and recoverable from durable Run history; it is not immutable historical evidence. |
 | `events.jsonl` | Append-only ordered Run event stream. Each record contains Run ID, sequence number and one versioned domain event. Existing events are never rewritten. |
-| `environment.json` | Captured execution environment with secrets and protected values redacted. |
-| `logs/` | Logs produced by Systems, backends, applications, nodes and other execution scopes. |
+| `environment.json` | Immutable minimal runtime-environment provenance. Process environment variables are captured only from an explicit allowlist and pass through redaction. |
+| `logs/` | Optional bounded diagnostic JSONL logs. Disabled by default; category/level filters, byte quotas and redaction apply. Log failures never control execution. |
 | `run.json` | Immutable final canonical Run record. Published only after a terminal `ExecutionRecord` exists and never overwritten. |
 
 ### File semantics
@@ -286,8 +286,8 @@ execution завершился до достижения соответству�
 | `plan.json` | Неизменяемый точный снимок resolved Plan, включая эффективные параметры, placement, bindings, вложенные Systems и execution topology. |
 | `status.json` | Текущий снимок состояния Run. Атомарно заменяется для быстрого чтения и может быть восстановлен из постоянной истории Run; сам по себе не является неизменяемой исторической записью. |
 | `events.jsonl` | Упорядоченный журнал событий Run только для добавления. Каждая запись содержит Run ID, номер последовательности и одно версионированное событие execution domain. Уже записанные события не переписываются. |
-| `environment.json` | Снимок окружения execution с удалёнными/скрытыми секретами и защищёнными значениями. |
-| `logs/` | Логи Systems, backend, applications, nodes и других областей исполнения. |
+| `environment.json` | Неизменяемый минимальный снимок runtime-окружения. Переменные окружения процесса сохраняются только по явному allowlist и проходят redaction. |
+| `logs/` | Опциональные ограниченные диагностические JSONL-логи. По умолчанию отключены; применяются фильтры category/level, byte quotas и redaction. Ошибки логирования не управляют execution. |
 | `run.json` | Неизменяемая итоговая каноническая запись Run. Публикуется только после появления terminal `ExecutionRecord` и никогда не перезаписывается. |
 
 ### Семантика файлов

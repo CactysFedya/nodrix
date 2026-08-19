@@ -7,6 +7,16 @@ import json
 import pytest
 
 from nodrix.run_events import RunEventJournal
+from nodrix.redaction import (
+    DEFAULT_REDACTION_MARKER,
+)
+from nodrix.run_environment import (
+    RunEnvironmentPolicy,
+    RunEnvironmentStore,
+)
+from nodrix.run_logs import (
+    RunLogPolicy,
+)
 from nodrix.run_record import RunRecordStore
 from nodrix.run_session import RunStore
 from nodrix.run_snapshots import (
@@ -1690,4 +1700,675 @@ def test_snapshot_publication_failure_prevents_backend_prepare(
     assert (
         status["details"]["stage"]
         == "snapshot"
+    )
+
+
+def test_environment_snapshot_exists_before_backend_prepare(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_environment_before_prepare"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    original_prepare = (
+        orchestrator.prepare_plan
+    )
+
+    prepare_observed = False
+
+    def guarded_prepare(
+        domain_plan,
+        *args,
+        **kwargs,
+    ):
+        nonlocal prepare_observed
+
+        directory = (
+            root / run_id
+        )
+
+        assert (
+            directory
+            / "definition.json"
+        ).is_file()
+
+        assert (
+            directory
+            / "plan.json"
+        ).is_file()
+
+        assert (
+            directory
+            / "environment.json"
+        ).is_file()
+
+        prepare_observed = True
+
+        return original_prepare(
+            domain_plan,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        orchestrator,
+        "prepare_plan",
+        guarded_prepare,
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert prepare_observed
+
+    assert (
+        execution.environment_store
+        is not None
+    )
+
+    document = (
+        execution.environment_store
+        .read()
+    )
+
+    assert document is not None
+
+    assert (
+        document["runId"]
+        == run_id
+    )
+
+    assert (
+        document["planId"]
+        == execution.plan.plan_id
+    )
+
+    # Default policy captures no process environment variables.
+    assert (
+        document["variables"]
+        == {}
+    )
+
+
+def test_runtime_environment_allowlist_and_redaction(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_environment_allowlist"
+    )
+
+    monkeypatch.setenv(
+        "NODRIX_TEST_MODE",
+        "benchmark",
+    )
+
+    monkeypatch.setenv(
+        "NODRIX_TEST_TOKEN",
+        "must-not-leak",
+    )
+
+    monkeypatch.setenv(
+        "NODRIX_UNLISTED_SECRET",
+        "also-must-not-leak",
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            environment_policy=(
+                RunEnvironmentPolicy(
+                    variables=(
+                        "NODRIX_TEST_MODE",
+                        "NODRIX_TEST_TOKEN",
+                    ),
+                )
+            ),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.environment_store
+        is not None
+    )
+
+    document = (
+        execution.environment_store
+        .read()
+    )
+
+    assert document is not None
+
+    assert (
+        document["variables"][
+            "NODRIX_TEST_MODE"
+        ]
+        == "benchmark"
+    )
+
+    assert (
+        document["variables"][
+            "NODRIX_TEST_TOKEN"
+        ]
+        == DEFAULT_REDACTION_MARKER
+    )
+
+    encoded = json.dumps(
+        document
+    )
+
+    assert (
+        "must-not-leak"
+        not in encoded
+    )
+
+    assert (
+        "also-must-not-leak"
+        not in encoded
+    )
+
+
+def test_environment_publication_failure_prevents_backend_prepare(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_environment_failure"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    prepare_called = False
+
+    original_prepare = (
+        orchestrator.prepare_plan
+    )
+
+    def guarded_prepare(
+        *args,
+        **kwargs,
+    ):
+        nonlocal prepare_called
+
+        prepare_called = True
+
+        return original_prepare(
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        orchestrator,
+        "prepare_plan",
+        guarded_prepare,
+    )
+
+    def fail_capture(
+        self,
+        *,
+        environ=None,
+        captured_at=None,
+        extra=None,
+    ):
+        raise OSError(
+            "synthetic environment provenance failure"
+        )
+
+    monkeypatch.setattr(
+        RunEnvironmentStore,
+        "capture",
+        fail_capture,
+    )
+
+    with pytest.raises(
+        OSError,
+        match=(
+            "synthetic environment "
+            "provenance failure"
+        ),
+    ):
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+
+    assert not prepare_called
+
+    directory = (
+        root / run_id
+    )
+
+    # Definition and Plan provenance already succeeded.
+    assert (
+        directory
+        / "definition.json"
+    ).is_file()
+
+    assert (
+        directory
+        / "plan.json"
+    ).is_file()
+
+    assert not (
+        directory
+        / "environment.json"
+    ).exists()
+
+    status = json.loads(
+        (
+            directory
+            / "status.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        status["state"]
+        == "failed"
+    )
+
+    assert (
+        status["details"]["stage"]
+        == "environment"
+    )
+
+
+def test_non_persistent_runtime_does_not_require_environment_provenance(
+    tmp_path,
+) -> None:
+    class CompatibilityBackend(
+        ObservingBackend
+    ):
+        def _prepare(
+            self,
+            context: BackendContext,
+        ) -> PreparedExecution:
+            return PreparedExecution(
+                backend=self.backend_id,
+                context=context,
+            )
+
+    expected = (
+        tmp_path
+        / "no-persistent-run"
+    )
+
+    backend = CompatibilityBackend(
+        expected_run_directory=expected,
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.run_session
+        is None
+    )
+
+    assert (
+        execution.environment_store
+        is None
+    )
+
+    assert not expected.exists()
+
+
+def test_persistent_runtime_has_disabled_log_store_by_default(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_default_logs"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.log_store
+        is not None
+    )
+
+    assert not (
+        execution.log_store
+        .policy
+        .enabled
+    )
+
+    assert not execution.log_store.write(
+        "runtime",
+        "critical",
+        "default mode remains quiet",
+        recorded_at=NOW,
+    )
+
+    assert not (
+        execution.log_store
+        .path(
+            "runtime"
+        )
+        .exists()
+    )
+
+
+def test_runtime_exposes_configured_sdk_logging(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_sdk_logs"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            log_policy=RunLogPolicy(
+                enabled=True,
+                min_level="info",
+                categories=(
+                    "sdk",
+                ),
+            ),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.log_store
+        is not None
+    )
+
+    assert execution.log_store.write(
+        "sdk.perception",
+        "info",
+        "custom SDK diagnostic",
+        fields={
+            "frame": 42,
+        },
+        recorded_at=NOW,
+    )
+
+    assert (
+        execution.log_store
+        .path(
+            "sdk.perception"
+        )
+        .is_file()
+    )
+
+    assert not execution.log_store.write(
+        "executor.local",
+        "error",
+        "category is filtered",
+        recorded_at=NOW,
+    )
+
+
+def test_log_storage_failure_does_not_control_execution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_broken_log_storage"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            log_policy=RunLogPolicy(
+                enabled=True,
+                min_level="debug",
+            ),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.log_store
+        is not None
+    )
+
+    def fail_append(
+        path,
+        encoded,
+    ) -> None:
+        raise OSError(
+            "synthetic optional log failure"
+        )
+
+    monkeypatch.setattr(
+        execution.log_store,
+        "_append",
+        fail_append,
+    )
+
+    # Optional diagnostics fail...
+    assert not execution.log_store.write(
+        "runtime",
+        "error",
+        "diagnostic only",
+        recorded_at=NOW,
+    )
+
+    assert (
+        execution.log_store
+        .stats()[
+            "persistenceErrors"
+        ]
+    )
+
+    # ...but execution control remains intact.
+    record = (
+        stop_canonical_system_execution(
+            orchestrator,
+            execution,
+            clock=_clock,
+        )
+    )
+
+    assert record.terminal
+    assert record.successful
+
+
+def test_non_persistent_runtime_has_no_log_store(
+    tmp_path,
+) -> None:
+    class CompatibilityBackend(
+        ObservingBackend
+    ):
+        def _prepare(
+            self,
+            context: BackendContext,
+        ) -> PreparedExecution:
+            return PreparedExecution(
+                backend=self.backend_id,
+                context=context,
+            )
+
+    backend = CompatibilityBackend(
+        expected_run_directory=(
+            tmp_path
+            / "unused"
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.log_store
+        is None
     )
