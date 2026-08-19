@@ -20,6 +20,10 @@ from nodrix.model import (
     ExecutionState,
     PlanRecord,
 )
+from nodrix.run_session import (
+    RunSession,
+    RunStore,
+)
 
 from .orchestration import (
     SystemExecutionHandle,
@@ -169,6 +173,7 @@ class CanonicalSystemExecution:
     plan: PlanRecord
     handle: SystemExecutionHandle
     started_at: datetime
+    run_session: RunSession | None = None
     finished_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -190,6 +195,23 @@ class CanonicalSystemExecution:
                 "SystemExecutionPlan"
             )
 
+        if self.run_session is not None:
+            if not isinstance(
+                self.run_session,
+                RunSession,
+            ):
+                raise TypeError(
+                    "run_session must be a RunSession or None"
+                )
+
+            if (
+                self.run_session.plan_id
+                != self.plan.plan_id
+            ):
+                raise ValueError(
+                    "RunSession belongs to a different PlanRecord"
+                )
+
         self.started_at = _timestamp(
             self.started_at,
             field_name="started_at",
@@ -209,6 +231,15 @@ class CanonicalSystemExecution:
     @property
     def execution_id(self) -> str:
         return self.handle.execution_id
+
+    @property
+    def run_id(self) -> str | None:
+        """Return the persistent Run identity when one is attached."""
+
+        if self.run_session is None:
+            return None
+
+        return self.run_session.run_id
 
     def record(
         self,
@@ -265,6 +296,8 @@ def start_canonical_system_execution(
     orchestrator: SystemOrchestrator,
     plan: PlanRecord,
     *,
+    run_store: RunStore | None = None,
+    run_id: str | None = None,
     clock: Clock = _utc_now,
 ) -> CanonicalSystemExecution:
     """Prepare and start a canonical System execution."""
@@ -281,6 +314,37 @@ def start_canonical_system_execution(
         plan
     )
 
+    if (
+        run_store is not None
+        and not isinstance(
+            run_store,
+            RunStore,
+        )
+    ):
+        raise TypeError(
+            "run_store must be a RunStore or None"
+        )
+
+    if (
+        run_id is not None
+        and run_store is None
+    ):
+        raise ValueError(
+            "run_id requires run_store"
+        )
+
+    # Persistent Run identity must exist before any backend preparation or
+    # execution starts.  If later preparation/startup fails, the Run directory
+    # intentionally remains as evidence of the attempted execution.
+    run_session = (
+        run_store.create(
+            plan,
+            run_id=run_id,
+        )
+        if run_store is not None
+        else None
+    )
+
     prepared = orchestrator.prepare_plan(
         domain_plan
     )
@@ -295,6 +359,7 @@ def start_canonical_system_execution(
         plan=plan,
         handle=handle,
         started_at=started_at,
+        run_session=run_session,
     )
 
 
