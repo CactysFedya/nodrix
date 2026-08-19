@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from nodrix.run_events import RunEventJournal
 from nodrix.run_session import RunStore
 from nodrix.system import (
     BackendCapabilities,
@@ -24,7 +25,9 @@ from nodrix.system.canonical import (
     plan_canonical_system,
 )
 from nodrix.system.canonical_runtime import (
+    inspect_canonical_system_execution,
     start_canonical_system_execution,
+    stop_canonical_system_execution,
 )
 from nodrix.system.orchestration import (
     OrchestrationError,
@@ -368,3 +371,364 @@ def test_existing_non_persistent_runtime_remains_supported(
 
     assert execution.run_session is None
     assert execution.run_id is None
+
+
+def _event_names(
+    execution,
+) -> list[str]:
+    assert execution.event_journal is not None
+
+    return [
+        record["event"]["event"]
+        for record
+        in execution.event_journal.read_all()
+    ]
+
+
+def test_persistent_runtime_records_prepared_and_started_events(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / ".nodrix"
+        / "runs"
+    )
+    run_id = "run_event_lifecycle"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert _event_names(
+        execution
+    ) == [
+        "prepared",
+        "started",
+    ]
+
+    records = (
+        execution.event_journal
+        .read_all()
+    )
+
+    assert [
+        record["sequence"]
+        for record in records
+    ] == [1, 2]
+
+    assert all(
+        record["runId"]
+        == run_id
+        for record in records
+    )
+
+
+def test_inspect_does_not_append_polling_snapshots(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_no_poll_events"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    before = _event_names(
+        execution
+    )
+
+    inspect_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
+    )
+
+    inspect_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
+    )
+
+    assert _event_names(
+        execution
+    ) == before
+
+
+def test_stop_records_stopping_and_finished_once(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_stop_events"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    record = (
+        stop_canonical_system_execution(
+            orchestrator,
+            execution,
+            clock=_clock,
+        )
+    )
+
+    assert record.terminal
+
+    assert _event_names(
+        execution
+    ) == [
+        "prepared",
+        "started",
+        "stopping",
+        "finished",
+    ]
+
+    # Re-inspection of an already terminal execution must not duplicate the
+    # final event.
+    inspect_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
+    )
+
+    assert _event_names(
+        execution
+    ) == [
+        "prepared",
+        "started",
+        "stopping",
+        "finished",
+    ]
+
+
+def test_event_persistence_failure_before_start_prevents_execution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_event_storage_failure"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    start_called = False
+    original_start = orchestrator.start
+
+    def guarded_start(*args, **kwargs):
+        nonlocal start_called
+        start_called = True
+        return original_start(
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        orchestrator,
+        "start",
+        guarded_start,
+    )
+
+    def fail_append(
+        self,
+        event,
+        *,
+        recorded_at=None,
+    ):
+        raise OSError(
+            "synthetic disk full"
+        )
+
+    monkeypatch.setattr(
+        RunEventJournal,
+        "append",
+        fail_append,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="synthetic disk full",
+    ):
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+
+    # prepare() may already have completed, but actual execution must not
+    # begin without the mandatory durable PREPARED event.
+    assert start_called is False
+
+    # Persistent Run identity still survives for diagnostics/recovery.
+    directory = (
+        root
+        / run_id
+    )
+
+    assert directory.is_dir()
+    assert (
+        directory
+        / "session.json"
+    ).is_file()
+
+
+def test_event_persistence_failure_after_start_does_not_block_stop(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_stop_with_broken_events"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.event_journal
+        is not None
+    )
+
+    def fail_append(
+        event,
+        *,
+        recorded_at=None,
+    ):
+        raise OSError(
+            "synthetic disk full"
+        )
+
+    monkeypatch.setattr(
+        execution.event_journal,
+        "append",
+        fail_append,
+    )
+
+    record = (
+        stop_canonical_system_execution(
+            orchestrator,
+            execution,
+            clock=_clock,
+        )
+    )
+
+    assert record.terminal
+    assert record.successful
+
+    errors = record.details[
+        "run_event_persistence_errors"
+    ]
+
+    assert len(errors) >= 1
+    assert any(
+        "synthetic disk full" in error
+        for error in errors
+    )

@@ -256,7 +256,7 @@ stage was reached.
 | `definition.json` | Exact canonical Definition snapshot used for this Run. |
 | `plan.json` | Exact resolved execution Plan used by the runtime. |
 | `status.json` | Current live status snapshot. Updated atomically while the Run is active. |
-| `events.jsonl` | Append-only ordered execution event stream. Existing events are never rewritten. |
+| `events.jsonl` | Append-only ordered Run event stream. Each record contains Run ID, sequence number and one versioned domain event. Existing events are never rewritten. |
 | `environment.json` | Captured execution environment with secrets and protected values redacted. |
 | `logs/` | Logs produced by Systems, backends, applications, nodes and other execution scopes. |
 | `run.json` | Final immutable canonical RunRecord. Created only after a terminal execution state is recorded. |
@@ -285,7 +285,7 @@ execution завершился до достижения соответству�
 | `definition.json` | Точный снимок канонической Definition, использованной для этого Run. |
 | `plan.json` | Точный разрешённый execution Plan, использованный runtime. |
 | `status.json` | Текущее состояние Run. Во время работы обновляется атомарно. |
-| `events.jsonl` | Упорядоченный журнал событий только для добавления. Уже записанные события не переписываются. |
+| `events.jsonl` | Упорядоченный журнал событий Run только для добавления. Каждая запись содержит Run ID, номер последовательности и одно версионированное событие execution domain. Уже записанные события не переписываются. |
 | `environment.json` | Снимок окружения execution с удалёнными/скрытыми секретами и защищёнными значениями. |
 | `logs/` | Логи Systems, backend, applications, nodes и других областей исполнения. |
 | `run.json` | Финальный неизменяемый канонический RunRecord. Создаётся только после terminal state execution. |

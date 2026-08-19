@@ -18,6 +18,8 @@ from .orchestration import (
     ChildSystemExecutionStatus,
     ScopeExecutionStatus,
     SystemExecutionStatus,
+    SystemStartupEvent,
+    SystemStartupEventKind,
 )
 
 
@@ -448,6 +450,91 @@ class ExecutionEvent:
                 else None
             ),
         }
+
+
+_STARTUP_EVENT_KIND_MAP = {
+    SystemStartupEventKind.CHILD_STARTED: (
+        ExecutionEventKind.CHILD_STARTED
+    ),
+    SystemStartupEventKind.DEPENDENCY_WAITING: (
+        ExecutionEventKind.DEPENDENCY_WAITING
+    ),
+    SystemStartupEventKind.DEPENDENCY_SATISFIED: (
+        ExecutionEventKind.DEPENDENCY_SATISFIED
+    ),
+    SystemStartupEventKind.DEPENDENCY_FAILED: (
+        ExecutionEventKind.DEPENDENCY_FAILED
+    ),
+}
+
+
+def execution_event_from_startup_event(
+    startup_event: SystemStartupEvent,
+    *,
+    timestamp: datetime | None = None,
+) -> ExecutionEvent:
+    """Convert one typed orchestrator startup event into the public event schema."""
+
+    if not isinstance(
+        startup_event,
+        SystemStartupEvent,
+    ):
+        raise TypeError(
+            "startup_event must be a SystemStartupEvent"
+        )
+
+    event_timestamp = (
+        _utc_now()
+        if timestamp is None
+        else timestamp
+    )
+
+    details: dict[str, Any] = {
+        "child": startup_event.child,
+    }
+
+    if startup_event.child_execution_id is not None:
+        details["childExecutionId"] = (
+            startup_event.child_execution_id
+        )
+
+    if startup_event.dependency_ordinal is not None:
+        details["dependencyOrdinal"] = (
+            startup_event.dependency_ordinal
+        )
+
+    if startup_event.requires is not None:
+        details["requires"] = (
+            startup_event.requires
+        )
+
+    if startup_event.condition is not None:
+        details["condition"] = (
+            startup_event.condition.value
+        )
+
+    if startup_event.timeout_seconds is not None:
+        details["timeoutSeconds"] = (
+            startup_event.timeout_seconds
+        )
+
+    if startup_event.elapsed_seconds is not None:
+        details["elapsedSeconds"] = (
+            startup_event.elapsed_seconds
+        )
+
+    return ExecutionEvent(
+        event=_STARTUP_EVENT_KIND_MAP[
+            startup_event.event
+        ],
+        system=startup_event.system,
+        timestamp=event_timestamp,
+        execution_id=(
+            startup_event.execution_id
+        ),
+        message=startup_event.message,
+        details=details,
+    )
 
 
 def dumps_execution_event(

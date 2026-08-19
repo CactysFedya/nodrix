@@ -10,7 +10,7 @@ record.  ExecutionRecord remains the immutable cross-domain representation.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -20,11 +20,19 @@ from nodrix.model import (
     ExecutionState,
     PlanRecord,
 )
+from nodrix.run_events import (
+    RunEventJournal,
+)
 from nodrix.run_session import (
     RunSession,
     RunStore,
 )
 
+from .execution_events import (
+    ExecutionEvent,
+    ExecutionEventKind,
+    execution_event_from_startup_event,
+)
 from .orchestration import (
     SystemExecutionHandle,
     SystemExecutionStatus,
@@ -174,6 +182,12 @@ class CanonicalSystemExecution:
     handle: SystemExecutionHandle
     started_at: datetime
     run_session: RunSession | None = None
+    event_journal: RunEventJournal | None = None
+    event_persistence_errors: list[str] = field(
+        default_factory=list,
+        repr=False,
+    )
+    terminal_event_recorded: bool = False
     finished_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -210,6 +224,28 @@ class CanonicalSystemExecution:
             ):
                 raise ValueError(
                     "RunSession belongs to a different PlanRecord"
+                )
+
+        if self.event_journal is not None:
+            if not isinstance(
+                self.event_journal,
+                RunEventJournal,
+            ):
+                raise TypeError(
+                    "event_journal must be a RunEventJournal or None"
+                )
+
+            if self.run_session is None:
+                raise ValueError(
+                    "event_journal requires run_session"
+                )
+
+            if (
+                self.event_journal.run_id
+                != self.run_session.run_id
+            ):
+                raise ValueError(
+                    "event_journal belongs to a different RunSession"
                 )
 
         self.started_at = _timestamp(
@@ -277,6 +313,17 @@ class CanonicalSystemExecution:
         if state.terminal and self.finished_at is None:
             self.finished_at = observed_at
 
+        details = _status_details(
+            status
+        )
+
+        if self.event_persistence_errors:
+            details[
+                "run_event_persistence_errors"
+            ] = tuple(
+                self.event_persistence_errors
+            )
+
         return ExecutionRecord(
             execution_id=self.execution_id,
             plan=self.plan,
@@ -288,7 +335,7 @@ class CanonicalSystemExecution:
                 if state.terminal
                 else None
             ),
-            details=_status_details(status),
+            details=details,
         )
 
 
@@ -345,21 +392,161 @@ def start_canonical_system_execution(
         else None
     )
 
-    prepared = orchestrator.prepare_plan(
-        domain_plan
+    event_journal = (
+        RunEventJournal(
+            run_session
+        )
+        if run_session is not None
+        else None
     )
 
-    started_at = _now(clock)
+    def persist_error(
+        *,
+        stage: str,
+        error: Exception,
+    ) -> None:
+        if event_journal is None:
+            return
 
-    handle = orchestrator.start(
-        prepared
+        observed_at = _now(
+            clock
+        )
+
+        event_journal.append(
+            ExecutionEvent(
+                event=ExecutionEventKind.ERROR,
+                system=domain_plan.system,
+                timestamp=observed_at,
+                message=(
+                    f"{stage} failed: {error}"
+                ),
+                details={
+                    "stage": stage,
+                    "errorType": (
+                        type(error).__name__
+                    ),
+                },
+            ).to_dict(),
+            recorded_at=observed_at,
+        )
+
+    try:
+        prepared = orchestrator.prepare_plan(
+            domain_plan
+        )
+    except Exception as exc:
+        try:
+            persist_error(
+                stage="prepare",
+                error=exc,
+            )
+        except Exception as event_exc:
+            exc.add_note(
+                "failed to persist Run prepare "
+                f"error event: {event_exc}"
+            )
+
+        raise
+
+    if event_journal is not None:
+        prepared_at = _now(
+            clock
+        )
+
+        event_journal.append(
+            ExecutionEvent(
+                event=ExecutionEventKind.PREPARED,
+                system=domain_plan.system,
+                timestamp=prepared_at,
+            ).to_dict(),
+            recorded_at=prepared_at,
+        )
+
+    def startup_event_sink(
+        startup_event,
+    ) -> None:
+        if event_journal is None:
+            return
+
+        observed_at = _now(
+            clock
+        )
+
+        event_journal.append(
+            execution_event_from_startup_event(
+                startup_event,
+                timestamp=observed_at,
+            ).to_dict(),
+            recorded_at=observed_at,
+        )
+
+    started_at = _now(
+        clock
     )
+
+    try:
+        handle = orchestrator.start(
+            prepared,
+            startup_event_sink=(
+                startup_event_sink
+                if event_journal is not None
+                else None
+            ),
+        )
+    except Exception as exc:
+        try:
+            persist_error(
+                stage="start",
+                error=exc,
+            )
+        except Exception as event_exc:
+            exc.add_note(
+                "failed to persist Run start "
+                f"error event: {event_exc}"
+            )
+
+        raise
+
+    if event_journal is not None:
+        started_event_at = _now(
+            clock
+        )
+
+        try:
+            event_journal.append(
+                ExecutionEvent(
+                    event=ExecutionEventKind.STARTED,
+                    system=domain_plan.system,
+                    timestamp=started_event_at,
+                    execution_id=(
+                        handle.execution_id
+                    ),
+                ).to_dict(),
+                recorded_at=started_event_at,
+            )
+        except Exception as exc:
+            # The execution has already started.  If the mandatory durable
+            # STARTED event cannot be persisted, stop it again so callers
+            # never receive an untracked live execution.
+            try:
+                orchestrator.stop(
+                    handle
+                )
+            except Exception as rollback_exc:
+                exc.add_note(
+                    "failed to stop execution after "
+                    "Run event persistence failure: "
+                    f"{rollback_exc}"
+                )
+
+            raise
 
     return CanonicalSystemExecution(
         plan=plan,
         handle=handle,
         started_at=started_at,
         run_session=run_session,
+        event_journal=event_journal,
     )
 
 
@@ -391,9 +578,38 @@ def inspect_canonical_system_execution(
         execution.handle
     )
 
+    observed_at = _now(
+        clock
+    )
+
+    if (
+        status.terminal
+        and not execution.terminal_event_recorded
+        and execution.event_journal is not None
+    ):
+        try:
+            execution.event_journal.append(
+                ExecutionEvent(
+                    event=ExecutionEventKind.FINISHED,
+                    system=(
+                        execution.handle
+                        .prepared.plan.system
+                    ),
+                    timestamp=observed_at,
+                    status=status,
+                ).to_dict(),
+                recorded_at=observed_at,
+            )
+        except Exception as exc:
+            execution.event_persistence_errors.append(
+                f"{type(exc).__name__}: {exc}"
+            )
+        else:
+            execution.terminal_event_recorded = True
+
     return execution.record(
         status,
-        observed_at=_now(clock),
+        observed_at=observed_at,
     )
 
 
@@ -422,14 +638,111 @@ def stop_canonical_system_execution(
             "execution must be a CanonicalSystemExecution"
         )
 
-    status = orchestrator.stop(
-        execution.handle,
-        timeout_seconds=timeout_seconds,
+    journal = (
+        execution.event_journal
     )
+
+    if journal is not None:
+        stopping_at = _now(
+            clock
+        )
+
+        try:
+            journal.append(
+                ExecutionEvent(
+                    event=ExecutionEventKind.STOPPING,
+                    system=(
+                        execution.handle
+                        .prepared.plan.system
+                    ),
+                    timestamp=stopping_at,
+                    execution_id=(
+                        execution.execution_id
+                    ),
+                ).to_dict(),
+                recorded_at=stopping_at,
+            )
+        except Exception as exc:
+            # A storage failure must never prevent an explicit stop request.
+            execution.event_persistence_errors.append(
+                f"{type(exc).__name__}: {exc}"
+            )
+
+    try:
+        status = orchestrator.stop(
+            execution.handle,
+            timeout_seconds=timeout_seconds,
+        )
+    except Exception as exc:
+        if journal is not None:
+            try:
+                failed_at = _now(
+                    clock
+                )
+
+                journal.append(
+                    ExecutionEvent(
+                        event=ExecutionEventKind.ERROR,
+                        system=(
+                            execution.handle
+                            .prepared.plan.system
+                        ),
+                        timestamp=failed_at,
+                        execution_id=(
+                            execution.execution_id
+                        ),
+                        message=(
+                            f"stop failed: {exc}"
+                        ),
+                        details={
+                            "stage": "stop",
+                            "errorType": (
+                                type(exc).__name__
+                            ),
+                        },
+                    ).to_dict(),
+                    recorded_at=failed_at,
+                )
+            except Exception as event_exc:
+                exc.add_note(
+                    "failed to persist Run stop "
+                    f"error event: {event_exc}"
+                )
+
+        raise
+
+    observed_at = _now(
+        clock
+    )
+
+    if (
+        journal is not None
+        and status.terminal
+        and not execution.terminal_event_recorded
+    ):
+        try:
+            journal.append(
+                ExecutionEvent(
+                    event=ExecutionEventKind.FINISHED,
+                    system=(
+                        execution.handle
+                        .prepared.plan.system
+                    ),
+                    timestamp=observed_at,
+                    status=status,
+                ).to_dict(),
+                recorded_at=observed_at,
+            )
+        except Exception as exc:
+            execution.event_persistence_errors.append(
+                f"{type(exc).__name__}: {exc}"
+            )
+        else:
+            execution.terminal_event_recorded = True
 
     return execution.record(
         status,
-        observed_at=_now(clock),
+        observed_at=observed_at,
     )
 
 
