@@ -23,6 +23,9 @@ from nodrix.model import (
 from nodrix.run_events import (
     RunEventJournal,
 )
+from nodrix.run_record import (
+    RunRecordStore,
+)
 from nodrix.run_session import (
     RunSession,
     RunStore,
@@ -225,6 +228,7 @@ class CanonicalSystemExecution:
     run_session: RunSession | None = None
     event_journal: RunEventJournal | None = None
     status_store: RunStatusStore | None = None
+    run_record_store: RunRecordStore | None = None
     event_persistence_errors: list[str] = field(
         default_factory=list,
         repr=False,
@@ -233,7 +237,12 @@ class CanonicalSystemExecution:
         default_factory=list,
         repr=False,
     )
+    run_record_persistence_errors: list[str] = field(
+        default_factory=list,
+        repr=False,
+    )
     terminal_event_recorded: bool = False
+    final_run_recorded: bool = False
     finished_at: datetime | None = None
 
     def __post_init__(self) -> None:
@@ -314,6 +323,28 @@ class CanonicalSystemExecution:
             ):
                 raise ValueError(
                     "status_store belongs to a different RunSession"
+                )
+
+        if self.run_record_store is not None:
+            if not isinstance(
+                self.run_record_store,
+                RunRecordStore,
+            ):
+                raise TypeError(
+                    "run_record_store must be a RunRecordStore or None"
+                )
+
+            if self.run_session is None:
+                raise ValueError(
+                    "run_record_store requires run_session"
+                )
+
+            if (
+                self.run_record_store.run_id
+                != self.run_session.run_id
+            ):
+                raise ValueError(
+                    "run_record_store belongs to a different RunSession"
                 )
 
         self.started_at = _timestamp(
@@ -399,6 +430,13 @@ class CanonicalSystemExecution:
                 self.status_persistence_errors
             )
 
+        if self.run_record_persistence_errors:
+            details[
+                "run_record_persistence_errors"
+            ] = tuple(
+                self.run_record_persistence_errors
+            )
+
         return ExecutionRecord(
             execution_id=self.execution_id,
             plan=self.plan,
@@ -412,6 +450,48 @@ class CanonicalSystemExecution:
             ),
             details=details,
         )
+
+
+def _finalize_run_record(
+    execution: CanonicalSystemExecution,
+    record: ExecutionRecord,
+) -> None:
+    """Publish immutable run.json once for a terminal execution.
+
+    Final-record persistence belongs to historical durability.  A failure here
+    must never change the already-observed terminal execution state.
+    """
+
+    if not record.terminal:
+        return
+
+    store = execution.run_record_store
+
+    if (
+        store is None
+        or execution.final_run_recorded
+    ):
+        return
+
+    try:
+        store.create(
+            record
+        )
+    except Exception as exc:
+        error = (
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        if (
+            not execution.run_record_persistence_errors
+            or execution.run_record_persistence_errors[-1]
+            != error
+        ):
+            execution.run_record_persistence_errors.append(
+                error
+            )
+    else:
+        execution.final_run_recorded = True
 
 
 def start_canonical_system_execution(
@@ -477,6 +557,14 @@ def start_canonical_system_execution(
 
     status_store = (
         RunStatusStore(
+            run_session
+        )
+        if run_session is not None
+        else None
+    )
+
+    run_record_store = (
+        RunRecordStore(
             run_session
         )
         if run_session is not None
@@ -710,6 +798,7 @@ def start_canonical_system_execution(
         run_session=run_session,
         event_journal=event_journal,
         status_store=status_store,
+        run_record_store=run_record_store,
         status_persistence_errors=(
             status_persistence_errors
         ),
@@ -789,10 +878,25 @@ def inspect_canonical_system_execution(
         else:
             execution.terminal_event_recorded = True
 
-    return execution.record(
+    record = execution.record(
         status,
         observed_at=observed_at,
     )
+
+    _finalize_run_record(
+        execution,
+        record,
+    )
+
+    if execution.run_record_persistence_errors:
+        # Re-snapshot so the caller sees historical persistence failures
+        # discovered during finalization.
+        record = execution.record(
+            status,
+            observed_at=observed_at,
+        )
+
+    return record
 
 
 def stop_canonical_system_execution(
@@ -952,10 +1056,25 @@ def stop_canonical_system_execution(
         else:
             execution.terminal_event_recorded = True
 
-    return execution.record(
+    record = execution.record(
         status,
         observed_at=observed_at,
     )
+
+    _finalize_run_record(
+        execution,
+        record,
+    )
+
+    if execution.run_record_persistence_errors:
+        # Re-snapshot so the caller sees historical persistence failures
+        # discovered during finalization.
+        record = execution.record(
+            status,
+            observed_at=observed_at,
+        )
+
+    return record
 
 
 __all__ = [

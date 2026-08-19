@@ -259,7 +259,7 @@ stage was reached.
 | `events.jsonl` | Append-only ordered Run event stream. Each record contains Run ID, sequence number and one versioned domain event. Existing events are never rewritten. |
 | `environment.json` | Captured execution environment with secrets and protected values redacted. |
 | `logs/` | Logs produced by Systems, backends, applications, nodes and other execution scopes. |
-| `run.json` | Final immutable canonical RunRecord. Created only after a terminal execution state is recorded. |
+| `run.json` | Immutable final canonical Run record. Published only after a terminal `ExecutionRecord` exists and never overwritten. |
 
 ### File semantics
 
@@ -288,7 +288,7 @@ execution завершился до достижения соответству�
 | `events.jsonl` | Упорядоченный журнал событий Run только для добавления. Каждая запись содержит Run ID, номер последовательности и одно версионированное событие execution domain. Уже записанные события не переписываются. |
 | `environment.json` | Снимок окружения execution с удалёнными/скрытыми секретами и защищёнными значениями. |
 | `logs/` | Логи Systems, backend, applications, nodes и других областей исполнения. |
-| `run.json` | Финальный неизменяемый канонический RunRecord. Создаётся только после terminal state execution. |
+| `run.json` | Неизменяемая итоговая каноническая запись Run. Публикуется только после появления terminal `ExecutionRecord` и никогда не перезаписывается. |
 
 ### Семантика файлов
 

@@ -7,6 +7,7 @@ import json
 import pytest
 
 from nodrix.run_events import RunEventJournal
+from nodrix.run_record import RunRecordStore
 from nodrix.run_session import RunStore
 from nodrix.run_status import RunStatusStore
 from nodrix.system import (
@@ -1072,6 +1073,259 @@ def test_status_storage_failure_does_not_control_execution(
     assert errors
     assert any(
         "synthetic status disk failure"
+        in item
+        for item in errors
+    )
+
+
+def test_terminal_stop_publishes_immutable_run_record(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = (
+        "run_final_runtime"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.run_record_store
+        is not None
+    )
+
+    assert not (
+        execution.run_record_store
+        .path.exists()
+    )
+
+    record = (
+        stop_canonical_system_execution(
+            orchestrator,
+            execution,
+            clock=_clock,
+        )
+    )
+
+    assert record.terminal
+    assert (
+        execution.final_run_recorded
+    )
+
+    document = (
+        execution.run_record_store
+        .read()
+    )
+
+    assert document is not None
+
+    assert (
+        document["runId"]
+        == run_id
+    )
+
+    assert (
+        document["execution"][
+            "executionId"
+        ]
+        == execution.execution_id
+    )
+
+    assert (
+        document["execution"]["state"]
+        == record.state.value
+    )
+
+    assert (
+        document["execution"]["plan"][
+            "planId"
+        ]
+        == execution.plan.plan_id
+    )
+
+
+def test_terminal_reinspection_never_rewrites_run_json(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = (
+        "run_final_once"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    stop_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
+    )
+
+    assert (
+        execution.run_record_store
+        is not None
+    )
+
+    path = (
+        execution.run_record_store.path
+    )
+
+    first = path.read_bytes()
+
+    inspect_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
+    )
+
+    second = path.read_bytes()
+
+    assert second == first
+
+    assert (
+        execution.final_run_recorded
+    )
+
+
+def test_final_record_storage_failure_does_not_change_terminal_execution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = (
+        "run_final_storage_failure"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    def fail_create(
+        self,
+        execution_record,
+        *,
+        summary=None,
+        metadata=None,
+    ):
+        raise OSError(
+            "synthetic final record failure"
+        )
+
+    monkeypatch.setattr(
+        RunRecordStore,
+        "create",
+        fail_create,
+    )
+
+    record = (
+        stop_canonical_system_execution(
+            orchestrator,
+            execution,
+            clock=_clock,
+        )
+    )
+
+    # Execution already terminated successfully. Persistence failure cannot
+    # retroactively turn it into an execution failure.
+    assert record.terminal
+    assert record.successful
+
+    assert not (
+        execution.final_run_recorded
+    )
+
+    assert (
+        execution.run_record_store
+        is not None
+    )
+
+    assert not (
+        execution.run_record_store
+        .path.exists()
+    )
+
+    errors = record.details[
+        "run_record_persistence_errors"
+    ]
+
+    assert errors
+
+    assert any(
+        "synthetic final record failure"
         in item
         for item in errors
     )
