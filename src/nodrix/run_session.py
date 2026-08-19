@@ -255,7 +255,7 @@ stage was reached.
 | `session.json` | Immutable Run session header: Run ID, creation time and exact Plan identity. Created before execution starts. |
 | `definition.json` | Exact canonical Definition snapshot used for this Run. |
 | `plan.json` | Exact resolved execution Plan used by the runtime. |
-| `status.json` | Current live status snapshot. Updated atomically while the Run is active. |
+| `status.json` | Current live status snapshot. Replaced atomically for fast reads and recoverable from durable Run history; it is not immutable historical evidence. |
 | `events.jsonl` | Append-only ordered Run event stream. Each record contains Run ID, sequence number and one versioned domain event. Existing events are never rewritten. |
 | `environment.json` | Captured execution environment with secrets and protected values redacted. |
 | `logs/` | Logs produced by Systems, backends, applications, nodes and other execution scopes. |
@@ -284,7 +284,7 @@ execution завершился до достижения соответству�
 | `session.json` | Неизменяемый заголовок Run: Run ID, время создания и идентичность точного Plan. Создаётся до начала execution. |
 | `definition.json` | Точный снимок канонической Definition, использованной для этого Run. |
 | `plan.json` | Точный разрешённый execution Plan, использованный runtime. |
-| `status.json` | Текущее состояние Run. Во время работы обновляется атомарно. |
+| `status.json` | Текущий снимок состояния Run. Атомарно заменяется для быстрого чтения и может быть восстановлен из постоянной истории Run; сам по себе не является неизменяемой исторической записью. |
 | `events.jsonl` | Упорядоченный журнал событий Run только для добавления. Каждая запись содержит Run ID, номер последовательности и одно версионированное событие execution domain. Уже записанные события не переписываются. |
 | `environment.json` | Снимок окружения execution с удалёнными/скрытыми секретами и защищёнными значениями. |
 | `logs/` | Логи Systems, backend, applications, nodes и других областей исполнения. |

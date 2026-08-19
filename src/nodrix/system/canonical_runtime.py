@@ -27,6 +27,9 @@ from nodrix.run_session import (
     RunSession,
     RunStore,
 )
+from nodrix.run_status import (
+    RunStatusStore,
+)
 
 from .execution_events import (
     ExecutionEvent,
@@ -139,6 +142,44 @@ def _status_details(
     return details
 
 
+def _write_run_status(
+    store: RunStatusStore | None,
+    errors: list[str],
+    *,
+    state: ExecutionState | str,
+    execution_id: str | None,
+    message: str | None = None,
+    details: dict[str, object] | None = None,
+    observed_at: datetime,
+) -> None:
+    """Persist recoverable live status without controlling execution."""
+
+    if store is None:
+        return
+
+    try:
+        store.write_if_changed(
+            state=state,
+            execution_id=execution_id,
+            message=message,
+            details=details,
+            updated_at=observed_at,
+        )
+    except Exception as exc:
+        error = (
+            f"{type(exc).__name__}: {exc}"
+        )
+
+        # Avoid unbounded growth if a broken filesystem is polled repeatedly.
+        if (
+            not errors
+            or errors[-1] != error
+        ):
+            errors.append(
+                error
+            )
+
+
 def _validate_system_plan_record(
     plan: PlanRecord,
 ) -> SystemExecutionPlan:
@@ -183,7 +224,12 @@ class CanonicalSystemExecution:
     started_at: datetime
     run_session: RunSession | None = None
     event_journal: RunEventJournal | None = None
+    status_store: RunStatusStore | None = None
     event_persistence_errors: list[str] = field(
+        default_factory=list,
+        repr=False,
+    )
+    status_persistence_errors: list[str] = field(
         default_factory=list,
         repr=False,
     )
@@ -246,6 +292,28 @@ class CanonicalSystemExecution:
             ):
                 raise ValueError(
                     "event_journal belongs to a different RunSession"
+                )
+
+        if self.status_store is not None:
+            if not isinstance(
+                self.status_store,
+                RunStatusStore,
+            ):
+                raise TypeError(
+                    "status_store must be a RunStatusStore or None"
+                )
+
+            if self.run_session is None:
+                raise ValueError(
+                    "status_store requires run_session"
+                )
+
+            if (
+                self.status_store.run_id
+                != self.run_session.run_id
+            ):
+                raise ValueError(
+                    "status_store belongs to a different RunSession"
                 )
 
         self.started_at = _timestamp(
@@ -324,6 +392,13 @@ class CanonicalSystemExecution:
                 self.event_persistence_errors
             )
 
+        if self.status_persistence_errors:
+            details[
+                "run_status_persistence_errors"
+            ] = tuple(
+                self.status_persistence_errors
+            )
+
         return ExecutionRecord(
             execution_id=self.execution_id,
             plan=self.plan,
@@ -400,6 +475,29 @@ def start_canonical_system_execution(
         else None
     )
 
+    status_store = (
+        RunStatusStore(
+            run_session
+        )
+        if run_session is not None
+        else None
+    )
+
+    status_persistence_errors: list[
+        str
+    ] = []
+
+    if run_session is not None:
+        _write_run_status(
+            status_store,
+            status_persistence_errors,
+            state=ExecutionState.CREATED,
+            execution_id=None,
+            observed_at=(
+                run_session.created_at
+            ),
+        )
+
     def persist_error(
         *,
         stage: str,
@@ -446,6 +544,25 @@ def start_canonical_system_execution(
                 f"error event: {event_exc}"
             )
 
+        failed_at = _now(
+            clock
+        )
+
+        _write_run_status(
+            status_store,
+            status_persistence_errors,
+            state=ExecutionState.FAILED,
+            execution_id=None,
+            message=str(exc),
+            details={
+                "stage": "prepare",
+                "errorType": (
+                    type(exc).__name__
+                ),
+            },
+            observed_at=failed_at,
+        )
+
         raise
 
     if event_journal is not None:
@@ -461,6 +578,18 @@ def start_canonical_system_execution(
             ).to_dict(),
             recorded_at=prepared_at,
         )
+    else:
+        prepared_at = _now(
+            clock
+        )
+
+    _write_run_status(
+        status_store,
+        status_persistence_errors,
+        state=ExecutionState.PREPARED,
+        execution_id=None,
+        observed_at=prepared_at,
+    )
 
     def startup_event_sink(
         startup_event,
@@ -505,6 +634,25 @@ def start_canonical_system_execution(
                 f"error event: {event_exc}"
             )
 
+        failed_at = _now(
+            clock
+        )
+
+        _write_run_status(
+            status_store,
+            status_persistence_errors,
+            state=ExecutionState.FAILED,
+            execution_id=None,
+            message=str(exc),
+            details={
+                "stage": "start",
+                "errorType": (
+                    type(exc).__name__
+                ),
+            },
+            observed_at=failed_at,
+        )
+
         raise
 
     if event_journal is not None:
@@ -541,12 +689,30 @@ def start_canonical_system_execution(
 
             raise
 
+    running_at = _now(
+        clock
+    )
+
+    _write_run_status(
+        status_store,
+        status_persistence_errors,
+        state=ExecutionState.RUNNING,
+        execution_id=(
+            handle.execution_id
+        ),
+        observed_at=running_at,
+    )
+
     return CanonicalSystemExecution(
         plan=plan,
         handle=handle,
         started_at=started_at,
         run_session=run_session,
         event_journal=event_journal,
+        status_store=status_store,
+        status_persistence_errors=(
+            status_persistence_errors
+        ),
     )
 
 
@@ -580,6 +746,22 @@ def inspect_canonical_system_execution(
 
     observed_at = _now(
         clock
+    )
+
+    _write_run_status(
+        execution.status_store,
+        execution.status_persistence_errors,
+        state=_execution_state(
+            status
+        ),
+        execution_id=(
+            status.execution_id
+        ),
+        message=status.message,
+        details=_status_details(
+            status
+        ),
+        observed_at=observed_at,
     )
 
     if (
@@ -640,6 +822,20 @@ def stop_canonical_system_execution(
 
     journal = (
         execution.event_journal
+    )
+
+    stopping_at = _now(
+        clock
+    )
+
+    _write_run_status(
+        execution.status_store,
+        execution.status_persistence_errors,
+        state=ExecutionState.STOPPING,
+        execution_id=(
+            execution.execution_id
+        ),
+        observed_at=stopping_at,
     )
 
     if journal is not None:
@@ -713,6 +909,22 @@ def stop_canonical_system_execution(
 
     observed_at = _now(
         clock
+    )
+
+    _write_run_status(
+        execution.status_store,
+        execution.status_persistence_errors,
+        state=_execution_state(
+            status
+        ),
+        execution_id=(
+            status.execution_id
+        ),
+        message=status.message,
+        details=_status_details(
+            status
+        ),
+        observed_at=observed_at,
     )
 
     if (

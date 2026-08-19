@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import json
 
 import pytest
 
 from nodrix.run_events import RunEventJournal
 from nodrix.run_session import RunStore
+from nodrix.run_status import RunStatusStore
 from nodrix.system import (
     BackendCapabilities,
     BackendContext,
@@ -731,4 +733,345 @@ def test_event_persistence_failure_after_start_does_not_block_stop(
     assert any(
         "synthetic disk full" in error
         for error in errors
+    )
+
+
+def _run_status(
+    execution,
+):
+    assert (
+        execution.status_store
+        is not None
+    )
+
+    document = (
+        execution.status_store.read()
+    )
+
+    assert document is not None
+
+    return document
+
+
+def test_persistent_runtime_has_running_live_status(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_live_status"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    status = _run_status(
+        execution
+    )
+
+    assert (
+        status["state"]
+        == "running"
+    )
+    assert (
+        status["executionId"]
+        == execution.execution_id
+    )
+
+    # created -> prepared -> running
+    assert (
+        status["generation"]
+        == 3
+    )
+
+
+def test_repeated_unchanged_inspection_does_not_rewrite_status(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_status_polling"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    # First inspection enriches the running status with actual scope details.
+    inspect_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
+    )
+
+    first = _run_status(
+        execution
+    )
+
+    inspect_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
+    )
+
+    second = _run_status(
+        execution
+    )
+
+    assert (
+        second["generation"]
+        == first["generation"]
+    )
+
+    assert second == first
+
+
+def test_stop_updates_live_status_to_terminal_state(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_terminal_status"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    record = (
+        stop_canonical_system_execution(
+            orchestrator,
+            execution,
+            clock=_clock,
+        )
+    )
+
+    assert record.terminal
+
+    status = _run_status(
+        execution
+    )
+
+    assert (
+        status["state"]
+        == "stopped"
+    )
+    assert status["terminal"]
+    assert status["successful"]
+
+    # created -> prepared -> running -> stopping -> stopped
+    assert (
+        status["generation"]
+        == 5
+    )
+
+
+def test_prepare_failure_leaves_failed_live_status(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_prepare_status_failure"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+        fail_prepare=True,
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    with pytest.raises(
+        OrchestrationError,
+    ):
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+
+    document = json.loads(
+        (
+            root
+            / run_id
+            / "status.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        document["state"]
+        == "failed"
+    )
+    assert document["terminal"]
+    assert not document["successful"]
+    assert (
+        document["executionId"]
+        is None
+    )
+
+    assert (
+        document["details"]["stage"]
+        == "prepare"
+    )
+
+
+def test_status_storage_failure_does_not_control_execution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+    run_id = "run_broken_status_storage"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    def fail_status(
+        self,
+        *,
+        state,
+        execution_id=None,
+        message=None,
+        details=None,
+        updated_at=None,
+    ):
+        raise OSError(
+            "synthetic status disk failure"
+        )
+
+    monkeypatch.setattr(
+        RunStatusStore,
+        "write_if_changed",
+        fail_status,
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    # status.json is only a recoverable cache. Execution is still alive.
+    assert (
+        execution.execution_id
+    )
+
+    record = (
+        stop_canonical_system_execution(
+            orchestrator,
+            execution,
+            clock=_clock,
+        )
+    )
+
+    assert record.terminal
+    assert record.successful
+
+    errors = record.details[
+        "run_status_persistence_errors"
+    ]
+
+    assert errors
+    assert any(
+        "synthetic status disk failure"
+        in item
+        for item in errors
     )
