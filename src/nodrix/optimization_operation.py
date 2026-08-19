@@ -11,7 +11,9 @@ from .benchmark_operation import benchmark_subject
 from .benchmarking import RunCallable
 from .execution_history import (
     PersistedRun,
-    persist_execution,
+)
+from .foreground_operation import (
+    persist_foreground_execution,
 )
 from .model import (
     OPTIMIZE,
@@ -291,7 +293,8 @@ def execute_optimization_operation(
         else None
     )
 
-    history = persist_execution(
+    outcome = persist_foreground_execution(
+        canonical_plan,
         execution,
         project=(
             Path(history_root)
@@ -334,7 +337,7 @@ def execute_optimization_operation(
     return OptimizationOperationResult(
         plan=canonical_plan,
         execution=execution,
-        history=history,
+        history=outcome.history,
         spec_path=spec_path,
         report_path=report_path,
         result=result,

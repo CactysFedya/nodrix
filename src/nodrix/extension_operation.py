@@ -7,7 +7,7 @@ This module owns the durable Run boundary for one extension-backed Operation:
         -> PlanRecord
         -> PlanExecutor
         -> ExecutionRecord
-        -> persist_execution()
+        -> canonical foreground boundary
         -> RunRecord
 
 The dispatcher, planner and executor deliberately remain free of persistence.
@@ -25,7 +25,9 @@ from typing import Any, Mapping
 
 from .execution_history import (
     PersistedRun,
-    persist_execution,
+)
+from .foreground_operation import (
+    execute_foreground_operation,
 )
 from .extension_dispatcher import (
     ExtensionDispatcher,
@@ -94,13 +96,10 @@ def execute_extension_operation(
             "context must be a PlanningContext"
         )
 
-    execution = dispatcher.dispatch(
+    outcome = execute_foreground_operation(
         operation,
+        dispatcher=dispatcher,
         context=context,
-    )
-
-    history = persist_execution(
-        execution,
         project=project,
         run_id=run_id,
         summary=summary,
@@ -108,9 +107,9 @@ def execute_extension_operation(
     )
 
     return ExtensionOperationResult(
-        plan=execution.plan,
-        execution=execution,
-        history=history,
+        plan=outcome.plan,
+        execution=outcome.execution,
+        history=outcome.history,
     )
 
 

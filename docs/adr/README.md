@@ -22,3 +22,4 @@ a public or architectural contract.
 - [ADR-0001: Run lifecycle, persistence, and recovery](0001-run-lifecycle-persistence-recovery.md)
 - [ADR-0002: Canonical Operation, planning, and execution contract](0002-canonical-operation-planning-execution.md)
 - [ADR-0003: Execution and Run policy](0003-execution-run-policy.md)
+- [ADR-0004: Canonical foreground Operation execution](0004-canonical-foreground-operation-execution.md)

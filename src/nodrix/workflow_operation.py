@@ -45,7 +45,9 @@ from .workflow_canonical import workflow_plan_record
 from .workflow_executor import WorkflowExecutor
 from .execution_history import (
     PersistedRun,
-    persist_execution,
+)
+from .foreground_operation import (
+    persist_foreground_execution,
 )
 from .workflow_planning import (
     WorkflowPlanResult,
@@ -262,7 +264,8 @@ def execute_workflow_operation(
         canonical_plan
     )
 
-    history = persist_execution(
+    outcome = persist_foreground_execution(
+        canonical_plan,
         execution,
         project=domain_plan.root,
         summary={
@@ -281,7 +284,7 @@ def execute_workflow_operation(
     return WorkflowOperationResult(
         plan=canonical_plan,
         execution=execution,
-        history=history,
+        history=outcome.history,
     )
 
 

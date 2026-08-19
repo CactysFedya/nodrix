@@ -22,3 +22,4 @@ ADR защищают принципы продукта от случайного
 - [ADR-0001: Lifecycle, хранение и recovery для Run](0001-run-lifecycle-persistence-recovery.md)
 - [ADR-0002: Канонический контракт Operation, planning и execution](0002-canonical-operation-planning-execution.md)
 - [ADR-0003: Execution и Run policy](0003-execution-run-policy.md)
+- [ADR-0004: Каноническое foreground-выполнение Operation](0004-canonical-foreground-operation-execution.md)

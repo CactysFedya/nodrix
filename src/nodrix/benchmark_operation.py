@@ -9,7 +9,10 @@ from typing import Any, Mapping
 from .benchmark_canonical import benchmark_plan_record
 from .benchmark_executor import BenchmarkExecutor
 from .benchmarking import BenchmarkPlan, RunCallable
-from .execution_history import PersistedRun, persist_execution
+from .execution_history import PersistedRun
+from .foreground_operation import (
+    persist_foreground_execution,
+)
 from .model import (
     BENCHMARK,
     EntityRef,
@@ -138,7 +141,8 @@ def execute_benchmark_operation(
         else {}
     )
 
-    history = persist_execution(
+    outcome = persist_foreground_execution(
+        canonical_plan,
         execution,
         project=(
             Path(history_root).expanduser().resolve()
@@ -168,7 +172,7 @@ def execute_benchmark_operation(
     return BenchmarkOperationResult(
         plan=canonical_plan,
         execution=execution,
-        history=history,
+        history=outcome.history,
     )
 
 
