@@ -84,6 +84,56 @@ def _timestamp_text(
     )
 
 
+def _reject_json_constant(
+    value: str,
+) -> None:
+    raise json.JSONDecodeError(
+        "non-standard JSON numeric constant "
+        f"{value!r}",
+        value,
+        0,
+    )
+
+
+def _parse_persisted_timestamp(
+    value: object,
+    *,
+    field_name: str,
+) -> datetime:
+    if not isinstance(
+        value,
+        str,
+    ):
+        raise RunRecordCorruptionError(
+            f"{field_name} must be a string"
+        )
+
+    candidate = (
+        value[:-1] + "+00:00"
+        if value.endswith("Z")
+        else value
+    )
+
+    try:
+        result = datetime.fromisoformat(
+            candidate
+        )
+    except ValueError as exc:
+        raise RunRecordCorruptionError(
+            f"{field_name} is invalid"
+        ) from exc
+
+    if (
+        result.tzinfo is None
+        or result.utcoffset() is None
+    ):
+        raise RunRecordCorruptionError(
+            f"{field_name} must be timezone-aware"
+        )
+
+    return result
+
+
 def _json_value(
     value: Any,
 ) -> Any:
@@ -458,6 +508,31 @@ def _validate_document(
             "run.json metadata must be an object"
         )
 
+    started_at = (
+        _parse_persisted_timestamp(
+            execution["startedAt"],
+            field_name=(
+                "run.json execution.startedAt"
+            ),
+        )
+    )
+
+    finished_at = (
+        _parse_persisted_timestamp(
+            execution["finishedAt"],
+            field_name=(
+                "run.json execution.finishedAt"
+            ),
+        )
+    )
+
+    if finished_at < started_at:
+        raise RunRecordCorruptionError(
+            "run.json execution.finishedAt "
+            "must not precede startedAt"
+        )
+
+
 
 class RunRecordStore:
     """Create and read the immutable final record of one persistent Run."""
@@ -509,9 +584,7 @@ class RunRecordStore:
                 "r",
                 encoding="utf-8",
             ) as stream:
-                document = json.load(
-                    stream
-                )
+                document = json.load(stream, parse_constant=_reject_json_constant)
         except (
             UnicodeDecodeError,
             json.JSONDecodeError,

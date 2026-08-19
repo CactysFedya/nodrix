@@ -428,3 +428,107 @@ def test_unchanged_status_does_not_advance_generation(
         changed["generation"]
         == 2
     )
+
+
+@pytest.mark.parametrize(
+    "constant",
+    (
+        "NaN",
+        "Infinity",
+        "-Infinity",
+    ),
+)
+def test_status_reader_rejects_nonstandard_json_numbers(
+    tmp_path,
+    constant: str,
+) -> None:
+    session = _session(
+        tmp_path
+    )
+
+    store = RunStatusStore(
+        session
+    )
+
+    store.write(
+        state="running",
+        execution_id="exec-1",
+        updated_at=UPDATED,
+    )
+
+    text = store.path.read_text(
+        encoding="utf-8"
+    )
+
+    old = '"details": {}'
+
+    assert old in text
+
+    store.path.write_text(
+        text.replace(
+            old,
+            (
+                '"details": '
+                '{"invalid": '
+                + constant
+                + "}"
+            ),
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RunStatusCorruptionError,
+        match="invalid JSON",
+    ):
+        RunStatusStore(
+            session
+        )
+
+
+def test_status_reader_requires_timezone_aware_updated_at(
+    tmp_path,
+) -> None:
+    session = _session(
+        tmp_path
+    )
+
+    store = RunStatusStore(
+        session
+    )
+
+    store.write(
+        state="running",
+        execution_id="exec-1",
+        updated_at=UPDATED,
+    )
+
+    document = json.loads(
+        store.path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    document["updatedAt"] = (
+        "2026-08-19T06:00:01"
+    )
+
+    store.path.write_text(
+        json.dumps(
+            document,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RunStatusCorruptionError,
+        match="timezone-aware",
+    ):
+        RunStatusStore(
+            session
+        )

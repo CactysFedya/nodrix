@@ -91,6 +91,56 @@ def _timestamp_text(
     )
 
 
+def _reject_json_constant(
+    value: str,
+) -> None:
+    raise json.JSONDecodeError(
+        "non-standard JSON numeric constant "
+        f"{value!r}",
+        value,
+        0,
+    )
+
+
+def _parse_persisted_timestamp(
+    value: object,
+    *,
+    field_name: str,
+) -> datetime:
+    if not isinstance(
+        value,
+        str,
+    ):
+        raise RunStatusCorruptionError(
+            f"{field_name} must be a string"
+        )
+
+    candidate = (
+        value[:-1] + "+00:00"
+        if value.endswith("Z")
+        else value
+    )
+
+    try:
+        result = datetime.fromisoformat(
+            candidate
+        )
+    except ValueError as exc:
+        raise RunStatusCorruptionError(
+            f"{field_name} is invalid"
+        ) from exc
+
+    if (
+        result.tzinfo is None
+        or result.utcoffset() is None
+    ):
+        raise RunStatusCorruptionError(
+            f"{field_name} must be timezone-aware"
+        )
+
+    return result
+
+
 def _json_value(
     value: Any,
 ) -> Any:
@@ -472,9 +522,7 @@ class RunStatusStore:
                 "r",
                 encoding="utf-8",
             ) as stream:
-                document = json.load(
-                    stream
-                )
+                document = json.load(stream, parse_constant=_reject_json_constant)
         except (
             UnicodeDecodeError,
             json.JSONDecodeError,
@@ -486,6 +534,13 @@ class RunStatusStore:
         _validate_existing_document(
             document,
             session=self._session,
+        )
+
+        _parse_persisted_timestamp(
+            document.get("updatedAt"),
+            field_name=(
+                "status.json updatedAt"
+            ),
         )
 
         return document

@@ -427,3 +427,165 @@ def test_reader_detects_corrupted_final_record(
         RunRecordStore(
             session
         ).read()
+
+
+@pytest.mark.parametrize(
+    "constant",
+    (
+        "NaN",
+        "Infinity",
+        "-Infinity",
+    ),
+)
+def test_final_record_reader_rejects_nonstandard_json_numbers(
+    tmp_path,
+    constant: str,
+) -> None:
+    plan = _plan()
+
+    session = _session(
+        tmp_path,
+        plan=plan,
+    )
+
+    store = RunRecordStore(
+        session
+    )
+
+    store.create(
+        _terminal_execution(
+            plan
+        )
+    )
+
+    text = store.path.read_text(
+        encoding="utf-8"
+    )
+
+    old = '"summary": {}'
+
+    assert old in text
+
+    store.path.write_text(
+        text.replace(
+            old,
+            (
+                '"summary": '
+                '{"invalid": '
+                + constant
+                + "}"
+            ),
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RunRecordCorruptionError,
+        match="invalid JSON",
+    ):
+        store.read()
+
+
+def test_final_record_reader_requires_timezone_aware_timestamps(
+    tmp_path,
+) -> None:
+    plan = _plan()
+
+    session = _session(
+        tmp_path,
+        plan=plan,
+    )
+
+    store = RunRecordStore(
+        session
+    )
+
+    store.create(
+        _terminal_execution(
+            plan
+        )
+    )
+
+    document = json.loads(
+        store.path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    document["execution"][
+        "startedAt"
+    ] = "2026-08-19T06:30:00"
+
+    store.path.write_text(
+        json.dumps(
+            document,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RunRecordCorruptionError,
+        match="timezone-aware",
+    ):
+        store.read()
+
+
+def test_final_record_reader_rejects_reversed_execution_interval(
+    tmp_path,
+) -> None:
+    plan = _plan()
+
+    session = _session(
+        tmp_path,
+        plan=plan,
+    )
+
+    store = RunRecordStore(
+        session
+    )
+
+    store.create(
+        _terminal_execution(
+            plan
+        )
+    )
+
+    document = json.loads(
+        store.path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    document["execution"][
+        "startedAt"
+    ] = (
+        "2026-08-19T06:31:00Z"
+    )
+
+    document["execution"][
+        "finishedAt"
+    ] = (
+        "2026-08-19T06:30:00Z"
+    )
+
+    store.path.write_text(
+        json.dumps(
+            document,
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        RunRecordCorruptionError,
+        match="must not precede",
+    ):
+        store.read()

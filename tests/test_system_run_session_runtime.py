@@ -18,6 +18,14 @@ from nodrix.run_logs import (
     RunLogPolicy,
 )
 from nodrix.run_record import RunRecordStore
+from nodrix.run_recovery import (
+    ACTIVE_OR_UNKNOWN,
+    FAILED_BEFORE_START,
+    HEALTHY_TERMINAL,
+    INCOMPLETE,
+    INTERRUPTED,
+    inspect_run_directory,
+)
 from nodrix.run_session import RunStore
 from nodrix.run_snapshots import (
     DEFINITION_SNAPSHOT,
@@ -2371,4 +2379,290 @@ def test_non_persistent_runtime_has_no_log_store(
     assert (
         execution.log_store
         is None
+    )
+
+
+def test_real_completed_run_passes_recovery_integrity(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_recovery_completed"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    record = (
+        stop_canonical_system_execution(
+            orchestrator,
+            execution,
+            clock=_clock,
+        )
+    )
+
+    assert record.terminal
+
+    report = inspect_run_directory(
+        root / run_id
+    )
+
+    assert (
+        report.classification
+        == HEALTHY_TERMINAL
+    ), report.issues
+
+    assert report.terminal
+    assert report.final_record_present
+    assert not report.corrupted
+
+    assert (
+        report.execution_id
+        == record.execution_id
+    )
+
+
+def test_real_running_run_is_active_or_interrupted_only_with_owner_knowledge(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_recovery_running"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    default_report = (
+        inspect_run_directory(
+            root / run_id
+        )
+    )
+
+    assert (
+        default_report.classification
+        == ACTIVE_OR_UNKNOWN
+    ), default_report.issues
+
+    assert (
+        default_report.recovered_state
+        == "running"
+    )
+
+    inactive_report = (
+        inspect_run_directory(
+            root / run_id,
+            assume_inactive=True,
+        )
+    )
+
+    assert (
+        inactive_report.classification
+        == INTERRUPTED
+    )
+
+    assert (
+        inactive_report.execution_id
+        is not None
+    )
+
+    # The test still owns this in-memory execution; terminate it normally.
+    stop_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
+    )
+
+
+def test_real_prepare_failure_is_recoverable_without_final_run_record(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_recovery_prepare_failure"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+        fail_prepare=True,
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    with pytest.raises(
+        OrchestrationError,
+        match="synthetic prepare failure",
+    ):
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+
+    report = inspect_run_directory(
+        root / run_id
+    )
+
+    assert (
+        report.classification
+        == FAILED_BEFORE_START
+    ), report.issues
+
+    assert (
+        report.recovered_state
+        == "failed"
+    )
+
+    assert not (
+        report.final_record_present
+    )
+
+
+def test_real_events_recover_running_state_when_status_cache_is_missing(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_recovery_without_status"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    status_path = (
+        root
+        / run_id
+        / "status.json"
+    )
+
+    status_path.unlink()
+
+    report = inspect_run_directory(
+        root / run_id
+    )
+
+    # status.json is only a reconstructible cache.  Its absence makes the
+    # persisted Run incomplete, but durable events still recover the last
+    # execution state and identity.
+    assert (
+        report.classification
+        == INCOMPLETE
+    ), report.issues
+
+    assert (
+        report.recovered_state
+        == "running"
+    )
+
+    assert (
+        report.execution_id
+        is not None
+    )
+
+    assert any(
+        issue.code == "REC105"
+        for issue in report.issues
+    )
+
+    stop_canonical_system_execution(
+        orchestrator,
+        execution,
+        clock=_clock,
     )

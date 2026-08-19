@@ -16,3 +16,7 @@ Each ADR records:
 
 A feature-specific implementation detail does not need an ADR unless it changes
 a public or architectural contract.
+
+## Accepted decisions
+
+- [ADR-0001: Run lifecycle, persistence, and recovery](0001-run-lifecycle-persistence-recovery.md)
