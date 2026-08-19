@@ -3381,3 +3381,588 @@ def test_policy_publication_failure_prevents_backend_prepare(
         == "policy"
         for item in events
     )
+
+
+def test_canonical_metrics_disabled_does_not_create_metric_storage(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_metrics_disabled"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            system_definition=_system(),
+            execution_policy=ExecutionPolicy(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.run_session
+        is not None
+    )
+
+    assert not (
+        root
+        / run_id
+        / "metrics"
+    ).exists()
+
+    policy_document = json.loads(
+        (
+            root
+            / run_id
+            / "policy.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        policy_document["metrics"]
+        is None
+    )
+
+
+def test_canonical_metrics_publish_into_run_metric_journal(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from nodrix.metric_publisher import (
+        MetricPublisher,
+    )
+    from nodrix.run_metric_policy import (
+        RunMetricPolicy,
+    )
+    from nodrix.run_metrics import (
+        RunMetricJournal,
+    )
+
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_metrics_enabled"
+    )
+
+    metric_policy = RunMetricPolicy(
+        max_records=32,
+        max_bytes=1024 * 1024,
+        max_record_bytes=64 * 1024,
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    original_prepare = (
+        SystemOrchestrator.prepare_plan
+    )
+
+    results = []
+
+    def prepare_with_metric(
+        self,
+        plan,
+        *args,
+        **kwargs,
+    ):
+        metric_sink = kwargs.get(
+            "metric_sink"
+        )
+
+        assert metric_sink is not None
+
+        # Provenance must exist before Metrics become available to execution.
+        assert (
+            root
+            / run_id
+            / "policy.json"
+        ).is_file()
+
+        if not results:
+            publisher = MetricPublisher(
+                source="runtime-test",
+                sink=metric_sink,
+            )
+
+            results.append(
+                publisher.observe(
+                    "runtime.items",
+                    1,
+                    value_type="integer",
+                    unit="count",
+                )
+            )
+
+        return original_prepare(
+            self,
+            plan,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        SystemOrchestrator,
+        "prepare_plan",
+        prepare_with_metric,
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            system_definition=_system(),
+            execution_policy=ExecutionPolicy(
+                metrics=metric_policy
+            ),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert len(results) == 1
+    assert results[0].accepted
+
+    assert (
+        execution.run_session
+        is not None
+    )
+
+    metric_path = (
+        root
+        / run_id
+        / "metrics"
+        / "records.jsonl"
+    )
+
+    assert metric_path.is_file()
+
+    records = (
+        RunMetricJournal(
+            execution.run_session,
+            policy=metric_policy,
+        )
+        .read_all()
+    )
+
+    assert len(records) == 1
+
+    assert (
+        records[0].run_id
+        == run_id
+    )
+
+    assert (
+        records[0].metric.name
+        == "runtime.items"
+    )
+
+    assert (
+        records[0].metric.value
+        == 1
+    )
+
+    assert (
+        records[0].metric.source
+        == "runtime-test"
+    )
+
+    policy_document = json.loads(
+        (
+            root
+            / run_id
+            / "policy.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        policy_document["metrics"]
+        == {
+            "maxRecords": 32,
+            "maxBytes": 1024 * 1024,
+            "maxRecordBytes": 64 * 1024,
+            "overflow": "drop",
+        }
+    )
+
+
+def test_canonical_metric_quota_loss_does_not_fail_prepare(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from nodrix.metric_publisher import (
+        MetricPublisher,
+    )
+    from nodrix.run_metric_policy import (
+        RunMetricPolicy,
+    )
+
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_metrics_quota"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    original_prepare = (
+        SystemOrchestrator.prepare_plan
+    )
+
+    results = []
+
+    def prepare_with_metric_loss(
+        self,
+        plan,
+        *args,
+        **kwargs,
+    ):
+        metric_sink = kwargs.get(
+            "metric_sink"
+        )
+
+        assert metric_sink is not None
+
+        if not results:
+            publisher = MetricPublisher(
+                source="runtime-test",
+                sink=metric_sink,
+            )
+
+            results.append(
+                publisher.observe(
+                    "runtime.items",
+                    1,
+                    value_type="integer",
+                    unit="count",
+                )
+            )
+
+            results.append(
+                publisher.observe(
+                    "runtime.items",
+                    2,
+                    value_type="integer",
+                    unit="count",
+                )
+            )
+
+        return original_prepare(
+            self,
+            plan,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        SystemOrchestrator,
+        "prepare_plan",
+        prepare_with_metric_loss,
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            system_definition=_system(),
+            execution_policy=ExecutionPolicy(
+                metrics=RunMetricPolicy(
+                    max_records=1,
+                    max_bytes=1024 * 1024,
+                    max_record_bytes=64 * 1024,
+                )
+            ),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    # Metric loss is not a control-plane prepare failure.
+    assert (
+        backend.prepare_observed_run
+        is True
+    )
+
+    assert (
+        execution.run_session
+        is not None
+    )
+
+    assert len(results) == 2
+
+    assert results[0].accepted
+
+    assert not (
+        results[1].accepted
+    )
+
+    assert (
+        results[1].reason
+        == "record-limit"
+    )
+
+    status = json.loads(
+        (
+            root
+            / run_id
+            / "metrics"
+            / "status.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        status["lossOccurred"]
+        is True
+    )
+
+    assert (
+        status["droppedRecords"]
+        == 1
+    )
+
+    assert (
+        status["lastDropReason"]
+        == "record-limit"
+    )
+
+
+def test_canonical_metric_storage_failure_does_not_fail_execution(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from nodrix.metric_publisher import (
+        MetricPublisher,
+    )
+    from nodrix.run_metric_policy import (
+        RunMetricPolicy,
+    )
+    from nodrix.run_metrics import (
+        RunMetricJournal,
+    )
+
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_metrics_storage_failure"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    def fail_append(
+        self,
+        metric,
+        *,
+        recorded_at=None,
+    ):
+        raise OSError(
+            "synthetic canonical Metric "
+            "storage failure"
+        )
+
+    monkeypatch.setattr(
+        RunMetricJournal,
+        "append",
+        fail_append,
+    )
+
+    original_prepare = (
+        SystemOrchestrator.prepare_plan
+    )
+
+    results = []
+
+    def prepare_with_failed_metric(
+        self,
+        plan,
+        *args,
+        **kwargs,
+    ):
+        metric_sink = kwargs.get(
+            "metric_sink"
+        )
+
+        assert metric_sink is not None
+
+        if not results:
+            publisher = MetricPublisher(
+                source="runtime-test",
+                sink=metric_sink,
+            )
+
+            results.append(
+                publisher.observe(
+                    "runtime.items",
+                    1,
+                    value_type="integer",
+                    unit="count",
+                )
+            )
+
+        return original_prepare(
+            self,
+            plan,
+            *args,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        SystemOrchestrator,
+        "prepare_plan",
+        prepare_with_failed_metric,
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            system_definition=_system(),
+            execution_policy=ExecutionPolicy(
+                metrics=RunMetricPolicy()
+            ),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        backend.prepare_observed_run
+        is True
+    )
+
+    assert (
+        execution.run_session
+        is not None
+    )
+
+    assert len(results) == 1
+
+    assert not (
+        results[0].accepted
+    )
+
+    assert (
+        results[0].reason
+        == "storage-error"
+    )
+
+
+def test_canonical_metrics_require_persistent_run_store(
+    tmp_path,
+) -> None:
+    from nodrix.run_metric_policy import (
+        RunMetricPolicy,
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            tmp_path
+            / "unused-run"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="persistent RunStore",
+    ):
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            system_definition=_system(),
+            execution_policy=ExecutionPolicy(
+                metrics=RunMetricPolicy()
+            ),
+        )
+
+    assert (
+        backend.prepare_observed_run
+        is False
+    )

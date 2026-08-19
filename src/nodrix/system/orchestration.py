@@ -19,6 +19,7 @@ import time
 from typing import Any, Callable, Mapping
 from uuid import uuid4
 
+from ..metric_publisher import MetricSink
 from ..errors import NodrixError
 from .backend import (
     BackendContext,
@@ -243,6 +244,7 @@ def backend_context_for_scope(
     ] = (),
     system_inbound_links: tuple[BackendSystemLink, ...] = (),
     system_outbound_links: tuple[BackendSystemLink, ...] = (),
+    metric_sink: MetricSink | None = None,
 ) -> BackendContext:
     """Project one global SystemExecutionPlan into one orchestration scope."""
 
@@ -360,6 +362,7 @@ def backend_context_for_scope(
         system_inbound_links=system_inbound_links,
         system_outbound_links=system_outbound_links,
         artifacts=artifacts,
+        metric_sink=metric_sink,
     )
 
 
@@ -1345,6 +1348,7 @@ class SystemOrchestrator:
         ] = (),
         _system_link_routes: tuple[_RoutedSystemLink, ...] = (),
         _system_path: tuple[str, ...] = (),
+        metric_sink: MetricSink | None = None,
     ) -> PreparedSystemExecution:
         system_link_routes = (
             *_system_link_routes,
@@ -1394,6 +1398,7 @@ class SystemOrchestrator:
                         and route.binding.direction == "outbound"
                     )
                 ),
+                metric_sink=metric_sink,
             )
 
             try:
@@ -1448,6 +1453,7 @@ class SystemOrchestrator:
                             and route.remaining_system_path[0] == child.name
                         )
                     ),
+                    metric_sink=metric_sink,
                 )
             except Exception as exc:
                 raise OrchestrationError(

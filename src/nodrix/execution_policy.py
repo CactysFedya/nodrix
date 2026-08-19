@@ -41,6 +41,10 @@ from nodrix.run_logs import (
 )
 
 
+from nodrix.run_metric_policy import (
+    RunMetricPolicy,
+)
+
 @dataclass(
     frozen=True,
     slots=True,
@@ -56,7 +60,11 @@ class ExecutionPolicy:
 
     ``logs`` controls optional bounded diagnostic logging.
 
-    Neither field changes the resolved semantic Plan that the executor receives.
+    ``metrics`` controls optional bounded canonical typed Metric storage.
+    ``None`` means canonical Metric persistence is disabled.
+
+    These fields do not change the resolved semantic Plan that the executor
+    receives.
     """
 
     environment: RunEnvironmentPolicy = field(
@@ -65,6 +73,7 @@ class ExecutionPolicy:
     logs: RunLogPolicy = field(
         default_factory=RunLogPolicy
     )
+    metrics: RunMetricPolicy | None = None
 
     def __post_init__(
         self,
@@ -83,7 +92,20 @@ class ExecutionPolicy:
             RunLogPolicy,
         ):
             raise TypeError(
-                "logs must be a RunLogPolicy"
+                "logs must be a "
+                "RunLogPolicy"
+            )
+
+        if (
+            self.metrics is not None
+            and not isinstance(
+                self.metrics,
+                RunMetricPolicy,
+            )
+        ):
+            raise TypeError(
+                "metrics must be a "
+                "RunMetricPolicy or None"
             )
 
 

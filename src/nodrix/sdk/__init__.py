@@ -10,6 +10,10 @@ from ..model import (
     ExecutionRecord,
     ExecutionState,
     MaterializedRef,
+    MetricDescriptor,
+    MetricRecord,
+    MetricValue,
+    MetricValueType,
     Operation,
     OperationKind,
     PlanKind,
@@ -24,6 +28,12 @@ from ..model import (
     superseded_by,
 )
 from ..executor_contract import PlanExecutor
+from ..metric_publisher import (
+    BoundMetric,
+    MetricPublishResult,
+    MetricPublisher,
+    MetricSink,
+)
 from ..extension_registry import ExtensionRegistry
 from ..planner_contract import (
     DefinitionResolver,
@@ -56,6 +66,7 @@ from .workflow import (
 
 __all__ = [
     "ArtifactRecord",
+    "BoundMetric",
     "CallableDefinition",
     "ComponentSpec",
     "Context",
@@ -73,6 +84,13 @@ __all__ = [
     "ExtensionRegistry",
     "Input",
     "MaterializedRef",
+    "MetricDescriptor",
+    "MetricPublishResult",
+    "MetricPublisher",
+    "MetricRecord",
+    "MetricSink",
+    "MetricValue",
+    "MetricValueType",
     "MessageDefinition",
     "NodeDefinition",
     "Operation",

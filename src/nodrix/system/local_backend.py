@@ -19,6 +19,7 @@ import threading
 from typing import TYPE_CHECKING, Any, Callable, Mapping
 from uuid import uuid4
 
+from ..metric_publisher import MetricSink
 from ..environment_materialization import materialize_environment
 from ..manifest import PipelineManifest, dump_manifest
 from ..storage_layout import StorageLayout
@@ -277,6 +278,43 @@ def _bind_runtime_execution_environment(
 
     setter(
         environment
+    )
+
+
+
+def _bind_runtime_metric_sink(
+    runtime: Any,
+    sink: MetricSink | None,
+) -> None:
+    """Bind canonical Metrics capability into a compatibility runtime."""
+
+    if sink is None:
+        return
+
+    if not isinstance(
+        sink,
+        MetricSink,
+    ):
+        raise TypeError(
+            "metric sink must implement MetricSink"
+        )
+
+    setter = getattr(
+        runtime,
+        "set_metric_sink",
+        None,
+    )
+
+    if not callable(
+        setter
+    ):
+        raise TypeError(
+            "runtime does not expose the canonical "
+            "MetricSink binding contract"
+        )
+
+    setter(
+        sink
     )
 
 
@@ -1046,6 +1084,10 @@ class LocalBackend(ExecutionBackend):
         _bind_runtime_execution_environment(
             runtime,
             execution_environment,
+        )
+        _bind_runtime_metric_sink(
+            runtime,
+            context.metric_sink,
         )
 
 

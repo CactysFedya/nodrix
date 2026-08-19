@@ -39,8 +39,12 @@ from nodrix.run_session import (
 )
 
 
-RUN_POLICY_API_VERSION = (
+RUN_POLICY_V1_API_VERSION = (
     "nodrix.execution-policy/v1"
+)
+
+RUN_POLICY_API_VERSION = (
+    "nodrix.execution-policy/v2"
 )
 
 RUN_POLICY_KIND = (
@@ -126,10 +130,9 @@ def execution_policy_document(
             "plan_id must be a non-empty string"
         )
 
-    environment = (
-        policy.environment
-    )
+    environment = policy.environment
     logs = policy.logs
+    metrics = policy.metrics
 
     return {
         "apiVersion": (
@@ -168,6 +171,24 @@ def execution_policy_document(
                 )
             ),
         },
+        "metrics": (
+            None
+            if metrics is None
+            else {
+                "maxRecords": (
+                    metrics.max_records
+                ),
+                "maxBytes": (
+                    metrics.max_bytes
+                ),
+                "maxRecordBytes": (
+                    metrics.max_record_bytes
+                ),
+                "overflow": (
+                    metrics.overflow
+                ),
+            }
+        ),
     }
 
 
@@ -352,7 +373,7 @@ def _validate_redaction(
         )
 
 
-def validate_execution_policy_document(
+def _validate_execution_policy_document_v1(
     document: Any,
     *,
     run_id: str,
@@ -384,7 +405,7 @@ def validate_execution_policy_document(
         document[
             "apiVersion"
         ]
-        != RUN_POLICY_API_VERSION
+        != RUN_POLICY_V1_API_VERSION
     ):
         raise RunPolicyCorruptionError(
             "policy.json apiVersion is unsupported"
@@ -584,6 +605,167 @@ def validate_execution_policy_document(
     return document
 
 
+
+def validate_execution_policy_document(
+    value: object,
+    *,
+    run_id: str,
+    plan_id: str,
+) -> dict[str, Any]:
+    """Validate historical v1 or current v2 policy provenance."""
+
+    if not isinstance(
+        value,
+        Mapping,
+    ):
+        raise RunPolicyCorruptionError(
+            "policy.json must contain a JSON object"
+        )
+
+    document = dict(
+        value
+    )
+
+    api_version = document.get(
+        "apiVersion"
+    )
+
+    if (
+        api_version
+        == RUN_POLICY_V1_API_VERSION
+    ):
+        return (
+            _validate_execution_policy_document_v1(
+                document,
+                run_id=run_id,
+                plan_id=plan_id,
+            )
+        )
+
+    if (
+        api_version
+        != RUN_POLICY_API_VERSION
+    ):
+        raise RunPolicyCorruptionError(
+            "policy.json has unsupported apiVersion"
+        )
+
+    expected = {
+        "apiVersion",
+        "kind",
+        "runId",
+        "planId",
+        "environment",
+        "logs",
+        "metrics",
+    }
+
+    if set(document) != expected:
+        raise RunPolicyCorruptionError(
+            "policy.json has invalid fields"
+        )
+
+    # Reuse the complete historical validation for every unchanged field.
+    legacy_document = dict(
+        document
+    )
+    metrics = legacy_document.pop(
+        "metrics"
+    )
+    legacy_document[
+        "apiVersion"
+    ] = RUN_POLICY_V1_API_VERSION
+
+    _validate_execution_policy_document_v1(
+        legacy_document,
+        run_id=run_id,
+        plan_id=plan_id,
+    )
+
+    if metrics is None:
+        return document
+
+    if not isinstance(
+        metrics,
+        Mapping,
+    ):
+        raise RunPolicyCorruptionError(
+            "policy.json metrics must be "
+            "a JSON object or null"
+        )
+
+    metric_document = dict(
+        metrics
+    )
+
+    expected_metrics = {
+        "maxRecords",
+        "maxBytes",
+        "maxRecordBytes",
+        "overflow",
+    }
+
+    if (
+        set(metric_document)
+        != expected_metrics
+    ):
+        raise RunPolicyCorruptionError(
+            "policy.json metrics has invalid fields"
+        )
+
+    for field_name in (
+        "maxRecords",
+        "maxBytes",
+        "maxRecordBytes",
+    ):
+        field_value = metric_document[
+            field_name
+        ]
+
+        if (
+            isinstance(
+                field_value,
+                bool,
+            )
+            or not isinstance(
+                field_value,
+                int,
+            )
+            or field_value <= 0
+        ):
+            raise RunPolicyCorruptionError(
+                "policy.json metrics."
+                f"{field_name} must be "
+                "a positive integer"
+            )
+
+    if (
+        metric_document[
+            "maxRecordBytes"
+        ]
+        > metric_document[
+            "maxBytes"
+        ]
+    ):
+        raise RunPolicyCorruptionError(
+            "policy.json metrics.maxRecordBytes "
+            "cannot exceed metrics.maxBytes"
+        )
+
+    if (
+        metric_document[
+            "overflow"
+        ]
+        != "drop"
+    ):
+        raise RunPolicyCorruptionError(
+            "policy.json metrics.overflow "
+            "must be 'drop'"
+        )
+
+    return document
+
+
 class RunPolicyStore:
     """Immutable policy.json storage bound to one RunSession."""
 
@@ -747,6 +929,7 @@ class RunPolicyStore:
 
 __all__ = [
     "RUN_POLICY_API_VERSION",
+    "RUN_POLICY_V1_API_VERSION",
     "RUN_POLICY_KIND",
     "RunPolicyCorruptionError",
     "RunPolicyError",

@@ -9,6 +9,12 @@ from typing import Any, Callable, Mapping
 from .cv_types import ManagedBuffer
 from .messages import Message
 from .lifecycle import LifecycleState, LifecycleTracker
+from .metric_publisher import (
+    MetricPublishResult,
+    MetricPublisher,
+    MetricSink,
+)
+from .model import MetricRecord
 
 
 @dataclass(slots=True)
@@ -26,6 +32,80 @@ class NodeContext:
         repr=False,
     )
     _output_allocator: Callable[[int, bool], ManagedBuffer] | None = None
+    _metric_sink: MetricSink | None = field(
+        default=None,
+        repr=False,
+    )
+    _metrics: MetricPublisher | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+
+    @property
+    def metrics(self) -> MetricPublisher:
+        """Return the component-facing canonical Metric publisher."""
+
+        if self._metrics is None:
+            self._metrics = MetricPublisher(
+                source=self.name,
+                sink=self._metric_sink,
+            )
+
+        return self._metrics
+
+    def _bind_metric_sink(
+        self,
+        sink: MetricSink | None,
+    ) -> None:
+        """Bind the executor-owned Metric sink before component execution."""
+
+        if (
+            sink is not None
+            and not isinstance(
+                sink,
+                MetricSink,
+            )
+        ):
+            raise TypeError(
+                "sink must implement MetricSink"
+            )
+
+        self._metric_sink = sink
+
+        # Recreate lazily so source remains immutable and components never
+        # receive direct access to the executor/storage implementation.
+        self._metrics = None
+
+    def _publish_metric_record(
+        self,
+        metric: MetricRecord,
+    ) -> MetricPublishResult:
+        """Publish one executor-reconstructed Metric for this component."""
+
+        if not isinstance(
+            metric,
+            MetricRecord,
+        ):
+            raise TypeError(
+                "metric must be a MetricRecord"
+            )
+
+        if (
+            metric.source
+            != self.name
+        ):
+            raise ValueError(
+                f"Metric source {metric.source!r} "
+                f"does not match component {self.name!r}"
+            )
+
+        return (
+            self.metrics
+            ._publish_record(  # noqa: SLF001
+                metric
+            )
+        )
 
     def allocate_buffer(self, size: int, *, readonly: bool = False) -> ManagedBuffer:
         """Allocate an output buffer from the executor-owned pool.

@@ -108,7 +108,7 @@ def test_execution_policy_is_immutable() -> None:
         )
 
 
-def test_execution_policy_v1_has_only_cross_domain_control_plane_fields() -> None:
+def test_execution_policy_has_only_cross_domain_control_plane_fields() -> None:
     names = tuple(
         item.name
         for item in fields(
@@ -119,6 +119,7 @@ def test_execution_policy_v1_has_only_cross_domain_control_plane_fields() -> Non
     assert names == (
         "environment",
         "logs",
+        "metrics",
     )
 
 
@@ -141,7 +142,6 @@ def test_execution_policy_does_not_duplicate_execution_semantics() -> None:
             "timeout",
             "resources",
             "retention",
-            "metrics",
             "artifacts",
             "events",
         }

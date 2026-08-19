@@ -125,6 +125,9 @@ def test_run_store_creates_durable_session_before_execution(
             / name
         ).exists()
 
+    # Canonical Metrics are optional and created lazily on first publish.
+    assert not session.metrics_path.exists()
+
 
 def test_run_readme_is_bilingual_and_self_describing(
     tmp_path,
@@ -165,6 +168,8 @@ def test_run_readme_is_bilingual_and_self_describing(
         "events.jsonl",
         "environment.json",
         "logs/",
+        "metrics/records.jsonl",
+        "metrics/status.json",
         "run.json",
     ):
         assert name in readme

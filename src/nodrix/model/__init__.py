@@ -11,6 +11,14 @@ from .history import (
     run_record_ref,
 )
 from .identity import EntityRef, RevisionRef
+from .metrics import (
+    METRIC_DESCRIPTOR_IDENTITY_SCHEMA,
+    MetricDescriptor,
+    MetricRecord,
+    MetricValue,
+    MetricValueType,
+    canonical_metric_descriptor_id,
+)
 from .operations import (
     BENCHMARK,
     OPTIMIZE,
@@ -90,6 +98,11 @@ __all__ = [
     "EntityRef",
     "ExecutionRecord",
     "ExecutionState",
+    "METRIC_DESCRIPTOR_IDENTITY_SCHEMA",
+    "MetricDescriptor",
+    "MetricRecord",
+    "MetricValue",
+    "MetricValueType",
     "MaterializedRef",
     "Operation",
     "OperationKind",
@@ -116,6 +129,7 @@ __all__ = [
     "TEST",
     "VALIDATE",
     "WORKFLOW",
+    "canonical_metric_descriptor_id",
     "canonical_plan_id",
     "combine_provenance",
     "execution_record_ref",

@@ -4,14 +4,22 @@ from pathlib import Path
 import subprocess
 
 import numpy as np
+import pytest
 import yaml
 
 from nodrix import Message, SharedBufferPool
 from nodrix.cv_types import EncodedFrame, Frame, ManagedBuffer, MediaCodec, PixelFormat
 from nodrix.hybrid_runtime import HybridPipelineRuntime
 from nodrix.manifest import load_manifest
+from nodrix.metric_publisher import (
+    MetricPublishResult,
+)
+from nodrix.model import MetricRecord
 from nodrix.node import NodeContext
-from nodrix.process_host import ProcessNodeProxy
+from nodrix.process_host import (
+    ProcessNodeError,
+    ProcessNodeProxy,
+)
 from nodrix.recording import NdrxReader, NdrxWriter
 from nodrix.shared_memory import descriptor_for_buffer, open_shared_buffer
 from nodrix.viewer import FFmpegAccessUnitDecoder, LatestSlot
@@ -191,3 +199,423 @@ def test_ffmpeg_encoder_outputs_valid_annex_b(tmp_path: Path) -> None:
     info = probe_media(str(path), input_format="h264")
     assert info["video"]["codec"] == "h264"
     assert info["video"]["width"] == 64
+
+
+class _CollectingMetricSink:
+    def __init__(self) -> None:
+        self.records: list[
+            MetricRecord
+        ] = []
+
+    def publish(
+        self,
+        metric: MetricRecord,
+    ) -> MetricPublishResult:
+        self.records.append(
+            metric
+        )
+
+        return MetricPublishResult(
+            accepted=True
+        )
+
+
+def test_process_node_publishes_canonical_metric_to_parent(
+    tmp_path: Path,
+) -> None:
+    reference = _write_node(
+        tmp_path / "metric_worker.py",
+        """
+from nodrix import Message, Node
+
+class Worker(Node):
+    input_types = {"input": "core.object"}
+    output_types = {"output": "core.object"}
+
+    def process(self, inputs):
+        result = self.context.metrics.observe(
+            "worker.items",
+            1,
+            value_type="integer",
+            unit="count",
+            attributes={"phase": "process"},
+        )
+        return {
+            "output": Message(
+                type="core.object",
+                payload={
+                    "accepted": result.accepted,
+                    "reason": result.reason,
+                },
+            )
+        }
+""",
+    )
+
+    proxy = ProcessNodeProxy(
+        name="worker",
+        uses=reference,
+        base_dir=tmp_path,
+        parameters={},
+        input_types={
+            "input": "core.object",
+        },
+        output_types={
+            "output": "core.object",
+        },
+        block_size=4096,
+        capacity=2,
+        threshold=16,
+        failure_policy="stop_pipeline",
+        max_restarts=0,
+        backoff_ms=0,
+        cpu_affinity=[],
+    )
+
+    sink = _CollectingMetricSink()
+
+    context = NodeContext(
+        "worker",
+        tmp_path,
+        tmp_path,
+        "offline",
+    )
+
+    context._bind_metric_sink(  # noqa: SLF001
+        sink
+    )
+
+    proxy.open(
+        context
+    )
+
+    try:
+        output = proxy.process(
+            {
+                "input": Message(
+                    type="core.object",
+                    payload={
+                        "value": 1
+                    },
+                )
+            }
+        )
+    finally:
+        proxy.close()
+
+    assert output is not None
+
+    assert output[
+        "output"
+    ].payload == {
+        "accepted": True,
+        "reason": None,
+    }
+
+    assert len(
+        sink.records
+    ) == 1
+
+    metric = sink.records[0]
+
+    assert (
+        metric.name
+        == "worker.items"
+    )
+    assert metric.value == 1
+    assert metric.source == "worker"
+    assert dict(
+        metric.attributes
+    ) == {
+        "phase": "process",
+    }
+
+
+def test_process_node_receives_disabled_metric_result(
+    tmp_path: Path,
+) -> None:
+    reference = _write_node(
+        tmp_path / "disabled_metric_worker.py",
+        """
+from nodrix import Message, Node
+
+class Worker(Node):
+    input_types = {"input": "core.object"}
+    output_types = {"output": "core.object"}
+
+    def process(self, inputs):
+        result = self.context.metrics.observe(
+            "worker.items",
+            1,
+            value_type="integer",
+            unit="count",
+        )
+        return {
+            "output": Message(
+                type="core.object",
+                payload={
+                    "accepted": result.accepted,
+                    "reason": result.reason,
+                },
+            )
+        }
+""",
+    )
+
+    proxy = ProcessNodeProxy(
+        name="worker",
+        uses=reference,
+        base_dir=tmp_path,
+        parameters={},
+        input_types={
+            "input": "core.object",
+        },
+        output_types={
+            "output": "core.object",
+        },
+        block_size=4096,
+        capacity=2,
+        threshold=16,
+        failure_policy="stop_pipeline",
+        max_restarts=0,
+        backoff_ms=0,
+        cpu_affinity=[],
+    )
+
+    proxy.open(
+        NodeContext(
+            "worker",
+            tmp_path,
+            tmp_path,
+            "offline",
+        )
+    )
+
+    try:
+        output = proxy.process(
+            {
+                "input": Message(
+                    type="core.object",
+                    payload={},
+                )
+            }
+        )
+    finally:
+        proxy.close()
+
+    assert output is not None
+
+    assert output[
+        "output"
+    ].payload == {
+        "accepted": False,
+        "reason": "disabled",
+    }
+
+
+def test_process_metric_source_cannot_impersonate_another_node(
+    tmp_path: Path,
+) -> None:
+    reference = _write_node(
+        tmp_path / "spoof_metric_worker.py",
+        """
+from nodrix import Node
+
+class Worker(Node):
+    input_types = {"input": "core.object"}
+    output_types = {}
+
+    def process(self, inputs):
+        self.context.metrics._source = "other-node"
+        self.context.metrics.observe(
+            "worker.items",
+            1,
+            value_type="integer",
+            unit="count",
+        )
+        return None
+""",
+    )
+
+    proxy = ProcessNodeProxy(
+        name="worker",
+        uses=reference,
+        base_dir=tmp_path,
+        parameters={},
+        input_types={
+            "input": "core.object",
+        },
+        output_types={},
+        block_size=4096,
+        capacity=2,
+        threshold=16,
+        failure_policy="stop_pipeline",
+        max_restarts=0,
+        backoff_ms=0,
+        cpu_affinity=[],
+    )
+
+    sink = _CollectingMetricSink()
+
+    context = NodeContext(
+        "worker",
+        tmp_path,
+        tmp_path,
+        "offline",
+    )
+
+    context._bind_metric_sink(  # noqa: SLF001
+        sink
+    )
+
+    proxy.open(
+        context
+    )
+
+    try:
+        with pytest.raises(
+            ProcessNodeError,
+            match="Metric source",
+        ):
+            proxy.process(
+                {
+                    "input": Message(
+                        type="core.object",
+                        payload={},
+                    )
+                }
+            )
+    finally:
+        proxy.close()
+
+    assert sink.records == []
+
+
+def test_hybrid_runtime_injects_canonical_metric_sink_without_owning_storage(
+    tmp_path: Path,
+) -> None:
+    reference = _write_node(
+        tmp_path / "hybrid_metric_worker.py",
+        """
+from nodrix import Node
+
+class Worker(Node):
+    input_types = {"input": "core.object"}
+    output_types = {"output": "core.object"}
+
+    def process(self, inputs):
+        result = self.context.metrics.observe(
+            "worker.processed",
+            1,
+            value_type="integer",
+            unit="count",
+        )
+        assert result.accepted
+        return {"output": inputs["input"]}
+""",
+    )
+
+    pipeline = (
+        tmp_path
+        / "metric-pipeline.yaml"
+    )
+
+    pipeline.write_text(
+        yaml.safe_dump(
+            {
+                "apiVersion": "nodrix.dev/v1",
+                "kind": "Pipeline",
+                "metadata": {
+                    "name": "canonical-metric-plumbing",
+                },
+                "nodes": {
+                    "source": {
+                        "uses": "core.synthetic_source",
+                        "parameters": {
+                            "count": 1,
+                        },
+                    },
+                    "worker": {
+                        "uses": reference,
+                    },
+                    "sink": {
+                        "uses": "core.counter_sink",
+                    },
+                },
+                "edges": [
+                    {
+                        "from": "source.output",
+                        "to": "worker.input",
+                    },
+                    {
+                        "from": "worker.output",
+                        "to": "sink.input",
+                    },
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    legacy_run_root = (
+        tmp_path
+        / "legacy-runs"
+    )
+
+    runtime = HybridPipelineRuntime(
+        load_manifest(
+            pipeline
+        ),
+        pipeline,
+        run_root=legacy_run_root,
+    )
+
+    metric_sink = (
+        _CollectingMetricSink()
+    )
+
+    runtime.set_metric_sink(
+        metric_sink
+    )
+
+    runtime.build()
+
+    report = runtime.run_sync()
+
+    assert (
+        report["status"]
+        == "completed"
+    )
+
+    assert len(
+        metric_sink.records
+    ) == 1
+
+    metric = (
+        metric_sink.records[0]
+    )
+
+    assert (
+        metric.name
+        == "worker.processed"
+    )
+    assert metric.value == 1
+    assert metric.source == "worker"
+
+    legacy_runs = tuple(
+        legacy_run_root.iterdir()
+    )
+
+    assert len(
+        legacy_runs
+    ) == 1
+
+    # Hybrid remains a compatibility executor.  It must not fabricate a
+    # canonical RunSession or canonical Metric journal inside its own legacy
+    # runtime directory.
+    assert not (
+        legacy_runs[0]
+        / "metrics"
+        / "records.jsonl"
+    ).exists()

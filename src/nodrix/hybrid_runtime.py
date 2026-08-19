@@ -12,6 +12,7 @@ import threading
 import time
 from typing import Any, Callable
 
+from .metric_publisher import MetricSink
 from .manifest import (
     PipelineManifest,
     external_transport_bindings,
@@ -101,6 +102,7 @@ class HybridPipelineRuntime(
         self._recording_writer: Any | None = None
         self._recording_streams = set(self.manifest.recording.streams)
         self._metrics_recorder: MetricsRecorder | None = None
+        self._canonical_metric_sink: MetricSink | None = None
         self._worker_threads: list[threading.Thread] = []
         self._watchdog_thread: threading.Thread | None = None
         self._built = False
@@ -166,6 +168,30 @@ class HybridPipelineRuntime(
             )
         )
 
+    def set_metric_sink(
+        self,
+        sink: MetricSink | None,
+    ) -> None:
+        """Bind an executor-owned canonical Metric sink before runtime build."""
+
+        if self._built:
+            raise RuntimeError(
+                "Metric sink must be bound before runtime build"
+            )
+
+        if (
+            sink is not None
+            and not isinstance(
+                sink,
+                MetricSink,
+            )
+        ):
+            raise TypeError(
+                "sink must implement MetricSink"
+            )
+
+        self._canonical_metric_sink = sink
+
     def _lock_execution_environment(
         self,
     ) -> None:
@@ -224,6 +250,9 @@ class HybridPipelineRuntime(
                     if str(link["from"]).split(".", 1)[0] == loaded.name
                     or str(link["to"]).split(".", 1)[0] == loaded.name
                 ),
+            )
+            context._bind_metric_sink(  # noqa: SLF001
+                self._canonical_metric_sink
             )
             bridge.resolve(loaded.node.configure(context))
             loaded.node._lifecycle.transition(LifecycleState.READY)

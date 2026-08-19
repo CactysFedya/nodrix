@@ -37,6 +37,10 @@ from nodrix.run_logs import (
     RunLogPolicy,
     RunLogStore,
 )
+from nodrix.run_metrics import (
+    RunMetricJournal,
+    RunMetricSink,
+)
 from nodrix.run_record import (
     RunRecordStore,
 )
@@ -750,6 +754,14 @@ def start_canonical_system_execution(
     )
 
     if (
+        effective_policy.metrics is not None
+        and run_store is None
+    ):
+        raise ValueError(
+            "canonical Metrics require a persistent RunStore"
+        )
+
+    if (
         run_store is not None
         and system_definition is None
     ):
@@ -1041,9 +1053,25 @@ def start_canonical_system_execution(
 
             raise
 
+    metric_sink = None
+
+    if effective_policy.metrics is not None:
+        if run_session is None:
+            raise RuntimeError(
+                "canonical Metric policy requires RunSession"
+            )
+
+        metric_sink = RunMetricSink(
+            RunMetricJournal(
+                run_session,
+                policy=effective_policy.metrics,
+            )
+        )
+
     try:
         prepared = orchestrator.prepare_plan(
-            domain_plan
+            domain_plan,
+            metric_sink=metric_sink,
         )
     except Exception as exc:
         try:

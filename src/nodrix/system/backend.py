@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from enum import Enum, StrEnum
 from typing import Any, Iterable, Literal, Mapping
 
+from ..metric_publisher import MetricSink
 from ..errors import NodrixError
 from .execution_context import (
     SystemExecutionContext,
@@ -121,6 +122,11 @@ class BackendContext:
     execution_context: SystemExecutionContext | None = field(
         default=None,
         repr=False,
+    )
+    metric_sink: MetricSink | None = field(
+        default=None,
+        repr=False,
+        compare=False,
     )
     targets: tuple[PlannedTarget, ...] = ()
     system_parameters: Mapping[str, Any] = field(

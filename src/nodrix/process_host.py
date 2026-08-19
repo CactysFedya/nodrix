@@ -12,6 +12,16 @@ from typing import Any, Iterator, Mapping
 
 from .cv_types import EncodedFrame, Frame, ManagedBuffer, MemoryType, Tensor
 from .messages import Message
+from .metric_publisher import (
+    MetricPublishResult,
+)
+from .metric_wire import (
+    metric_from_publication_document,
+    metric_publication_document,
+    metric_publication_result_document,
+    metric_publish_result_from_document,
+)
+from .model import MetricRecord
 from .node import Node, NodeContext, SourceNode
 from .registry import load_node_class
 from .shared_memory import (
@@ -301,7 +311,55 @@ def _install_child_environment(
     )
 
 
-def _child_main(connection: Connection, config: dict[str, Any]) -> None:
+class _ProcessMetricSink:
+    """Synchronous child-side Metric transport over a dedicated Pipe."""
+
+    def __init__(
+        self,
+        connection: Connection,
+    ) -> None:
+        self._connection = connection
+        self._lock = threading.Lock()
+
+    def publish(
+        self,
+        metric: MetricRecord,
+    ) -> MetricPublishResult:
+        if not isinstance(
+            metric,
+            MetricRecord,
+        ):
+            raise TypeError(
+                "metric must be a MetricRecord"
+            )
+
+        request = (
+            metric_publication_document(
+                metric
+            )
+        )
+
+        with self._lock:
+            self._connection.send(
+                request
+            )
+
+            response = (
+                self._connection.recv()
+            )
+
+        return (
+            metric_publish_result_from_document(
+                response
+            )
+        )
+
+
+def _child_main(
+    connection: Connection,
+    metric_connection: Connection,
+    config: dict[str, Any],
+) -> None:
     node: Node | None = None
     producer: Any = None
     context: NodeContext | None = None
@@ -320,6 +378,11 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
             environment=dict(os.environ),
             device=config.get("device", "auto"),
             external_links=tuple(config.get("external_links") or ()),
+        )
+        context._bind_metric_sink(  # noqa: SLF001
+            _ProcessMetricSink(
+                metric_connection
+            )
         )
         node.configure(context)
         affinity = config.get("cpu_affinity") or []
@@ -434,6 +497,7 @@ def _child_main(connection: Connection, config: dict[str, Any]) -> None:
             pass
     finally:
         connection.close()
+        metric_connection.close()
 
 
 class ProcessNodeError(RuntimeError):
@@ -498,6 +562,9 @@ class ProcessNodeProxy(Node):
         self._ctx = mp.get_context("spawn")
         self._process: mp.Process | None = None
         self._connection: Connection | None = None
+        self._metric_connection: Connection | None = None
+        self._metric_thread: threading.Thread | None = None
+        self._metric_stop = threading.Event()
         self._restart_lock = threading.RLock()
         self._generation = 0
         self.restarts = 0
@@ -515,6 +582,9 @@ class ProcessNodeProxy(Node):
         if self.context is None:
             raise RuntimeError("ProcessNodeProxy has no NodeContext")
         parent, child = self._ctx.Pipe(duplex=True)
+        metric_parent, metric_child = self._ctx.Pipe(
+            duplex=True
+        )
         config = {
             "name": self.name,
             "uses": self.uses,
@@ -537,11 +607,35 @@ class ProcessNodeProxy(Node):
                 dict(item) for item in self.context.external_links
             ],
         }
-        process = self._ctx.Process(target=_child_main, args=(child, config), name=f"nodrix-process:{self.name}")
+        process = self._ctx.Process(
+            target=_child_main,
+            args=(
+                child,
+                metric_child,
+                config,
+            ),
+            name=(
+                f"nodrix-process:{self.name}"
+            ),
+        )
         process.start()
         child.close()
+        metric_child.close()
         self._process = process
         self._connection = parent
+        self._metric_connection = (
+            metric_parent
+        )
+        self._metric_stop.clear()
+        self._metric_thread = threading.Thread(
+            target=self._metric_receiver_loop,
+            args=(metric_parent,),
+            name=(
+                f"nodrix-metrics:{self.name}"
+            ),
+            daemon=True,
+        )
+        self._metric_thread.start()
         self._generation += 1
         if not parent.poll(15.0):
             self._terminate()
@@ -552,10 +646,102 @@ class ProcessNodeProxy(Node):
             raise ProcessNodeError(response.get("error", "isolated node startup failed"))
         self._runtime_info = dict(response.get("runtime_info") or {})
 
+    def _metric_receiver_loop(
+        self,
+        connection: Connection,
+    ) -> None:
+        """Publish child Metrics through the parent-owned Metric sink."""
+
+        while not self._metric_stop.is_set():
+            try:
+                if not connection.poll(
+                    0.1
+                ):
+                    continue
+
+                request = (
+                    connection.recv()
+                )
+            except (
+                EOFError,
+                BrokenPipeError,
+                OSError,
+            ):
+                return
+
+            try:
+                metric = (
+                    metric_from_publication_document(
+                        request
+                    )
+                )
+
+                if (
+                    metric.source
+                    != self.name
+                ):
+                    raise ValueError(
+                        f"Metric source {metric.source!r} "
+                        f"does not match isolated node "
+                        f"{self.name!r}"
+                    )
+
+                if self.context is None:
+                    raise RuntimeError(
+                        "ProcessNodeProxy has no "
+                        "parent NodeContext"
+                    )
+
+                result = (
+                    self.context
+                    ._publish_metric_record(  # noqa: SLF001
+                        metric
+                    )
+                )
+
+                response = (
+                    metric_publication_result_document(
+                        result
+                    )
+                )
+            except Exception as exc:
+                response = (
+                    metric_publication_result_document(
+                        error=(
+                            f"{type(exc).__name__}: "
+                            f"{exc}"
+                        )
+                    )
+                )
+
+            try:
+                connection.send(
+                    response
+                )
+            except (
+                EOFError,
+                BrokenPipeError,
+                OSError,
+            ):
+                return
+
     def _terminate(self) -> None:
         if self._connection is not None:
             self._connection.close()
             self._connection = None
+
+        self._metric_stop.set()
+
+        if self._metric_connection is not None:
+            self._metric_connection.close()
+            self._metric_connection = None
+
+        if self._metric_thread is not None:
+            self._metric_thread.join(
+                timeout=1.0
+            )
+            self._metric_thread = None
+
         if self._process is not None:
             if self._process.is_alive():
                 self._process.terminate()
