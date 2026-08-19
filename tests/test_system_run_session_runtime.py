@@ -6,6 +6,9 @@ import json
 
 import pytest
 
+from nodrix.execution_policy import (
+    ExecutionPolicy,
+)
 from nodrix.run_events import RunEventJournal
 from nodrix.redaction import (
     DEFAULT_REDACTION_MARKER,
@@ -16,6 +19,9 @@ from nodrix.run_environment import (
 )
 from nodrix.run_logs import (
     RunLogPolicy,
+)
+from nodrix.run_policy import (
+    RunPolicyStore,
 )
 from nodrix.run_record import RunRecordStore
 from nodrix.run_recovery import (
@@ -2665,4 +2671,713 @@ def test_real_events_recover_running_state_when_status_cache_is_missing(
         orchestrator,
         execution,
         clock=_clock,
+    )
+
+
+
+def test_runtime_accepts_explicit_default_execution_policy(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_explicit_default_execution_policy"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            execution_policy=ExecutionPolicy(),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.environment_store
+        is not None
+    )
+    assert (
+        execution.log_store
+        is not None
+    )
+
+    environment = (
+        execution.environment_store
+        .read()
+    )
+
+    assert environment is not None
+    assert environment["variables"] == {}
+
+    assert (
+        execution.log_store
+        .policy
+        .enabled
+        is False
+    )
+
+
+def test_runtime_execution_policy_controls_environment_and_logs(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_unified_execution_policy"
+    )
+
+    monkeypatch.setenv(
+        "NODRIX_POLICY_MODE",
+        "debug",
+    )
+
+    environment_policy = (
+        RunEnvironmentPolicy(
+            variables=(
+                "NODRIX_POLICY_MODE",
+            ),
+        )
+    )
+
+    log_policy = RunLogPolicy(
+        enabled=True,
+        min_level="info",
+        categories=(
+            "sdk",
+        ),
+    )
+
+    policy = ExecutionPolicy(
+        environment=environment_policy,
+        logs=log_policy,
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            execution_policy=policy,
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.environment_store
+        is not None
+    )
+    assert (
+        execution.log_store
+        is not None
+    )
+
+    environment = (
+        execution.environment_store
+        .read()
+    )
+
+    assert environment is not None
+    assert (
+        environment["variables"][
+            "NODRIX_POLICY_MODE"
+        ]
+        == "debug"
+    )
+
+    assert (
+        execution.log_store
+        .policy
+        is log_policy
+    )
+
+    assert execution.log_store.write(
+        "sdk.policy",
+        "info",
+        "unified policy is active",
+        recorded_at=NOW,
+    )
+
+    assert not execution.log_store.write(
+        "executor.local",
+        "error",
+        "category remains filtered",
+        recorded_at=NOW,
+    )
+
+
+def test_legacy_environment_and_log_policy_arguments_remain_compatible(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_legacy_execution_policy_compat"
+    )
+
+    monkeypatch.setenv(
+        "NODRIX_LEGACY_MODE",
+        "compat",
+    )
+
+    log_policy = RunLogPolicy(
+        enabled=True,
+        min_level="warning",
+        categories=(
+            "legacy",
+        ),
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            ("host", "local"): backend,
+        }
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            environment_policy=(
+                RunEnvironmentPolicy(
+                    variables=(
+                        "NODRIX_LEGACY_MODE",
+                    ),
+                )
+            ),
+            log_policy=log_policy,
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.environment_store
+        is not None
+    )
+    assert (
+        execution.log_store
+        is not None
+    )
+
+    environment = (
+        execution.environment_store
+        .read()
+    )
+
+    assert environment is not None
+    assert (
+        environment["variables"][
+            "NODRIX_LEGACY_MODE"
+        ]
+        == "compat"
+    )
+
+    assert (
+        execution.log_store
+        .policy
+        is log_policy
+    )
+
+    assert execution.log_store.write(
+        "legacy.adapter",
+        "warning",
+        "legacy policy compatibility",
+        recorded_at=NOW,
+    )
+
+
+def test_runtime_rejects_mixed_unified_and_legacy_policy_arguments(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            (
+                "host",
+                "local",
+            ): ObservingBackend(
+                expected_run_directory=(
+                    root / "unused"
+                ),
+            ),
+        }
+    )
+
+    conflicts = (
+        {
+            "environment_policy":
+                RunEnvironmentPolicy(),
+        },
+        {
+            "log_policy":
+                RunLogPolicy(
+                    enabled=True
+                ),
+        },
+    )
+
+    for index, conflict in enumerate(
+        conflicts,
+        start=1,
+    ):
+        run_id = (
+            f"run_policy_conflict_{index}"
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=(
+                "execution_policy cannot be combined "
+                "with environment_policy or log_policy"
+            ),
+        ):
+            start_canonical_system_execution(
+                orchestrator,
+                _plan(),
+                system_definition=_system(),
+                execution_policy=ExecutionPolicy(),
+                run_store=RunStore(
+                    root,
+                    clock=_clock,
+                ),
+                run_id=run_id,
+                clock=_clock,
+                **conflict,
+            )
+
+        # Conflict validation happens before Run identity
+        # or backend preparation is created.
+        assert not (
+            root / run_id
+        ).exists()
+
+
+
+def test_runtime_persists_unified_execution_policy(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_persisted_execution_policy"
+    )
+
+    monkeypatch.setenv(
+        "NODRIX_POLICY_TEST",
+        "enabled",
+    )
+
+    policy = ExecutionPolicy(
+        environment=(
+            RunEnvironmentPolicy(
+                variables=(
+                    "NODRIX_POLICY_TEST",
+                ),
+            )
+        ),
+        logs=RunLogPolicy(
+            enabled=True,
+            min_level="info",
+            categories=(
+                "sdk",
+                "mapping",
+            ),
+            max_bytes=4096,
+            max_category_bytes=2048,
+            max_record_bytes=1024,
+            overflow="drop",
+        ),
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            system_definition=_system(),
+            execution_policy=policy,
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.policy_store
+        is not None
+    )
+
+    document = (
+        execution.policy_store
+        .read()
+    )
+
+    assert document is not None
+
+    assert (
+        document["runId"]
+        == run_id
+    )
+
+    assert (
+        document["planId"]
+        == execution.plan.plan_id
+    )
+
+    assert (
+        document["environment"][
+            "variables"
+        ]
+        == [
+            "NODRIX_POLICY_TEST",
+        ]
+    )
+
+    assert (
+        document["logs"][
+            "enabled"
+        ]
+        is True
+    )
+
+    assert (
+        document["logs"][
+            "categories"
+        ]
+        == [
+            "mapping",
+            "sdk",
+        ]
+    )
+
+    assert (
+        root
+        / run_id
+        / "policy.json"
+    ).is_file()
+
+
+def test_runtime_persists_effective_legacy_policy(
+    tmp_path,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_persisted_legacy_policy"
+    )
+
+    legacy_environment = (
+        RunEnvironmentPolicy(
+            variables=(
+                "RMW_IMPLEMENTATION",
+                "ROS_DOMAIN_ID",
+            ),
+        )
+    )
+
+    legacy_logs = RunLogPolicy(
+        enabled=True,
+        min_level="warning",
+        categories=(
+            "legacy",
+        ),
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    execution = (
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            system_definition=_system(),
+            environment_policy=(
+                legacy_environment
+            ),
+            log_policy=legacy_logs,
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+    )
+
+    assert (
+        execution.policy_store
+        is not None
+    )
+
+    document = (
+        execution.policy_store
+        .read()
+    )
+
+    assert document is not None
+
+    assert (
+        document["environment"][
+            "variables"
+        ]
+        == [
+            "RMW_IMPLEMENTATION",
+            "ROS_DOMAIN_ID",
+        ]
+    )
+
+    assert (
+        document["logs"][
+            "enabled"
+        ]
+        is True
+    )
+
+    assert (
+        document["logs"][
+            "categories"
+        ]
+        == [
+            "legacy",
+        ]
+    )
+
+
+def test_policy_publication_failure_prevents_backend_prepare(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    root = (
+        tmp_path
+        / "runs"
+    )
+
+    run_id = (
+        "run_policy_storage_failure"
+    )
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    orchestrator = SystemOrchestrator(
+        {
+            (
+                "host",
+                "local",
+            ): backend,
+        }
+    )
+
+    def fail_policy_create(
+        self,
+    ):
+        raise OSError(
+            "synthetic policy storage failure"
+        )
+
+    monkeypatch.setattr(
+        RunPolicyStore,
+        "create",
+        fail_policy_create,
+    )
+
+    with pytest.raises(
+        OSError,
+        match=(
+            "synthetic policy storage failure"
+        ),
+    ):
+        start_canonical_system_execution(
+            orchestrator,
+            _plan(),
+            system_definition=_system(),
+            execution_policy=(
+                ExecutionPolicy()
+            ),
+            run_store=RunStore(
+                root,
+                clock=_clock,
+            ),
+            run_id=run_id,
+            clock=_clock,
+        )
+
+    # Run identity and exact snapshots already exist as evidence.
+    run_directory = (
+        root / run_id
+    )
+
+    assert run_directory.is_dir()
+
+    assert (
+        run_directory
+        / "session.json"
+    ).is_file()
+
+    assert (
+        run_directory
+        / "definition.json"
+    ).is_file()
+
+    assert (
+        run_directory
+        / "plan.json"
+    ).is_file()
+
+    # Policy publication failed before environment provenance
+    # and before backend preparation.
+    assert not (
+        run_directory
+        / "policy.json"
+    ).exists()
+
+    assert not (
+        run_directory
+        / "environment.json"
+    ).exists()
+
+    assert (
+        backend.prepare_observed_run
+        is False
+    )
+
+    status = json.loads(
+        (
+            run_directory
+            / "status.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        status["state"]
+        == "failed"
+    )
+
+    assert (
+        status["details"][
+            "stage"
+        ]
+        == "policy"
+    )
+
+    events = [
+        json.loads(line)
+        for line in (
+            run_directory
+            / "events.jsonl"
+        ).read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+
+    assert any(
+        item[
+            "event"
+        ][
+            "details"
+        ].get(
+            "stage"
+        )
+        == "policy"
+        for item in events
     )

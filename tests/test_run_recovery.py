@@ -722,3 +722,255 @@ def test_final_run_reversed_execution_interval_is_corruption(
         issue.code == "REC610"
         for issue in report.issues
     )
+
+
+
+def _upgrade_to_v2(
+    directory: Path,
+    *,
+    with_policy: bool = True,
+) -> None:
+    session_path = (
+        directory
+        / "session.json"
+    )
+
+    session = json.loads(
+        session_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    session[
+        "layout"
+    ] = "nodrix.run-layout/v2"
+
+    _write_json(
+        session_path,
+        session,
+    )
+
+    if not with_policy:
+        return
+
+    _write_json(
+        directory
+        / "policy.json",
+        {
+            "apiVersion": (
+                "nodrix.execution-policy/v1"
+            ),
+            "kind": (
+                "ExecutionPolicy"
+            ),
+            "runId": RUN_ID,
+            "planId": PLAN_ID,
+            "environment": {
+                "variables": [],
+                "redaction": {
+                    "sensitiveKeyTokens": [],
+                    "marker": "[REDACTED]",
+                    "secretValues": {
+                        "configured": False,
+                        "count": 0,
+                        "persisted": False,
+                    },
+                },
+            },
+            "logs": {
+                "enabled": False,
+                "minLevel": "warning",
+                "categories": [],
+                "maxBytes": 4194304,
+                "maxCategoryBytes": 1048576,
+                "maxRecordBytes": 65536,
+                "overflow": "drop",
+                "redaction": {
+                    "sensitiveKeyTokens": [],
+                    "marker": "[REDACTED]",
+                    "secretValues": {
+                        "configured": False,
+                        "count": 0,
+                        "persisted": False,
+                    },
+                },
+            },
+        },
+    )
+
+
+def test_legacy_v1_run_remains_recoverable_without_policy(
+    tmp_path,
+) -> None:
+    directory = _base_run(
+        tmp_path
+    )
+
+    _write_events(
+        directory
+    )
+
+    _write_status(
+        directory,
+        state="completed",
+        execution_id="exec-1",
+    )
+
+    _write_final(
+        directory
+    )
+
+    assert not (
+        directory
+        / "policy.json"
+    ).exists()
+
+    report = inspect_run_directory(
+        directory
+    )
+
+    assert (
+        report.classification
+        == HEALTHY_TERMINAL
+    )
+
+    assert not any(
+        issue.code == "REC107"
+        for issue in report.issues
+    )
+
+
+def test_v2_run_with_valid_policy_is_healthy(
+    tmp_path,
+) -> None:
+    directory = _base_run(
+        tmp_path
+    )
+
+    _upgrade_to_v2(
+        directory
+    )
+
+    _write_events(
+        directory
+    )
+
+    _write_status(
+        directory,
+        state="completed",
+        execution_id="exec-1",
+    )
+
+    _write_final(
+        directory
+    )
+
+    report = inspect_run_directory(
+        directory
+    )
+
+    assert (
+        report.classification
+        == HEALTHY_TERMINAL
+    )
+
+    assert not report.corrupted
+
+
+def test_v2_run_without_policy_is_incomplete(
+    tmp_path,
+) -> None:
+    directory = _base_run(
+        tmp_path
+    )
+
+    _upgrade_to_v2(
+        directory,
+        with_policy=False,
+    )
+
+    _write_events(
+        directory
+    )
+
+    _write_status(
+        directory,
+        state="completed",
+        execution_id="exec-1",
+    )
+
+    _write_final(
+        directory
+    )
+
+    report = inspect_run_directory(
+        directory
+    )
+
+    assert (
+        report.classification
+        == INCOMPLETE
+    )
+
+    assert any(
+        issue.code == "REC107"
+        and issue.path == "policy.json"
+        for issue in report.issues
+    )
+
+
+def test_v2_run_with_mismatched_policy_identity_is_corrupted(
+    tmp_path,
+) -> None:
+    directory = _base_run(
+        tmp_path
+    )
+
+    _upgrade_to_v2(
+        directory
+    )
+
+    policy_path = (
+        directory
+        / "policy.json"
+    )
+
+    policy = json.loads(
+        policy_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    policy[
+        "runId"
+    ] = "run_other"
+
+    _write_json(
+        policy_path,
+        policy,
+    )
+
+    _write_events(
+        directory
+    )
+
+    _write_status(
+        directory,
+        state="running",
+        execution_id="exec-1",
+    )
+
+    report = inspect_run_directory(
+        directory
+    )
+
+    assert (
+        report.classification
+        == CORRUPTED
+    )
+
+    assert any(
+        issue.code == "REC410"
+        and issue.path == "policy.json"
+        for issue in report.issues
+    )

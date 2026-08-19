@@ -25,9 +25,14 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
+from nodrix.run_policy import (
+    RunPolicyCorruptionError,
+    validate_execution_policy_document,
+)
 from nodrix.run_session import (
     RUN_LAYOUT_SCHEMA,
     RUN_SESSION_SCHEMA,
+    SUPPORTED_RUN_LAYOUT_SCHEMAS,
 )
 
 
@@ -74,6 +79,7 @@ _INCOMPLETE_CODES = {
     "REC104",
     "REC105",
     "REC106",
+    "REC107",
 }
 
 
@@ -793,9 +799,13 @@ def inspect_run_directory(
                 "session.schema is unsupported"
             )
 
+        layout = session.get(
+            "layout"
+        )
+
         if (
-            session.get("layout")
-            != RUN_LAYOUT_SCHEMA
+            layout
+            not in SUPPORTED_RUN_LAYOUT_SCHEMAS
         ):
             raise ValueError(
                 "session.layout is unsupported"
@@ -915,6 +925,46 @@ def inspect_run_directory(
         missing_code="REC102",
         issues=issues,
     )
+
+    if layout == RUN_LAYOUT_SCHEMA:
+        policy_path = (
+            path
+            / "policy.json"
+        )
+
+        if not policy_path.is_file():
+            _add(
+                issues,
+                "warning",
+                "REC107",
+                "policy.json",
+                (
+                    "Run layout v2 requires "
+                    "immutable ExecutionPolicy provenance"
+                ),
+            )
+        else:
+            try:
+                policy = _load_json(
+                    policy_path
+                )
+
+                validate_execution_policy_document(
+                    policy,
+                    run_id=run_id,
+                    plan_id=plan_id,
+                )
+            except (
+                ValueError,
+                RunPolicyCorruptionError,
+            ) as exc:
+                _add(
+                    issues,
+                    "error",
+                    "REC410",
+                    "policy.json",
+                    str(exc),
+                )
 
     environment = _load_optional(
         path,

@@ -27,7 +27,14 @@ from nodrix.model import PlanRecord
 
 
 RUN_SESSION_SCHEMA = "nodrix.run-session/v1"
-RUN_LAYOUT_SCHEMA = "nodrix.run-layout/v1"
+
+RUN_LAYOUT_SCHEMA_V1 = "nodrix.run-layout/v1"
+RUN_LAYOUT_SCHEMA = "nodrix.run-layout/v2"
+
+SUPPORTED_RUN_LAYOUT_SCHEMAS = (
+    RUN_LAYOUT_SCHEMA_V1,
+    RUN_LAYOUT_SCHEMA,
+)
 
 _RUN_ID_RE = re.compile(
     r"^run_[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
@@ -255,6 +262,7 @@ stage was reached.
 | `session.json` | Immutable Run session header: Run ID, creation time and exact Plan identity. Created before execution starts. |
 | `definition.json` | Immutable canonical Definition snapshot whose revision is the exact System revision referenced by the Run Plan. |
 | `plan.json` | Immutable exact resolved Plan snapshot, including effective parameters, placement, bindings, nested Systems and execution topology. |
+| `policy.json` | Immutable effective ExecutionPolicy provenance for this Run. Literal redaction secret values are never persisted. |
 | `status.json` | Current live status snapshot. Replaced atomically for fast reads and recoverable from durable Run history; it is not immutable historical evidence. |
 | `events.jsonl` | Append-only ordered Run event stream. Each record contains Run ID, sequence number and one versioned domain event. Existing events are never rewritten. |
 | `environment.json` | Immutable minimal runtime-environment provenance. Process environment variables are captured only from an explicit allowlist and pass through redaction. |
@@ -263,7 +271,7 @@ stage was reached.
 
 ### File semantics
 
-- `session.json`, `definition.json`, `plan.json` and final `run.json` are historical evidence and must not be silently rewritten.
+- `session.json`, `definition.json`, `plan.json`, `policy.json` and final `run.json` are historical evidence and must not be silently rewritten.
 - `events.jsonl` is append-only.
 - `status.json` is live operational state and may change while execution is active.
 - `logs/` may grow while the Run is active.
@@ -284,6 +292,7 @@ execution завершился до достижения соответству�
 | `session.json` | Неизменяемый заголовок Run: Run ID, время создания и идентичность точного Plan. Создаётся до начала execution. |
 | `definition.json` | Неизменяемый снимок канонического Definition; его revision точно совпадает с ревизией System, на которую ссылается Plan данного Run. |
 | `plan.json` | Неизменяемый точный снимок resolved Plan, включая эффективные параметры, placement, bindings, вложенные Systems и execution topology. |
+| `policy.json` | Неизменяемый снимок effective ExecutionPolicy данного Run. Literal secret values из redaction policy никогда не сохраняются. |
 | `status.json` | Текущий снимок состояния Run. Атомарно заменяется для быстрого чтения и может быть восстановлен из постоянной истории Run; сам по себе не является неизменяемой исторической записью. |
 | `events.jsonl` | Упорядоченный журнал событий Run только для добавления. Каждая запись содержит Run ID, номер последовательности и одно версионированное событие execution domain. Уже записанные события не переписываются. |
 | `environment.json` | Неизменяемый минимальный снимок runtime-окружения. Переменные окружения процесса сохраняются только по явному allowlist и проходят redaction. |
@@ -292,7 +301,7 @@ execution завершился до достижения соответству�
 
 ### Семантика файлов
 
-- `session.json`, `definition.json`, `plan.json` и финальный `run.json` являются историческими данными и не должны молча переписываться.
+- `session.json`, `definition.json`, `plan.json`, `policy.json` и финальный `run.json` являются историческими данными и не должны молча переписываться.
 - `events.jsonl` работает только на добавление.
 - `status.json` является текущим operational state и может изменяться во время работы.
 - `logs/` может пополняться во время выполнения.
@@ -499,6 +508,8 @@ class RunStore:
 
 __all__ = [
     "RUN_LAYOUT_SCHEMA",
+    "RUN_LAYOUT_SCHEMA_V1",
+    "SUPPORTED_RUN_LAYOUT_SCHEMAS",
     "RUN_SESSION_SCHEMA",
     "RunSession",
     "RunStore",

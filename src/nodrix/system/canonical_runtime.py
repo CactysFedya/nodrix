@@ -20,6 +20,12 @@ from nodrix.model import (
     ExecutionState,
     PlanRecord,
 )
+from nodrix.execution_policy import (
+    ExecutionPolicy,
+)
+from nodrix.run_policy import (
+    RunPolicyStore,
+)
 from nodrix.run_environment import (
     RunEnvironmentPolicy,
     RunEnvironmentStore,
@@ -245,6 +251,7 @@ class CanonicalSystemExecution:
     started_at: datetime
     run_session: RunSession | None = None
     snapshot_store: RunSnapshotStore | None = None
+    policy_store: RunPolicyStore | None = None
     environment_store: RunEnvironmentStore | None = None
     log_store: RunLogStore | None = None
     event_journal: RunEventJournal | None = None
@@ -330,6 +337,39 @@ class CanonicalSystemExecution:
             ):
                 raise ValueError(
                     "snapshot_store belongs to a different PlanRecord"
+                )
+
+        if self.policy_store is not None:
+            if not isinstance(
+                self.policy_store,
+                RunPolicyStore,
+            ):
+                raise TypeError(
+                    "policy_store must be a "
+                    "RunPolicyStore or None"
+                )
+
+            if self.run_session is None:
+                raise ValueError(
+                    "policy_store requires run_session"
+                )
+
+            if (
+                self.policy_store.run_id
+                != self.run_session.run_id
+            ):
+                raise ValueError(
+                    "policy_store belongs to "
+                    "a different RunSession"
+                )
+
+            if (
+                self.policy_store.plan_id
+                != self.plan.plan_id
+            ):
+                raise ValueError(
+                    "policy_store belongs to "
+                    "a different PlanRecord"
                 )
 
         if self.environment_store is not None:
@@ -613,6 +653,7 @@ def start_canonical_system_execution(
     plan: PlanRecord,
     *,
     system_definition: SystemModel | None = None,
+    execution_policy: ExecutionPolicy | None = None,
     environment_policy: RunEnvironmentPolicy | None = None,
     log_policy: RunLogPolicy | None = None,
     run_store: RunStore | None = None,
@@ -645,6 +686,18 @@ def start_canonical_system_execution(
         )
 
     if (
+        execution_policy is not None
+        and not isinstance(
+            execution_policy,
+            ExecutionPolicy,
+        )
+    ):
+        raise TypeError(
+            "execution_policy must be an "
+            "ExecutionPolicy or None"
+        )
+
+    if (
         environment_policy is not None
         and not isinstance(
             environment_policy,
@@ -666,6 +719,35 @@ def start_canonical_system_execution(
         raise TypeError(
             "log_policy must be a RunLogPolicy or None"
         )
+
+    if (
+        execution_policy is not None
+        and (
+            environment_policy is not None
+            or log_policy is not None
+        )
+    ):
+        raise ValueError(
+            "execution_policy cannot be combined "
+            "with environment_policy or log_policy"
+        )
+
+    effective_policy = (
+        execution_policy
+        if execution_policy is not None
+        else ExecutionPolicy(
+            environment=(
+                environment_policy
+                if environment_policy is not None
+                else RunEnvironmentPolicy()
+            ),
+            logs=(
+                log_policy
+                if log_policy is not None
+                else RunLogPolicy()
+            ),
+        )
+    )
 
     if (
         run_store is not None
@@ -734,10 +816,19 @@ def start_canonical_system_execution(
         else None
     )
 
+    policy_store = (
+        RunPolicyStore(
+            run_session,
+            policy=effective_policy,
+        )
+        if run_session is not None
+        else None
+    )
+
     environment_store = (
         RunEnvironmentStore(
             run_session,
-            policy=environment_policy,
+            policy=effective_policy.environment,
         )
         if run_session is not None
         else None
@@ -746,7 +837,7 @@ def start_canonical_system_execution(
     log_store = (
         RunLogStore(
             run_session,
-            policy=log_policy,
+            policy=effective_policy.logs,
         )
         if run_session is not None
         else None
@@ -865,6 +956,42 @@ def start_canonical_system_execution(
                 message=str(exc),
                 details={
                     "stage": "snapshot",
+                    "errorType": (
+                        type(exc).__name__
+                    ),
+                },
+                observed_at=failed_at,
+            )
+
+            raise
+
+    if policy_store is not None:
+        try:
+            policy_store.create()
+        except Exception as exc:
+            try:
+                persist_error(
+                    stage="policy",
+                    error=exc,
+                )
+            except Exception as event_exc:
+                exc.add_note(
+                    "failed to persist Run policy "
+                    f"error event: {event_exc}"
+                )
+
+            failed_at = _now(
+                clock
+            )
+
+            _write_run_status(
+                status_store,
+                status_persistence_errors,
+                state=ExecutionState.FAILED,
+                execution_id=None,
+                message=str(exc),
+                details={
+                    "stage": "policy",
                     "errorType": (
                         type(exc).__name__
                     ),
@@ -1095,6 +1222,7 @@ def start_canonical_system_execution(
         started_at=started_at,
         run_session=run_session,
         snapshot_store=snapshot_store,
+        policy_store=policy_store,
         environment_store=environment_store,
         log_store=log_store,
         event_journal=event_journal,

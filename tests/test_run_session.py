@@ -114,6 +114,7 @@ def test_run_store_creates_durable_session_before_execution(
     for name in (
         "definition.json",
         "plan.json",
+        "policy.json",
         "status.json",
         "events.jsonl",
         "environment.json",
@@ -159,6 +160,7 @@ def test_run_readme_is_bilingual_and_self_describing(
         "session.json",
         "definition.json",
         "plan.json",
+        "policy.json",
         "status.json",
         "events.jsonl",
         "environment.json",
