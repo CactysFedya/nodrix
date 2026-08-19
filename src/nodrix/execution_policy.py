@@ -11,11 +11,12 @@ the exact domain Plan.
 This policy instead owns cross-domain control-plane behavior surrounding that
 execution.
 
-Initial v1 composition:
+Current composition:
 
     ExecutionPolicy
         -> RunEnvironmentPolicy
         -> RunLogPolicy
+        -> RunMetricPolicy | None
 
 Lifecycle Events are mandatory historical evidence and therefore are not an
 optional policy switch.

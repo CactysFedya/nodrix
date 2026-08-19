@@ -3966,3 +3966,390 @@ def test_canonical_metrics_require_persistent_run_store(
         backend.prepare_observed_run
         is False
     )
+
+
+def test_runtime_persists_minimal_observability_profile_as_effective_policy(
+    tmp_path,
+) -> None:
+    root = tmp_path / "runs"
+    run_id = "run_observability_minimal"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    execution = start_canonical_system_execution(
+        SystemOrchestrator(
+            {
+                (
+                    "host",
+                    "local",
+                ): backend,
+            }
+        ),
+        _plan(),
+        system_definition=_system(),
+        observability_profile="minimal",
+        run_store=RunStore(
+            root,
+            clock=_clock,
+        ),
+        run_id=run_id,
+        clock=_clock,
+    )
+
+    assert execution.run_session is not None
+    assert backend.prepare_observed_run is True
+
+    document = json.loads(
+        (
+            root
+            / run_id
+            / "policy.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert document["logs"]["enabled"] is False
+    assert document["metrics"] is None
+
+    assert not (
+        root
+        / run_id
+        / "metrics"
+    ).exists()
+
+
+def test_runtime_persists_standard_observability_profile_as_effective_policy(
+    tmp_path,
+) -> None:
+    root = tmp_path / "runs"
+    run_id = "run_observability_standard"
+
+    backend = ObservingBackend(
+        expected_run_directory=(
+            root / run_id
+        ),
+    )
+
+    execution = start_canonical_system_execution(
+        SystemOrchestrator(
+            {
+                (
+                    "host",
+                    "local",
+                ): backend,
+            }
+        ),
+        _plan(),
+        system_definition=_system(),
+        observability_profile="standard",
+        run_store=RunStore(
+            root,
+            clock=_clock,
+        ),
+        run_id=run_id,
+        clock=_clock,
+    )
+
+    assert execution.run_session is not None
+    assert backend.prepare_observed_run is True
+
+    document = json.loads(
+        (
+            root
+            / run_id
+            / "policy.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert document["logs"]["enabled"] is True
+    assert document["logs"]["minLevel"] == "warning"
+
+    assert (
+        document["metrics"]["maxRecords"]
+        == 100_000
+    )
+
+    assert (
+        document["metrics"]["maxBytes"]
+        == 4 * 1024 * 1024
+    )
+
+
+@pytest.mark.parametrize(
+    "conflicting",
+    (
+        "execution_policy",
+        "environment_policy",
+        "log_policy",
+    ),
+)
+def test_runtime_rejects_ambiguous_observability_profile_policy_combinations(
+    conflicting,
+    tmp_path,
+) -> None:
+    backend = ObservingBackend(
+        expected_run_directory=(
+            tmp_path / "unused-run"
+        ),
+    )
+
+    kwargs = {
+        "observability_profile": "minimal",
+    }
+
+    if conflicting == "execution_policy":
+        kwargs["execution_policy"] = (
+            ExecutionPolicy()
+        )
+    elif conflicting == "environment_policy":
+        kwargs["environment_policy"] = (
+            RunEnvironmentPolicy()
+        )
+    elif conflicting == "log_policy":
+        kwargs["log_policy"] = (
+            RunLogPolicy()
+        )
+    else:
+        raise AssertionError(
+            conflicting
+        )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "observability_profile cannot "
+            "be combined"
+        ),
+    ):
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            **kwargs,
+        )
+
+    assert (
+        backend.prepare_observed_run
+        is False
+    )
+
+
+def test_runtime_rejects_unknown_observability_profile_before_prepare(
+    tmp_path,
+) -> None:
+    backend = ObservingBackend(
+        expected_run_directory=(
+            tmp_path / "unused-run"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="unsupported observability profile",
+    ):
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            observability_profile=(
+                "not-a-profile"
+            ),
+        )
+
+    assert (
+        backend.prepare_observed_run
+        is False
+    )
+
+
+def test_runtime_custom_observability_uses_execution_policy_instead(
+    tmp_path,
+) -> None:
+    backend = ObservingBackend(
+        expected_run_directory=(
+            tmp_path / "unused-run"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires custom_policy",
+    ):
+        start_canonical_system_execution(
+            SystemOrchestrator(
+                {
+                    (
+                        "host",
+                        "local",
+                    ): backend,
+                }
+            ),
+            _plan(),
+            observability_profile="custom",
+        )
+
+    assert (
+        backend.prepare_observed_run
+        is False
+    )
+
+
+def test_observability_profile_changes_policy_not_plan_identity(
+    tmp_path,
+) -> None:
+    root = tmp_path / "runs"
+
+    plan = _plan()
+    system = _system()
+
+    first_backend = ObservingBackend(
+        expected_run_directory=(
+            root / "run_observability_plan_a"
+        ),
+    )
+
+    second_backend = ObservingBackend(
+        expected_run_directory=(
+            root / "run_observability_plan_b"
+        ),
+    )
+
+    start_canonical_system_execution(
+        SystemOrchestrator(
+            {
+                (
+                    "host",
+                    "local",
+                ): first_backend,
+            }
+        ),
+        plan,
+        system_definition=system,
+        observability_profile="minimal",
+        run_store=RunStore(
+            root,
+            clock=_clock,
+        ),
+        run_id="run_observability_plan_a",
+        clock=_clock,
+    )
+
+    start_canonical_system_execution(
+        SystemOrchestrator(
+            {
+                (
+                    "host",
+                    "local",
+                ): second_backend,
+            }
+        ),
+        plan,
+        system_definition=system,
+        observability_profile="debug",
+        run_store=RunStore(
+            root,
+            clock=_clock,
+        ),
+        run_id="run_observability_plan_b",
+        clock=_clock,
+    )
+
+    first_plan = json.loads(
+        (
+            root
+            / "run_observability_plan_a"
+            / "plan.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    second_plan = json.loads(
+        (
+            root
+            / "run_observability_plan_b"
+            / "plan.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        first_plan["planId"]
+        == second_plan["planId"]
+    )
+
+    assert (
+        first_plan["runId"]
+        != second_plan["runId"]
+    )
+
+    first_plan_without_run = dict(
+        first_plan
+    )
+    second_plan_without_run = dict(
+        second_plan
+    )
+
+    first_plan_without_run.pop(
+        "runId"
+    )
+    second_plan_without_run.pop(
+        "runId"
+    )
+
+    assert (
+        first_plan_without_run
+        == second_plan_without_run
+    )
+
+    first_policy = json.loads(
+        (
+            root
+            / "run_observability_plan_a"
+            / "policy.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    second_policy = json.loads(
+        (
+            root
+            / "run_observability_plan_b"
+            / "policy.json"
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert first_policy != second_policy
+
+    assert (
+        first_policy["metrics"]
+        is None
+    )
+
+    assert (
+        second_policy["metrics"]
+        is not None
+    )

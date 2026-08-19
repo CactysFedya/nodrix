@@ -10,6 +10,11 @@ record.  ExecutionRecord remains the immutable cross-domain representation.
 
 from __future__ import annotations
 
+from ..observability_profiles import (
+    ObservabilityProfileName,
+    resolve_observability_profile,
+)
+
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
@@ -658,6 +663,7 @@ def start_canonical_system_execution(
     *,
     system_definition: SystemModel | None = None,
     execution_policy: ExecutionPolicy | None = None,
+    observability_profile: ObservabilityProfileName | str | None = None,
     environment_policy: RunEnvironmentPolicy | None = None,
     log_policy: RunLogPolicy | None = None,
     run_store: RunStore | None = None,
@@ -736,22 +742,43 @@ def start_canonical_system_execution(
             "with environment_policy or log_policy"
         )
 
-    effective_policy = (
-        execution_policy
-        if execution_policy is not None
-        else ExecutionPolicy(
-            environment=(
-                environment_policy
-                if environment_policy is not None
-                else RunEnvironmentPolicy()
-            ),
-            logs=(
-                log_policy
-                if log_policy is not None
-                else RunLogPolicy()
-            ),
+    if (
+        observability_profile is not None
+        and (
+            execution_policy is not None
+            or environment_policy is not None
+            or log_policy is not None
         )
-    )
+    ):
+        raise ValueError(
+            "observability_profile cannot be combined "
+            "with execution_policy, environment_policy, "
+            "or log_policy"
+        )
+
+    if observability_profile is not None:
+        effective_policy = (
+            resolve_observability_profile(
+                observability_profile
+            )
+        )
+    else:
+        effective_policy = (
+            execution_policy
+            if execution_policy is not None
+            else ExecutionPolicy(
+                environment=(
+                    environment_policy
+                    if environment_policy is not None
+                    else RunEnvironmentPolicy()
+                ),
+                logs=(
+                    log_policy
+                    if log_policy is not None
+                    else RunLogPolicy()
+                ),
+            )
+        )
 
     if (
         effective_policy.metrics is not None
