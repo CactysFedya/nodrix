@@ -235,9 +235,9 @@ def render_run_readme(
 
     return f"""# Nodrix Run
 
-Run ID: `{session.run_id}`  
-Created: `{created_at}`  
-Layout standard: `{RUN_LAYOUT_SCHEMA}`  
+Run ID: `{session.run_id}`<br>
+Created: `{created_at}`<br>
+Layout standard: `{RUN_LAYOUT_SCHEMA}`<br>
 Session schema: `{RUN_SESSION_SCHEMA}`
 
 ## English
