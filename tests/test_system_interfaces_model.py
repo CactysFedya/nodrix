@@ -107,6 +107,7 @@ def _sink_system(
     *,
     type_id: str = POINT_CLOUD,
     target: str | None = None,
+    optional_input: bool = False,
 ) -> SystemModel:
     return SystemModel(
         name=name,
@@ -114,6 +115,7 @@ def _sink_system(
             SystemPort(
                 name="cloud",
                 type_id=type_id,
+                optional=optional_input,
             ),
         ),
         graphs=(
@@ -558,7 +560,10 @@ def test_planner_rejects_child_port_without_concrete_boundary() -> None:
 
 
 def test_planner_records_effective_child_parameter_values() -> None:
-    base = _sink_system(name="mapper")
+    base = _sink_system(
+        name="mapper",
+        optional_input=True,
+    )
     child = base.model_copy(
         update={
             "parameters": (
@@ -610,7 +615,10 @@ def test_planner_records_effective_child_parameter_values() -> None:
 
 
 def test_public_parameter_can_bind_through_child_system_boundary() -> None:
-    base = _sink_system(name="mapper")
+    base = _sink_system(
+        name="mapper",
+        optional_input=True,
+    )
     child = base.model_copy(
         update={
             "parameters": (

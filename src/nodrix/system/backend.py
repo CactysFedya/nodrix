@@ -89,6 +89,7 @@ class BackendSystemLink:
     direction: Literal["inbound", "outbound"]
     local_endpoint: str
     remote_endpoint: str
+    owner_system_path: tuple[str, ...] = ()
     local_system_path: tuple[str, ...] = ()
     remote_system_path: tuple[str, ...] = ()
 

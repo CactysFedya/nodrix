@@ -563,15 +563,23 @@ def lower_local_context(context: BackendContext) -> LocalLoweringResult:
             }
         )
 
-    system_links_by_ordinal: dict[int, list[Any]] = {}
+    system_links_by_identity: dict[
+        tuple[tuple[str, ...], int],
+        list[Any],
+    ] = {}
+
     for system_link in context.system_links:
-        system_links_by_ordinal.setdefault(
+        identity = (
+            system_link.owner_system_path,
             system_link.ordinal,
+        )
+        system_links_by_identity.setdefault(
+            identity,
             [],
         ).append(system_link)
 
-    for ordinal in sorted(system_links_by_ordinal):
-        sides = system_links_by_ordinal[ordinal]
+    for identity in sorted(system_links_by_identity):
+        sides = system_links_by_identity[identity]
         outbound = next(
             (item for item in sides if item.direction == "outbound"),
             None,

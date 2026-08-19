@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
+from typing import Any, Mapping
 
 from nodrix.model import (
     RUN,
@@ -29,8 +29,13 @@ from .definition import (
     DEFAULT_SYSTEM_NAMESPACE,
     system_entity_ref,
 )
+from .execution_context import SystemExecutionContext
 from .model import SystemModel
-from .planning import SystemExecutionPlan, plan_system
+from .planning import (
+    SystemDefinitionResolver,
+    SystemExecutionPlan,
+    plan_system,
+)
 
 
 def system_plan_digest(
@@ -206,6 +211,9 @@ def plan_canonical_system(
     entity: EntityRef | None = None,
     namespace: str = DEFAULT_SYSTEM_NAMESPACE,
     catalog: DefinitionCatalog | None = None,
+    execution_context: SystemExecutionContext | None = None,
+    system_resolver: SystemDefinitionResolver | None = None,
+    parameters: Mapping[str, Any] | None = None,
 ) -> PlanRecord:
     """Plan a SystemModel and immediately expose the canonical PlanRecord."""
 
@@ -239,6 +247,9 @@ def plan_canonical_system(
     resolved = plan_system(
         system,
         catalog=catalog,
+        execution_context=execution_context,
+        system_resolver=system_resolver,
+        parameters=parameters,
     )
 
     return system_plan_record(

@@ -1370,10 +1370,10 @@ def plan_system(
         cross_target = source.target != target.target
         cross_backend = source.backend != target.backend
 
-        if has_application:
-            boundary = "application"
-        elif has_system:
+        if has_system:
             boundary = "system"
+        elif has_application:
+            boundary = "application"
         elif cross_target:
             boundary = "cross_target"
         elif cross_backend:

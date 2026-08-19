@@ -666,6 +666,77 @@ def validate_system(
                     )
                 )
 
+    supplied_child_inputs: set[
+        tuple[str, str]
+    ] = set()
+
+    # A parent public input may explicitly delegate responsibility
+    # to one child System input.
+    for binding in system.bindings.inputs:
+        endpoint = parse_system_endpoint(
+            binding.endpoint
+        )
+        if (
+            endpoint.kind
+            is SystemEndpointKind.SYSTEM
+        ):
+            supplied_child_inputs.add(
+                (
+                    endpoint.instance,
+                    endpoint.port,
+                )
+            )
+
+    # A normal SystemLink may satisfy one child input directly.
+    for link in system.links:
+        endpoint = parse_system_endpoint(
+            link.target
+        )
+        if (
+            endpoint.kind
+            is SystemEndpointKind.SYSTEM
+        ):
+            supplied_child_inputs.add(
+                (
+                    endpoint.instance,
+                    endpoint.port,
+                )
+            )
+
+    for index, instance in enumerate(
+        system.systems
+    ):
+        child = child_definitions.get(
+            instance.name
+        )
+        if child is None:
+            continue
+
+        for port in child.inputs:
+            if (
+                not port.optional
+                and (
+                    instance.name,
+                    port.name,
+                )
+                not in supplied_child_inputs
+            ):
+                diagnostics.append(
+                    SystemDiagnostic(
+                        "error",
+                        "SYS177",
+                        (
+                            f"systems[{index}]"
+                            f".inputs.{port.name}"
+                        ),
+                        (
+                            "required child System input is not "
+                            "satisfied by a parent link or delegated "
+                            "parent System input"
+                        ),
+                    )
+                )
+
     dependency_edges: set[tuple[str, str]] = set()
 
     for index, dependency in enumerate(

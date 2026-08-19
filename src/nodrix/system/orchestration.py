@@ -129,6 +129,8 @@ def _resolve_system_link_endpoint(
 
 def _plan_system_link_routes(
     plan: SystemExecutionPlan,
+    *,
+    owner_system_path: tuple[str, ...] = (),
 ) -> tuple[_RoutedSystemLink, ...]:
     routes: list[_RoutedSystemLink] = []
     for link in plan.links:
@@ -153,6 +155,7 @@ def _plan_system_link_routes(
                         direction="outbound",
                         local_endpoint=source_endpoint,
                         remote_endpoint=target_endpoint,
+                        owner_system_path=owner_system_path,
                         local_system_path=source_path,
                         remote_system_path=target_path,
                     ),
@@ -166,6 +169,7 @@ def _plan_system_link_routes(
                         direction="inbound",
                         local_endpoint=target_endpoint,
                         remote_endpoint=source_endpoint,
+                        owner_system_path=owner_system_path,
                         local_system_path=target_path,
                         remote_system_path=source_path,
                     ),
@@ -1167,12 +1171,16 @@ class SystemOrchestrator:
             ...,
         ] = (),
         _system_link_routes: tuple[_RoutedSystemLink, ...] = (),
+        _system_path: tuple[str, ...] = (),
     ) -> OrchestrationValidationReport:
         scopes = self.scopes(plan)
         diagnostics: list[OrchestrationDiagnostic] = []
         system_link_routes = (
             *_system_link_routes,
-            *_plan_system_link_routes(plan),
+            *_plan_system_link_routes(
+                plan,
+                owner_system_path=_system_path,
+            ),
         )
 
         try:
@@ -1284,6 +1292,7 @@ class SystemOrchestrator:
             child_report = self.validate_plan(
                 child.plan,
                 execution_context=child_context,
+                _system_path=(*_system_path, child.name),
                 inherited_resources=child.resource_bindings,
                 _system_link_routes=tuple(
                     _RoutedSystemLink(
@@ -1335,16 +1344,21 @@ class SystemOrchestrator:
             ...,
         ] = (),
         _system_link_routes: tuple[_RoutedSystemLink, ...] = (),
+        _system_path: tuple[str, ...] = (),
     ) -> PreparedSystemExecution:
         system_link_routes = (
             *_system_link_routes,
-            *_plan_system_link_routes(plan),
+            *_plan_system_link_routes(
+                plan,
+                owner_system_path=_system_path,
+            ),
         )
         report = self.validate_plan(
             plan,
             execution_context=execution_context,
             inherited_resources=inherited_resources,
             _system_link_routes=_system_link_routes,
+            _system_path=_system_path,
         )
         report.raise_for_errors()
 
@@ -1417,6 +1431,7 @@ class SystemOrchestrator:
                 child_execution = self.prepare_plan(
                     child.plan,
                     execution_context=child_context,
+                    _system_path=(*_system_path, child.name),
                     inherited_resources=child.resource_bindings,
                     _system_link_routes=tuple(
                         _RoutedSystemLink(
