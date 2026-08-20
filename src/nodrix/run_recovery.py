@@ -31,8 +31,8 @@ from nodrix.run_policy import (
 )
 from nodrix.run_session import (
     RUN_LAYOUT_SCHEMA,
-    RUN_SESSION_SCHEMA,
-    SUPPORTED_RUN_LAYOUT_SCHEMAS,
+    RunSessionCorruptionError,
+    run_session_from_document,
 )
 
 
@@ -787,101 +787,33 @@ def inspect_run_directory(
         )
 
     try:
-        session = _load_json(
+        session_document = _load_json(
             session_path
         )
 
-        if (
-            session.get("schema")
-            != RUN_SESSION_SCHEMA
-        ):
-            raise ValueError(
-                "session.schema is unsupported"
+        loaded_session = (
+            run_session_from_document(
+                session_document,
+                directory=path,
             )
+        )
 
-        layout = session.get(
+        layout = session_document[
             "layout"
+        ]
+
+        run_id = (
+            loaded_session.run_id
         )
 
-        if (
-            layout
-            not in SUPPORTED_RUN_LAYOUT_SCHEMAS
-        ):
-            raise ValueError(
-                "session.layout is unsupported"
-            )
-
-        run_id = _text_field(
-            session,
-            "run_id",
-            source="session",
+        plan_id = (
+            loaded_session.plan_id
         )
 
-        plan_document = (
-            session.get("plan")
-        )
-
-        if not isinstance(
-            plan_document,
-            dict,
-        ):
-            raise ValueError(
-                "session.plan must be an object"
-            )
-
-        plan_id = _text_field(
-            plan_document,
-            "id",
-            source="session.plan",
-        )
-
-        _text_field(
-            plan_document,
-            "kind",
-            source="session.plan",
-        )
-
-        _parse_timestamp(
-            session.get(
-                "created_at"
-            ),
-            field_name=(
-                "session.created_at"
-            ),
-        )
-
-        operation_document = (
-            session.get(
-                "operation"
-            )
-        )
-
-        if not isinstance(
-            operation_document,
-            dict,
-        ):
-            raise ValueError(
-                "session.operation must be an object"
-            )
-
-        _text_field(
-            operation_document,
-            "kind",
-            source="session.operation",
-        )
-
-        _text_field(
-            operation_document,
-            "subject",
-            source="session.operation",
-        )
-
-        _text_field(
-            operation_document,
-            "subject_revision",
-            source="session.operation",
-        )
-    except ValueError as exc:
+    except (
+        RunSessionCorruptionError,
+        ValueError,
+    ) as exc:
         return RunRecoveryReport(
             directory=path,
             run_id=None,

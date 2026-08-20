@@ -719,29 +719,456 @@ def runs_logs_command(
             console.print("Structured events are available in events.jsonl.")
 
 
+def _comparison_value(
+    value: object,
+    *,
+    signed: bool = False,
+) -> str:
+    if (
+        isinstance(
+            value,
+            bool,
+        )
+        or not isinstance(
+            value,
+            (int, float),
+        )
+    ):
+        return "-"
+
+    if signed:
+        return f"{float(value):+.3f}"
+
+    return f"{float(value):.3f}"
+
+
+def _comparison_percent(
+    value: object,
+) -> str:
+    if (
+        isinstance(
+            value,
+            bool,
+        )
+        or not isinstance(
+            value,
+            (int, float),
+        )
+    ):
+        return "-"
+
+    return f"{float(value):+.1f}%"
+
+
+def _comparison_yes_no(
+    value: object,
+) -> str:
+    if value is True:
+        return "yes"
+
+    if value is False:
+        return "no"
+
+    return "unknown"
+
+
+def _is_canonical_runs_comparison(
+    comparison: dict[str, object],
+) -> bool:
+    evidence = comparison.get(
+        "evidence"
+    )
+
+    metrics = comparison.get(
+        "metrics"
+    )
+
+    return (
+        isinstance(
+            evidence,
+            dict,
+        )
+        and isinstance(
+            metrics,
+            dict,
+        )
+        and isinstance(
+            metrics.get(
+                "descriptors"
+            ),
+            list,
+        )
+    )
+
+
+def _render_canonical_runs_comparison(
+    comparison: dict[str, object],
+) -> None:
+    first = comparison.get(
+        "first"
+    )
+
+    first = (
+        first
+        if isinstance(
+            first,
+            dict,
+        )
+        else {}
+    )
+
+    second = comparison.get(
+        "second"
+    )
+
+    second = (
+        second
+        if isinstance(
+            second,
+            dict,
+        )
+        else {}
+    )
+
+    evidence = comparison.get(
+        "evidence"
+    )
+
+    evidence = (
+        evidence
+        if isinstance(
+            evidence,
+            dict,
+        )
+        else {}
+    )
+
+    metrics = comparison.get(
+        "metrics"
+    )
+
+    metrics = (
+        metrics
+        if isinstance(
+            metrics,
+            dict,
+        )
+        else {}
+    )
+
+    console.print(
+        "[bold]COMPARE[/bold] "
+        f"{first.get('runId') or '-'}"
+        " → "
+        f"{second.get('runId') or '-'}"
+    )
+
+    console.print(
+        "[dim]Exact workload[/dim]  "
+        + _comparison_yes_no(
+            evidence.get(
+                "sameExactWorkload"
+            )
+        )
+    )
+
+    console.print(
+        "[dim]Same policy[/dim]      "
+        + _comparison_yes_no(
+            evidence.get(
+                "samePolicy"
+            )
+        )
+    )
+
+    console.print(
+        "[dim]Metrics complete[/dim] "
+        + _comparison_yes_no(
+            metrics.get(
+                "complete"
+            )
+        )
+    )
+
+    first_metrics = metrics.get(
+        "first"
+    )
+
+    first_metrics = (
+        first_metrics
+        if isinstance(
+            first_metrics,
+            dict,
+        )
+        else {}
+    )
+
+    second_metrics = metrics.get(
+        "second"
+    )
+
+    second_metrics = (
+        second_metrics
+        if isinstance(
+            second_metrics,
+            dict,
+        )
+        else {}
+    )
+
+    first_dropped = (
+        first_metrics.get(
+            "droppedRecords",
+            0,
+        )
+    )
+
+    second_dropped = (
+        second_metrics.get(
+            "droppedRecords",
+            0,
+        )
+    )
+
+    if (
+        first_dropped
+        or second_dropped
+    ):
+        console.print(
+            "[yellow]Metric loss[/yellow] "
+            f"first={first_dropped}, "
+            f"second={second_dropped}"
+        )
+
+    console.print()
+
+    descriptors = metrics.get(
+        "descriptors"
+    )
+
+    descriptors = (
+        descriptors
+        if isinstance(
+            descriptors,
+            list,
+        )
+        else []
+    )
+
+    if not descriptors:
+        console.print(
+            "No canonical Metric observations."
+        )
+        return
+
+    table = Table(
+        "Metric",
+        "First mean",
+        "Second mean",
+        "Delta",
+        "Change",
+        box=None,
+        show_edge=False,
+        pad_edge=False,
+    )
+
+    for raw in descriptors:
+        if not isinstance(
+            raw,
+            dict,
+        ):
+            continue
+
+        name = str(
+            raw.get(
+                "name"
+            )
+            or raw.get(
+                "descriptorId"
+            )
+            or "-"
+        )
+
+        unit = raw.get(
+            "unit"
+        )
+
+        if (
+            isinstance(
+                unit,
+                str,
+            )
+            and unit
+        ):
+            name = (
+                f"{name} [{unit}]"
+            )
+
+        first_summary = raw.get(
+            "first"
+        )
+
+        first_summary = (
+            first_summary
+            if isinstance(
+                first_summary,
+                dict,
+            )
+            else {}
+        )
+
+        second_summary = raw.get(
+            "second"
+        )
+
+        second_summary = (
+            second_summary
+            if isinstance(
+                second_summary,
+                dict,
+            )
+            else {}
+        )
+
+        table.add_row(
+            name,
+            _comparison_value(
+                first_summary.get(
+                    "mean"
+                )
+            ),
+            _comparison_value(
+                second_summary.get(
+                    "mean"
+                )
+            ),
+            _comparison_value(
+                raw.get(
+                    "meanDelta"
+                ),
+                signed=True,
+            ),
+            _comparison_percent(
+                raw.get(
+                    "meanPercent"
+                )
+            ),
+        )
+
+    console.print(
+        table
+    )
+
+
 @runs_app.command("compare")
 def runs_compare_command(
     first: str,
     second: str,
-    project: Annotated[Path, typer.Option("--project", "-p")] = Path.cwd(),
-    table_output: Annotated[bool, typer.Option("--table", help="Render the principal metrics as a table")] = False,
+    project: Annotated[
+        Path,
+        typer.Option(
+            "--project",
+            "-p",
+        ),
+    ] = Path.cwd(),
+    table_output: Annotated[
+        bool,
+        typer.Option(
+            "--table",
+            help=(
+                "Render the principal metrics "
+                "as a table"
+            ),
+        ),
+    ] = False,
 ) -> None:
-    comparison = compare_runs(first, second, project)
-    if not table_output:
-        console.print_json(json.dumps(comparison))
-        return
-    table = Table("Metric", "First", "Second", "Delta", "Change")
-    for name, raw in dict(comparison.get("metrics", {})).items():
-        item = dict(raw)
-        percent = item.get("percent")
-        table.add_row(
-            name,
-            f"{float(item.get('first', 0.0)):.3f}",
-            f"{float(item.get('second', 0.0)):.3f}",
-            f"{float(item.get('delta', 0.0)):+.3f}",
-            "-" if percent is None else f"{float(percent):+.1f}%",
+    try:
+        comparison = compare_runs(
+            first,
+            second,
+            project,
         )
-    console.print(table)
+    except Exception as exc:
+        console.print(
+            "[red]Cannot compare runs:[/red] "
+            f"{exc}"
+        )
+        raise typer.Exit(
+            1
+        )
+
+    if not table_output:
+        console.print_json(
+            json.dumps(
+                comparison,
+                ensure_ascii=False,
+            )
+        )
+        return
+
+    if _is_canonical_runs_comparison(
+        comparison
+    ):
+        _render_canonical_runs_comparison(
+            comparison
+        )
+        return
+
+    # Preserve historical table rendering for legacy pipeline Runs.
+    table = Table(
+        "Metric",
+        "First",
+        "Second",
+        "Delta",
+        "Change",
+    )
+
+    metrics = comparison.get(
+        "metrics",
+        {},
+    )
+
+    metrics = (
+        metrics
+        if isinstance(
+            metrics,
+            dict,
+        )
+        else {}
+    )
+
+    for name, raw in metrics.items():
+        if not isinstance(
+            raw,
+            dict,
+        ):
+            continue
+
+        percent = raw.get(
+            "percent"
+        )
+
+        table.add_row(
+            str(name),
+            (
+                f"{float(raw.get('first', 0.0)):.3f}"
+            ),
+            (
+                f"{float(raw.get('second', 0.0)):.3f}"
+            ),
+            (
+                f"{float(raw.get('delta', 0.0)):+.3f}"
+            ),
+            (
+                "-"
+                if percent is None
+                else f"{float(percent):+.1f}%"
+            ),
+        )
+
+    console.print(
+        table
+    )
 
 
 @native_app.command("inspect")

@@ -20,7 +20,7 @@ import json
 from pathlib import Path
 import re
 import shutil
-from typing import Callable
+from typing import Any, Callable, Mapping
 from uuid import uuid4
 
 from nodrix.model import PlanRecord
@@ -43,6 +43,14 @@ _TOKEN_RE = re.compile(r"^[0-9a-f]{12}$")
 
 Clock = Callable[[], datetime]
 TokenFactory = Callable[[], str]
+
+
+class RunSessionError(RuntimeError):
+    """Base error for reopening persistent Run sessions."""
+
+
+class RunSessionCorruptionError(RunSessionError):
+    """Existing session.json violates the canonical RunSession contract."""
 
 
 def _utc_now() -> datetime:
@@ -80,6 +88,63 @@ def _iso_timestamp(value: datetime) -> str:
             timespec="microseconds"
         )
         .replace("+00:00", "Z")
+    )
+
+
+def _reject_json_constant(
+    value: str,
+) -> None:
+    raise ValueError(
+        f"non-finite JSON constant {value!r} is not allowed"
+    )
+
+
+def _required_session_text(
+    value: object,
+    *,
+    field_name: str,
+) -> str:
+    if not isinstance(value, str):
+        raise TypeError(
+            f"{field_name} must be a string"
+        )
+
+    normalized = value.strip()
+
+    if not normalized:
+        raise ValueError(
+            f"{field_name} must be non-empty"
+        )
+
+    return normalized
+
+
+def _parse_session_timestamp(
+    value: object,
+    *,
+    field_name: str,
+) -> datetime:
+    text = _required_session_text(
+        value,
+        field_name=field_name,
+    )
+
+    try:
+        parsed = datetime.fromisoformat(
+            (
+                text[:-1] + "+00:00"
+                if text.endswith("Z")
+                else text
+            )
+        )
+    except ValueError as exc:
+        raise ValueError(
+            f"{field_name} must be an ISO-8601 timestamp"
+        ) from exc
+
+    return _utc_datetime(
+        parsed,
+        field_name=field_name,
     )
 
 
@@ -156,6 +221,7 @@ class RunSession:
     subject: str
     subject_revision: str
     directory: Path
+    layout: str = RUN_LAYOUT_SCHEMA
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -173,6 +239,25 @@ class RunSession:
                 self.created_at,
                 field_name="created_at",
             ),
+        )
+
+        layout = _required_session_text(
+            self.layout,
+            field_name="layout",
+        )
+
+        if (
+            layout
+            not in SUPPORTED_RUN_LAYOUT_SCHEMAS
+        ):
+            raise ValueError(
+                "layout is unsupported"
+            )
+
+        object.__setattr__(
+            self,
+            "layout",
+            layout,
         )
 
         if not isinstance(
@@ -220,7 +305,7 @@ class RunSession:
 
         return {
             "schema": RUN_SESSION_SCHEMA,
-            "layout": RUN_LAYOUT_SCHEMA,
+            "layout": self.layout,
             "run_id": self.run_id,
             "created_at": _iso_timestamp(
                 self.created_at
@@ -238,6 +323,231 @@ class RunSession:
             },
             "documentation": "README.md",
         }
+
+
+def run_session_from_document(
+    document: Mapping[str, Any],
+    *,
+    directory: str | Path,
+) -> RunSession:
+    """Construct a validated RunSession from one persisted header.
+
+    This function validates canonical session semantics but deliberately does
+    not require the directory basename to equal ``run_id``.  Recovery tooling
+    needs to report that mismatch as a separate integrity issue.
+
+    ``load_run_session`` is the strict filesystem boundary and does enforce
+    directory identity.
+    """
+
+    if not isinstance(document, Mapping):
+        raise RunSessionCorruptionError(
+            "session.json must contain a JSON object"
+        )
+
+    expected_fields = {
+        "schema",
+        "layout",
+        "run_id",
+        "created_at",
+        "plan",
+        "operation",
+        "documentation",
+    }
+
+    if set(document) != expected_fields:
+        raise RunSessionCorruptionError(
+            "session.json has invalid fields"
+        )
+
+    try:
+        if document["schema"] != RUN_SESSION_SCHEMA:
+            raise ValueError(
+                "session.schema is unsupported"
+            )
+
+        layout = _required_session_text(
+            document["layout"],
+            field_name="session.layout",
+        )
+
+        if layout not in SUPPORTED_RUN_LAYOUT_SCHEMAS:
+            raise ValueError(
+                "session.layout is unsupported"
+            )
+
+        run_id = _validate_run_id(
+            _required_session_text(
+                document["run_id"],
+                field_name="session.run_id",
+            )
+        )
+
+        created_at = _parse_session_timestamp(
+            document["created_at"],
+            field_name="session.created_at",
+        )
+
+        plan = document["plan"]
+
+        if not isinstance(plan, Mapping):
+            raise TypeError(
+                "session.plan must be an object"
+            )
+
+        if set(plan) != {
+            "id",
+            "kind",
+        }:
+            raise ValueError(
+                "session.plan has invalid fields"
+            )
+
+        plan_id = _required_session_text(
+            plan["id"],
+            field_name="session.plan.id",
+        )
+
+        plan_kind = _required_session_text(
+            plan["kind"],
+            field_name="session.plan.kind",
+        )
+
+        operation = document["operation"]
+
+        if not isinstance(
+            operation,
+            Mapping,
+        ):
+            raise TypeError(
+                "session.operation must be an object"
+            )
+
+        if set(operation) != {
+            "kind",
+            "subject",
+            "subject_revision",
+        }:
+            raise ValueError(
+                "session.operation has invalid fields"
+            )
+
+        operation_kind = _required_session_text(
+            operation["kind"],
+            field_name="session.operation.kind",
+        )
+
+        subject = _required_session_text(
+            operation["subject"],
+            field_name="session.operation.subject",
+        )
+
+        subject_revision = _required_session_text(
+            operation["subject_revision"],
+            field_name=(
+                "session.operation.subject_revision"
+            ),
+        )
+
+        documentation = _required_session_text(
+            document["documentation"],
+            field_name="session.documentation",
+        )
+
+        if documentation != "README.md":
+            raise ValueError(
+                "session.documentation must be 'README.md'"
+            )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise RunSessionCorruptionError(
+            str(exc)
+        ) from exc
+
+    return RunSession(
+        run_id=run_id,
+        created_at=created_at,
+        plan_id=plan_id,
+        plan_kind=plan_kind,
+        operation_kind=operation_kind,
+        subject=subject,
+        subject_revision=subject_revision,
+        directory=Path(
+            directory
+        ).expanduser().resolve(),
+        layout=layout,
+    )
+
+
+def load_run_session(
+    directory: str | Path,
+) -> RunSession:
+    """Strictly reopen one existing canonical Run directory."""
+
+    path = (
+        Path(directory)
+        .expanduser()
+        .resolve()
+    )
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Run directory does not exist: {path}"
+        )
+
+    if not path.is_dir():
+        raise NotADirectoryError(
+            f"Run path is not a directory: {path}"
+        )
+
+    session_path = (
+        path
+        / "session.json"
+    )
+
+    if not session_path.exists():
+        raise FileNotFoundError(
+            f"session.json does not exist: {session_path}"
+        )
+
+    if not session_path.is_file():
+        raise RunSessionCorruptionError(
+            "session.json exists but is not a file"
+        )
+
+    try:
+        raw = session_path.read_text(
+            encoding="utf-8"
+        )
+
+        document = json.loads(
+            raw,
+            parse_constant=_reject_json_constant,
+        )
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ) as exc:
+        raise RunSessionCorruptionError(
+            "session.json contains invalid JSON"
+        ) from exc
+
+    session = run_session_from_document(
+        document,
+        directory=path,
+    )
+
+    if path.name != session.run_id:
+        raise RunSessionCorruptionError(
+            "Run directory name does not match "
+            "session.run_id"
+        )
+
+    return session
 
 
 def render_run_readme(
@@ -521,13 +831,33 @@ class RunStore:
         return session
 
 
+    def open(
+        self,
+        run_id: str,
+    ) -> RunSession:
+        """Reopen one exact existing canonical Run session."""
+
+        canonical_run_id = _validate_run_id(
+            run_id
+        )
+
+        return load_run_session(
+            self.root
+            / canonical_run_id
+        )
+
+
 __all__ = [
     "RUN_LAYOUT_SCHEMA",
     "RUN_LAYOUT_SCHEMA_V1",
     "SUPPORTED_RUN_LAYOUT_SCHEMAS",
     "RUN_SESSION_SCHEMA",
     "RunSession",
+    "RunSessionCorruptionError",
+    "RunSessionError",
     "RunStore",
+    "load_run_session",
+    "run_session_from_document",
     "generate_run_id",
     "render_run_readme",
 ]

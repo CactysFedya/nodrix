@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from .benchmarking import aggregate_reports
+from .run_bundle import load_canonical_run_bundle
+from .run_comparison import compare_canonical_run_bundles
 from .storage_layout import StorageLayout
 
 
@@ -15,6 +17,22 @@ _ACTIVE_RUN_STATUSES = {
     "degraded",
     "stopping",
 }
+
+
+class RunComparisonError(RuntimeError):
+    """Base error for incompatible or unavailable Run comparisons."""
+
+
+class RunComparisonCompatibilityError(
+    RunComparisonError
+):
+    """Two Runs belong to incompatible execution-history models."""
+
+
+class CanonicalRunComparisonUnavailableError(
+    RunComparisonError
+):
+    """Canonical history exists but lacks the persisted evidence bundle."""
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -171,22 +189,160 @@ def _mean_metric(summary: Mapping[str, Any], name: str) -> float:
         return 0.0
 
 
-def compare_runs(first: str, second: str, project: str | Path = ".") -> dict[str, Any]:
-    a = load_run(first, project)
-    b = load_run(second, project)
-    node_names = sorted(set(a.get("nodes", {})) | set(b.get("nodes", {})))
-    nodes: dict[str, Any] = {}
+def _comparison_run_kind(
+    directory: Path,
+) -> str:
+    """Classify one Run directory for comparison only.
+
+    The canonical operational model is identified by its persistent
+    RunSession.  The older ``nodrix.run/v1`` document remains canonical
+    history, but it lacks the immutable Definition/Plan/Policy bundle needed
+    for the new structured comparison.
+    """
+
+    session_path = (
+        directory
+        / "session.json"
+    )
+
+    if session_path.exists():
+        return "canonical-persisted"
+
+    run_path = (
+        directory
+        / "run.json"
+    )
+
+    if run_path.is_file():
+        report = _read_json(
+            run_path
+        )
+
+        if is_canonical_run_report(
+            report
+        ):
+            return "canonical-report"
+
+    return "legacy"
+
+
+def _compare_legacy_runs(
+    first: str,
+    second: str,
+    project: str | Path = ".",
+) -> dict[str, Any]:
+    """Preserve the historical pipeline Run comparison contract."""
+
+    a = load_run(
+        first,
+        project,
+    )
+
+    b = load_run(
+        second,
+        project,
+    )
+
+    node_names = sorted(
+        set(
+            a.get(
+                "nodes",
+                {},
+            )
+        )
+        | set(
+            b.get(
+                "nodes",
+                {},
+            )
+        )
+    )
+
+    nodes: dict[
+        str,
+        Any,
+    ] = {}
+
     for name in node_names:
-        left = dict(a.get("nodes", {}).get(name, {}))
-        right = dict(b.get("nodes", {}).get(name, {}))
-        nodes[name] = {
-            "messages_delta": int(right.get("messages", 0)) - int(left.get("messages", 0)),
-            "p95_ms_delta": float(right.get("p95_ms", 0.0)) - float(left.get("p95_ms", 0.0)),
-            "errors_delta": int(right.get("errors", 0)) - int(left.get("errors", 0)),
+        left = dict(
+            a.get(
+                "nodes",
+                {},
+            ).get(
+                name,
+                {},
+            )
+        )
+
+        right = dict(
+            b.get(
+                "nodes",
+                {},
+            ).get(
+                name,
+                {},
+            )
+        )
+
+        nodes[
+            name
+        ] = {
+            "messages_delta": (
+                int(
+                    right.get(
+                        "messages",
+                        0,
+                    )
+                )
+                - int(
+                    left.get(
+                        "messages",
+                        0,
+                    )
+                )
+            ),
+            "p95_ms_delta": (
+                float(
+                    right.get(
+                        "p95_ms",
+                        0.0,
+                    )
+                )
+                - float(
+                    left.get(
+                        "p95_ms",
+                        0.0,
+                    )
+                )
+            ),
+            "errors_delta": (
+                int(
+                    right.get(
+                        "errors",
+                        0,
+                    )
+                )
+                - int(
+                    left.get(
+                        "errors",
+                        0,
+                    )
+                )
+            ),
         }
 
-    left_summary = aggregate_reports([a])
-    right_summary = aggregate_reports([b])
+    left_summary = aggregate_reports(
+        [
+            a,
+        ]
+    )
+
+    right_summary = aggregate_reports(
+        [
+            b,
+        ]
+    )
+
     metric_names = (
         "duration_seconds",
         "source_rate_hz",
@@ -195,14 +351,144 @@ def compare_runs(first: str, second: str, project: str | Path = ".") -> dict[str
         "dropped_messages",
         "estimated_memory_bytes",
     )
+
     metrics = {
-        name: _metric(_mean_metric(left_summary, name), _mean_metric(right_summary, name))
+        name: _metric(
+            _mean_metric(
+                left_summary,
+                name,
+            ),
+            _mean_metric(
+                right_summary,
+                name,
+            ),
+        )
         for name in metric_names
     }
+
     return {
-        "first": a.get("run_dir", first),
-        "second": b.get("run_dir", second),
-        "duration_seconds_delta": float(b.get("duration_seconds", 0.0)) - float(a.get("duration_seconds", 0.0)),
+        "first": a.get(
+            "run_dir",
+            first,
+        ),
+        "second": b.get(
+            "run_dir",
+            second,
+        ),
+        "duration_seconds_delta": (
+            float(
+                b.get(
+                    "duration_seconds",
+                    0.0,
+                )
+            )
+            - float(
+                a.get(
+                    "duration_seconds",
+                    0.0,
+                )
+            )
+        ),
         "nodes": nodes,
         "metrics": metrics,
     }
+
+
+def compare_runs(
+    first: str,
+    second: str,
+    project: str | Path = ".",
+) -> dict[str, Any]:
+    """Compare two Runs without silently crossing history models."""
+
+    first_directory = resolve_run(
+        first,
+        project,
+    )
+
+    second_directory = resolve_run(
+        second,
+        project,
+    )
+
+    first_kind = _comparison_run_kind(
+        first_directory
+    )
+
+    second_kind = _comparison_run_kind(
+        second_directory
+    )
+
+    first_is_canonical = (
+        first_kind.startswith(
+            "canonical-"
+        )
+    )
+
+    second_is_canonical = (
+        second_kind.startswith(
+            "canonical-"
+        )
+    )
+
+    if (
+        first_is_canonical
+        != second_is_canonical
+    ):
+        raise RunComparisonCompatibilityError(
+            "cannot compare canonical and legacy Runs; "
+            f"{first_directory.name} is {first_kind}, "
+            f"{second_directory.name} is {second_kind}"
+        )
+
+    if (
+        first_kind
+        == "canonical-persisted"
+        and second_kind
+        == "canonical-persisted"
+    ):
+        return (
+            compare_canonical_run_bundles(
+                load_canonical_run_bundle(
+                    first_directory
+                ),
+                load_canonical_run_bundle(
+                    second_directory
+                ),
+            )
+            .to_dict()
+        )
+
+    if first_is_canonical:
+        unavailable = [
+            directory.name
+            for directory, kind
+            in (
+                (
+                    first_directory,
+                    first_kind,
+                ),
+                (
+                    second_directory,
+                    second_kind,
+                ),
+            )
+            if kind
+            != "canonical-persisted"
+        ]
+
+        raise CanonicalRunComparisonUnavailableError(
+            "canonical runs compare requires the persistent "
+            "RunSession/Definition/Plan/Policy evidence bundle; "
+            "report-only canonical history cannot provide exact "
+            "comparison: "
+            + ", ".join(
+                unavailable
+            )
+        )
+
+    return _compare_legacy_runs(
+        first,
+        second,
+        project,
+    )

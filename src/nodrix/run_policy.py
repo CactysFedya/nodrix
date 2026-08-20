@@ -766,6 +766,60 @@ def validate_execution_policy_document(
     return document
 
 
+
+def load_run_policy(
+    session: RunSession,
+) -> dict[str, Any] | None:
+    """Read historical policy.json without reconstructing ExecutionPolicy."""
+
+    if not isinstance(
+        session,
+        RunSession,
+    ):
+        raise TypeError(
+            "session must be a RunSession"
+        )
+
+    path = (
+        session.directory
+        / "policy.json"
+    )
+
+    if not path.exists():
+        return None
+
+    if not path.is_file():
+        raise RunPolicyCorruptionError(
+            "policy.json exists but is not a file"
+        )
+
+    try:
+        with path.open(
+            "r",
+            encoding="utf-8",
+        ) as stream:
+            document = json.load(
+                stream,
+                parse_constant=(
+                    _reject_json_constant
+                ),
+            )
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ) as exc:
+        raise RunPolicyCorruptionError(
+            "policy.json contains invalid JSON"
+        ) from exc
+
+    return validate_execution_policy_document(
+        document,
+        run_id=session.run_id,
+        plan_id=session.plan_id,
+    )
+
+
 class RunPolicyStore:
     """Immutable policy.json storage bound to one RunSession."""
 
@@ -828,33 +882,8 @@ class RunPolicyStore:
     def read(
         self,
     ) -> dict[str, Any] | None:
-        if not self.path.exists():
-            return None
-
-        try:
-            with self.path.open(
-                "r",
-                encoding="utf-8",
-            ) as stream:
-                document = json.load(
-                    stream,
-                    parse_constant=(
-                        _reject_json_constant
-                    ),
-                )
-        except (
-            UnicodeDecodeError,
-            json.JSONDecodeError,
-            ValueError,
-        ) as exc:
-            raise RunPolicyCorruptionError(
-                "policy.json contains invalid JSON"
-            ) from exc
-
-        return validate_execution_policy_document(
-            document,
-            run_id=self.run_id,
-            plan_id=self.plan_id,
+        return load_run_policy(
+            self._session
         )
 
     def create(
@@ -935,5 +964,6 @@ __all__ = [
     "RunPolicyError",
     "RunPolicyStore",
     "execution_policy_document",
+    "load_run_policy",
     "validate_execution_policy_document",
 ]
