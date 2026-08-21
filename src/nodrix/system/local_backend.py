@@ -33,6 +33,7 @@ from .backend import (
     ExecutionBackend,
     ExecutionHealthState,
     ExecutionObservation,
+    ExecutionTiming,
     PreparedExecution,
 )
 from .execution_context import SystemExecutionContext
@@ -1200,6 +1201,30 @@ class LocalBackend(ExecutionBackend):
         if error is not None:
             details["error"] = f"{type(error).__name__}: {error}"
 
+        timing: ExecutionTiming | None = None
+
+        raw_duration = report.get(
+            "duration_seconds"
+        )
+
+        if raw_duration is not None:
+            try:
+                timing = ExecutionTiming(
+                    raw_duration
+                )
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+                # Timing is optional backend evidence. Invalid compatibility
+                # runtime timing must not destabilize ordinary inspection.
+                # Consumers requiring measured timing can reject timing=None.
+                details[
+                    "timing_error"
+                ] = (
+                    f"{type(exc).__name__}: {exc}"
+                )
+
         observation: ExecutionObservation | None = None
         snapshotter = getattr(execution.runtime, "snapshot", None)
         if callable(snapshotter):
@@ -1247,6 +1272,7 @@ class LocalBackend(ExecutionBackend):
             ),
             details=details,
             observation=observation,
+            timing=timing,
         )
 
     def _stop(

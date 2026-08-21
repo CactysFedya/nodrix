@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from enum import StrEnum
 from pathlib import Path
 from typing import Annotated
 
@@ -10,11 +11,21 @@ import typer
 import yaml
 
 from .benchmarking import (
+    BenchmarkPlan,
     direct_benchmark_plan,
     load_benchmark_plan,
 )
 from .benchmark_operation import (
     execute_benchmark_operation,
+)
+from .benchmark_system_execution import (
+    execute_canonical_system_benchmark,
+)
+from .benchmark_system_runner import (
+    CanonicalSystemBenchmarkRunner,
+)
+from .benchmark_system_workload import (
+    CanonicalBenchmarkSystemWorkloadResolver,
 )
 from .cli_context import (
     _format_bytes,
@@ -27,6 +38,12 @@ from .cli_context import (
     recording_app,
 )
 from .hybrid_runtime import HybridPipelineRuntime
+from .local_project_catalog import (
+    local_project_definition_catalog,
+)
+from .local_system_execution import (
+    build_local_system_orchestrator,
+)
 from .manifest import load_manifest_details
 from .optimization import (
     build_optimization_plan,
@@ -39,6 +56,8 @@ from .planning import (
     diagnose_report,
     explain_target,
 )
+from .run_session import RunStore
+from .workspace import find_workspace
 from .storage_layout import StorageLayout
 
 
@@ -161,6 +180,13 @@ def device_v4l2_probe(
     console.print(table)
 
 
+class BenchmarkCliMode(StrEnum):
+    """Explicit Benchmark execution semantics exposed by the CLI."""
+
+    SYSTEM = "system"
+    LEGACY = "legacy"
+
+
 def _execute_benchmark_run(
     pipeline: Path,
     run_root: Path,
@@ -178,21 +204,278 @@ def _execute_benchmark_run(
     return runtime.run_sync() if isinstance(runtime, HybridPipelineRuntime) else asyncio.run(runtime.run())
 
 
+def _canonical_benchmark_project_root(
+    plan: BenchmarkPlan,
+) -> Path:
+    """Resolve one storage/execution root for a canonical System Benchmark."""
+
+    source = (
+        Path(
+            plan.pipeline
+        )
+        .expanduser()
+        .resolve()
+    )
+
+    return (
+        find_workspace(
+            source.parent
+        )
+        or source.parent
+    ).resolve()
+
+
+def _canonical_benchmark_summary(
+    execution,
+) -> dict[str, object]:
+    """Return stable CLI-facing summary of one canonical System Benchmark."""
+
+    return {
+        "schema": (
+            "nodrix.benchmark-system-cli/v1"
+        ),
+        "mode": "system",
+        "benchmark_plan_id": (
+            execution.plan.plan_id
+        ),
+        "benchmark_subject": (
+            execution
+            .plan
+            .operation
+            .subject
+            .canonical
+        ),
+        "benchmark_revision": (
+            execution
+            .plan
+            .subject_revision
+            .canonical
+        ),
+        "warmup_run_ids": list(
+            execution.warmup_run_ids
+        ),
+        "measured_run_ids": list(
+            execution.measured_run_ids
+        ),
+        "artifacts": [
+            {
+                "kind": artifact.kind,
+                "uri": str(
+                    artifact.uri
+                ),
+            }
+            for artifact
+            in execution.artifacts
+        ],
+    }
+
+
+def _execute_canonical_benchmark_cli(
+    plan: BenchmarkPlan,
+) -> dict[str, object]:
+    """Execute canonical System Benchmark through reusable execution layers."""
+
+    if not isinstance(
+        plan,
+        BenchmarkPlan,
+    ):
+        raise TypeError(
+            "plan must be a BenchmarkPlan"
+        )
+
+    project_root = (
+        _canonical_benchmark_project_root(
+            plan
+        )
+    )
+
+    layout = StorageLayout(
+        project_root
+    )
+
+    def orchestrator_factory(
+        resolved,
+    ):
+        execution_root = (
+            resolved.project_root
+            or resolved.source.parent
+        ).resolve()
+
+        if (
+            execution_root
+            != project_root
+        ):
+            raise ValueError(
+                "all canonical Benchmark variants "
+                "must resolve inside the same "
+                "project root"
+            )
+
+        return (
+            build_local_system_orchestrator(
+                resolved.plan,
+                project=(
+                    resolved.project_root
+                ),
+                working_directory=(
+                    execution_root
+                ),
+                run_root=(
+                    layout.runs_root
+                ),
+            )
+        )
+
+    resolver = (
+        CanonicalBenchmarkSystemWorkloadResolver(
+            orchestrator_factory=(
+                orchestrator_factory
+            ),
+            catalog_provider=(
+                local_project_definition_catalog
+            ),
+        )
+    )
+
+    runner = (
+        CanonicalSystemBenchmarkRunner(
+            workload_resolver=resolver,
+            run_store=RunStore(
+                layout.runs_root
+            ),
+        )
+    )
+
+    execution = (
+        execute_canonical_system_benchmark(
+            plan,
+            runner=runner,
+            project=project_root,
+        )
+    )
+
+    return (
+        _canonical_benchmark_summary(
+            execution
+        )
+    )
+
+
 @app.command()
 def benchmark(
-    pipeline: Annotated[Path | None, typer.Argument(help="2.x Pipeline manifest; defaults to pipeline.yaml")] = None,
-    spec: Annotated[Path | None, typer.Option("--spec", help="Versioned benchmark YAML specification")] = None,
-    repeat: Annotated[int | None, typer.Option("--repeat", min=1)] = None,
-    warmup: Annotated[int | None, typer.Option("--warmup", min=0)] = None,
-    output: Annotated[Path | None, typer.Option("--output", help="Benchmark artifact root or legacy summary .json path")] = None,
-    variants: Annotated[list[str] | None, typer.Option("--variant", help="Run only a named variant from --spec")] = None,
-    profile: Annotated[str | None, typer.Option("--profile")] = None,
-    set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
-    block_values: Annotated[list[str] | None, typer.Option("--block")] = None,
-    json_output: Annotated[bool, typer.Option("--json")] = False,
+    pipeline: Annotated[
+        Path | None,
+        typer.Argument(
+            help=(
+                "System source with --mode system; "
+                "2.x Pipeline manifest with --mode legacy"
+            )
+        ),
+    ] = None,
+    mode: Annotated[
+        BenchmarkCliMode | None,
+        typer.Option(
+            "--mode",
+            help=(
+                "Execution semantics: "
+                "'system' for canonical System Benchmark "
+                "or 'legacy' for 2.x Pipeline compatibility"
+            ),
+        ),
+    ] = None,
+    spec: Annotated[
+        Path | None,
+        typer.Option(
+            "--spec",
+            help="Versioned benchmark YAML specification",
+        ),
+    ] = None,
+    repeat: Annotated[
+        int | None,
+        typer.Option(
+            "--repeat",
+            min=1,
+        ),
+    ] = None,
+    warmup: Annotated[
+        int | None,
+        typer.Option(
+            "--warmup",
+            min=0,
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            help=(
+                "Legacy Benchmark artifact root or summary JSON path; "
+                "canonical System mode uses project storage"
+            ),
+        ),
+    ] = None,
+    variants: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--variant",
+            help="Run only a named variant from --spec",
+        ),
+    ] = None,
+    profile: Annotated[
+        str | None,
+        typer.Option(
+            "--profile",
+            help=(
+                "Project Profile in system mode; "
+                "legacy Pipeline profile in legacy mode"
+            ),
+        ),
+    ] = None,
+    set_values: Annotated[
+        list[str] | None,
+        typer.Option("--set"),
+    ] = None,
+    block_values: Annotated[
+        list[str] | None,
+        typer.Option("--block"),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json"),
+    ] = False,
 ) -> None:
-    """Run a reproducible benchmark suite with warm-up, variants, artifacts and percentiles."""
+    """Run an explicitly selected canonical System or legacy Pipeline Benchmark."""
+
     try:
+        if mode is None:
+            raise ValueError(
+                "--mode is required; choose "
+                "'system' or 'legacy'"
+            )
+
+        if (
+            mode
+            is BenchmarkCliMode.SYSTEM
+        ):
+            if (
+                set_values
+                or block_values
+            ):
+                raise ValueError(
+                    "--set and --block are legacy "
+                    "Pipeline options; canonical "
+                    "System Benchmark uses Project "
+                    "Profiles or canonical System "
+                    "parameters"
+                )
+
+            if output is not None:
+                raise ValueError(
+                    "--output is currently legacy-only; "
+                    "canonical System Benchmark results "
+                    "use canonical project storage"
+                )
+
         if spec is not None:
             plan = load_benchmark_plan(
                 spec,
@@ -201,57 +484,231 @@ def benchmark(
                 warmup_override=warmup,
                 selected_variants=variants,
             )
-            if profile is not None or set_values or block_values:
-                raise ValueError("--profile, --set and --block belong in benchmark variants when --spec is used")
+
+            if (
+                profile is not None
+                or set_values
+                or block_values
+            ):
+                raise ValueError(
+                    "--profile, --set and --block "
+                    "belong in benchmark variants "
+                    "when --spec is used"
+                )
+
         else:
+            source = (
+                pipeline
+                if pipeline is not None
+                else (
+                    Path("system.yaml")
+                    if mode
+                    is BenchmarkCliMode.SYSTEM
+                    else Path("pipeline.yaml")
+                )
+            )
+
             plan = direct_benchmark_plan(
-                pipeline or Path("pipeline.yaml"),
-                repeat=repeat if repeat is not None else 3,
-                warmup=warmup if warmup is not None else 1,
+                source,
+                repeat=(
+                    repeat
+                    if repeat is not None
+                    else 3
+                ),
+                warmup=(
+                    warmup
+                    if warmup is not None
+                    else 1
+                ),
                 profile=profile,
                 set_values=set_values,
                 block_values=block_values,
             )
-        legacy_json = output if output is not None and output.suffix.lower() == ".json" else None
-        root = output.parent if legacy_json is not None else output
-        outcome = execute_benchmark_operation(
-            plan,
-            run_callable=_execute_benchmark_run,
-            output_root=root,
-        )
 
-        if not outcome.successful:
-            message = outcome.execution.details.get(
-                "error",
-                "benchmark execution failed",
+        if (
+            mode
+            is BenchmarkCliMode.SYSTEM
+        ):
+            summary = (
+                _execute_canonical_benchmark_cli(
+                    plan
+                )
             )
-            raise RuntimeError(str(message))
 
-        summary = outcome.summary()
+        elif (
+            mode
+            is BenchmarkCliMode.LEGACY
+        ):
+            legacy_json = (
+                output
+                if (
+                    output is not None
+                    and output.suffix.lower()
+                    == ".json"
+                )
+                else None
+            )
 
-        if legacy_json is not None:
-            legacy_json.parent.mkdir(parents=True, exist_ok=True)
-            legacy_json.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
+            root = (
+                output.parent
+                if legacy_json is not None
+                else output
+            )
+
+            outcome = (
+                execute_benchmark_operation(
+                    plan,
+                    run_callable=(
+                        _execute_benchmark_run
+                    ),
+                    output_root=root,
+                )
+            )
+
+            if not outcome.successful:
+                message = (
+                    outcome
+                    .execution
+                    .details
+                    .get(
+                        "error",
+                        "benchmark execution failed",
+                    )
+                )
+
+                raise RuntimeError(
+                    str(
+                        message
+                    )
+                )
+
+            summary = (
+                outcome.summary()
+            )
+
+            if legacy_json is not None:
+                legacy_json.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+
+                legacy_json.write_text(
+                    json.dumps(
+                        summary,
+                        indent=2,
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+        else:
+            raise ValueError(
+                "unsupported Benchmark "
+                "execution mode"
+            )
+
     except Exception as exc:
-        console.print(f"[red]Benchmark failed:[/red] {exc}")
-        raise typer.Exit(1)
-    if json_output:
-        console.print_json(json.dumps(summary))
-        return
-    table = Table("Variant", "Runs", "Source Hz", "Sink Hz", "E2E P95 ms", "Drops", "Memory")
-    for name, raw in dict(summary.get("variants", {})).items():
-        item = dict(raw)
-        table.add_row(
-            str(name),
-            str(item.get("runs", 0)),
-            f"{float(dict(item.get('source_rate_hz') or {}).get('mean', 0.0)):.2f}",
-            f"{float(dict(item.get('sink_rate_hz') or {}).get('mean', 0.0)):.2f}",
-            f"{float(dict(item.get('end_to_end_p95_ms') or {}).get('mean', 0.0)):.3f}",
-            f"{float(dict(item.get('dropped_messages') or {}).get('mean', 0.0)):.1f}",
-            _format_bytes(dict(item.get("estimated_memory_bytes") or {}).get("mean")),
+        console.print(
+            "[red]Benchmark failed:[/red] "
+            f"{exc}"
         )
-    console.print(table)
-    console.print(f"Artifacts: {summary['suite_dir']}")
+
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print_json(
+            json.dumps(
+                summary
+            )
+        )
+
+        return
+
+    if (
+        mode
+        is BenchmarkCliMode.SYSTEM
+    ):
+        console.print(
+            "[green]BENCHMARK COMPLETED[/green] "
+            f"{summary['benchmark_plan_id']} · "
+            f"measured="
+            f"{len(summary['measured_run_ids'])} · "
+            f"artifacts="
+            f"{len(summary['artifacts'])}"
+        )
+
+        for artifact in summary[
+            "artifacts"
+        ]:
+            console.print(
+                "Artifact: "
+                f"{artifact['uri']}"
+            )
+
+        return
+
+    table = Table(
+        "Variant",
+        "Runs",
+        "Source Hz",
+        "Sink Hz",
+        "E2E P95 ms",
+        "Drops",
+        "Memory",
+    )
+
+    for name, raw in dict(
+        summary.get(
+            "variants",
+            {},
+        )
+    ).items():
+        item = dict(
+            raw
+        )
+
+        table.add_row(
+            str(
+                name
+            ),
+            str(
+                item.get(
+                    "runs",
+                    0,
+                )
+            ),
+            (
+                f"{float(dict(item.get('source_rate_hz') or {}).get('mean', 0.0)):.2f}"
+            ),
+            (
+                f"{float(dict(item.get('sink_rate_hz') or {}).get('mean', 0.0)):.2f}"
+            ),
+            (
+                f"{float(dict(item.get('end_to_end_p95_ms') or {}).get('mean', 0.0)):.3f}"
+            ),
+            (
+                f"{float(dict(item.get('dropped_messages') or {}).get('mean', 0.0)):.1f}"
+            ),
+            _format_bytes(
+                dict(
+                    item.get(
+                        "estimated_memory_bytes"
+                    )
+                    or {}
+                ).get(
+                    "mean"
+                )
+            ),
+        )
+
+    console.print(
+        table
+    )
+
+    console.print(
+        f"Artifacts: "
+        f"{summary['suite_dir']}"
+    )
 
 
 @app.command("plan")

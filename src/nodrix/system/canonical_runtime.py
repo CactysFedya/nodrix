@@ -62,6 +62,10 @@ from nodrix.run_status import (
     RunStatusStore,
 )
 
+from .execution_context import (
+    SystemExecutionContext,
+    validate_system_execution_context_binding,
+)
 from .execution_events import (
     ExecutionEvent,
     ExecutionEventKind,
@@ -125,7 +129,7 @@ def _execution_state(
     )
 
 
-def _status_details(
+def _status_details_base(
     status: SystemExecutionStatus,
 ) -> dict[str, object]:
     details: dict[str, object] = {
@@ -174,6 +178,104 @@ def _status_details(
             }
             for item in status.systems
         )
+
+    return details
+
+
+def _status_details(
+    status: SystemExecutionStatus,
+) -> dict[str, object]:
+    """Return canonical execution details with typed timing evidence.
+
+    Per-backend timing is preserved without inventing a total System
+    duration. An exact execution timing is promoted only when one direct
+    backend scope represents the whole System and no nested child Systems
+    participate.
+    """
+
+    details = dict(
+        _status_details_base(
+            status
+        )
+    )
+
+    backend_timings = tuple(
+        {
+            "target": (
+                item.scope.target
+            ),
+            "backend": (
+                item.scope.backend
+            ),
+            "execution_id": (
+                item.status.execution_id
+            ),
+            "duration_seconds": (
+                item.status
+                .timing
+                .duration_seconds
+            ),
+        }
+        for item
+        in status.scopes
+        if (
+            item.status.timing
+            is not None
+        )
+    )
+
+    if backend_timings:
+        details[
+            "backend_timings"
+        ] = backend_timings
+
+    # Only this topology has an unambiguous whole-execution backend timing.
+    #
+    # Do not use sum/max for multi-scope or hierarchical Systems: scopes may
+    # overlap and child Systems may have different lifecycle boundaries.
+    if (
+        len(
+            status.scopes
+        )
+        == 1
+        and not status.systems
+    ):
+        scope_status = (
+            status.scopes[
+                0
+            ]
+        )
+
+        timing = (
+            scope_status
+            .status
+            .timing
+        )
+
+        if timing is not None:
+            details[
+                "execution_timing"
+            ] = {
+                "source": "backend",
+                "target": (
+                    scope_status
+                    .scope
+                    .target
+                ),
+                "backend": (
+                    scope_status
+                    .scope
+                    .backend
+                ),
+                "execution_id": (
+                    scope_status
+                    .status
+                    .execution_id
+                ),
+                "duration_seconds": (
+                    timing.duration_seconds
+                ),
+            }
 
     return details
 
@@ -662,6 +764,7 @@ def start_canonical_system_execution(
     plan: PlanRecord,
     *,
     system_definition: SystemModel | None = None,
+    execution_context: SystemExecutionContext | None = None,
     execution_policy: ExecutionPolicy | None = None,
     observability_profile: ObservabilityProfileName | str | None = None,
     environment_policy: RunEnvironmentPolicy | None = None,
@@ -682,6 +785,14 @@ def start_canonical_system_execution(
 
     domain_plan = _validate_system_plan_record(
         plan
+    )
+
+    # The materialized execution context is part of exact execution
+    # semantics.  Never run a Plan with a missing or different context:
+    # execution_context_sha256 is the deterministic binding contract.
+    validate_system_execution_context_binding(
+        domain_plan.execution_context_sha256,
+        execution_context,
     )
 
     if (
@@ -1099,6 +1210,7 @@ def start_canonical_system_execution(
         prepared = orchestrator.prepare_plan(
             domain_plan,
             metric_sink=metric_sink,
+            execution_context=execution_context,
         )
     except Exception as exc:
         try:

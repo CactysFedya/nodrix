@@ -9,6 +9,7 @@ import yaml
 from typer.testing import CliRunner
 
 import nodrix.cli_system_commands as system_cli
+import nodrix.local_system_execution as local_system_execution
 from nodrix.cli import app
 from nodrix.project_foundation import (
     add_project_resource,
@@ -184,7 +185,7 @@ def test_system_run_executes_local_backend_to_completion(
         _status(BackendExecutionState.RUNNING),
         _status(BackendExecutionState.COMPLETED),
     ]
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
     monkeypatch.setattr(system_cli.time, "sleep", lambda _: None)
 
     result = runner.invoke(app, ["system", "run", str(path)])
@@ -214,7 +215,7 @@ def test_system_run_failed_scope_stops_remaining_execution(
             message="RuntimeError: boom",
         ),
     ]
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
 
     result = runner.invoke(app, ["system", "run", str(path)])
 
@@ -255,7 +256,7 @@ def test_system_run_reports_missing_non_local_backend_binding(
         path,
     )
     FakeLocalBackend.reset()
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
 
     result = runner.invoke(app, ["system", "run", str(path)])
 
@@ -284,7 +285,7 @@ def test_system_run_surfaces_backend_validation_errors(
             ),
         ),
     )
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
 
     result = runner.invoke(app, ["system", "run", str(path)])
 
@@ -302,7 +303,7 @@ def test_system_run_ctrl_c_requests_orchestrated_stop(
     _write_local_system(path)
     FakeLocalBackend.reset()
     FakeLocalBackend.inspect_error = KeyboardInterrupt()
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
 
     result = runner.invoke(
         app,
@@ -330,7 +331,7 @@ def test_system_run_inspect_exception_becomes_failure_and_stops(
     _write_local_system(path)
     FakeLocalBackend.reset()
     FakeLocalBackend.inspect_error = RuntimeError("inspect exploded")
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
 
     result = runner.invoke(app, ["system", "run", str(path)])
 
@@ -373,7 +374,7 @@ def test_system_run_with_project_resolves_sdk_and_passes_project(
     FakeLocalBackend.statuses = [
         _status(BackendExecutionState.COMPLETED),
     ]
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
 
     result = runner.invoke(
         app,
@@ -447,7 +448,7 @@ def test_system_run_handles_multiple_independent_local_scopes(
         _status(BackendExecutionState.COMPLETED),
         _status(BackendExecutionState.COMPLETED),
     ]
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
     monkeypatch.setattr(system_cli.time, "sleep", lambda _: None)
 
     result = runner.invoke(app, ["system", "run", str(path)])
@@ -484,7 +485,7 @@ def test_system_run_warnings_as_errors_refuses_cycle(
         path,
     )
     FakeLocalBackend.reset()
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
 
     result = runner.invoke(
         app,
@@ -568,7 +569,7 @@ def test_system_run_profile_uses_exact_profile_bound_plan(
     ]
 
     monkeypatch.setattr(
-        system_cli,
+        local_system_execution,
         "LocalBackend",
         FakeLocalBackend,
     )
@@ -731,7 +732,7 @@ def test_system_run_jsonl_emits_dependency_startup_events(
         _status(BackendExecutionState.COMPLETED),
         _status(BackendExecutionState.COMPLETED),
     ]
-    monkeypatch.setattr(system_cli, "LocalBackend", FakeLocalBackend)
+    monkeypatch.setattr(local_system_execution, "LocalBackend", FakeLocalBackend)
     monkeypatch.setattr(system_cli.time, "sleep", lambda _: None)
 
     result = runner.invoke(
@@ -792,7 +793,7 @@ def test_system_run_executes_child_system_hierarchy(
     ]
 
     monkeypatch.setattr(
-        system_cli,
+        local_system_execution,
         "LocalBackend",
         FakeLocalBackend,
     )
@@ -863,7 +864,7 @@ def test_system_run_executes_child_system_standalone(
     ]
 
     monkeypatch.setattr(
-        system_cli,
+        local_system_execution,
         "LocalBackend",
         FakeLocalBackend,
     )
@@ -995,7 +996,7 @@ def test_system_run_renders_scope_transition_while_parent_stays_running(
     ]
 
     monkeypatch.setattr(
-        system_cli,
+        local_system_execution,
         "LocalBackend",
         FakeLocalBackend,
     )
@@ -1083,7 +1084,7 @@ def test_system_run_renders_observation_transition_without_state_change(
     ]
 
     monkeypatch.setattr(
-        system_cli,
+        local_system_execution,
         "LocalBackend",
         FakeLocalBackend,
     )
@@ -1133,7 +1134,7 @@ def test_system_run_renders_nested_system_observation(
     ]
 
     monkeypatch.setattr(
-        system_cli,
+        local_system_execution,
         "LocalBackend",
         FakeLocalBackend,
     )
@@ -1198,7 +1199,7 @@ def test_system_run_emits_versioned_jsonl_events(
     ]
 
     monkeypatch.setattr(
-        system_cli,
+        local_system_execution,
         "LocalBackend",
         FakeLocalBackend,
     )

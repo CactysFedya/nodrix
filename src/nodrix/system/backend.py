@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+import math
 from enum import Enum, StrEnum
 from typing import Any, Iterable, Literal, Mapping
 
@@ -558,6 +559,58 @@ class ExecutionObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionTiming:
+    """Backend-neutral measured execution timing evidence.
+
+    ``duration_seconds`` is supplied by the execution backend from its own
+    execution measurement.  It is distinct from orchestration observation
+    timestamps such as CanonicalSystemExecution.finished_at.
+    """
+
+    duration_seconds: float
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(
+                self.duration_seconds,
+                bool,
+            )
+            or not isinstance(
+                self.duration_seconds,
+                (
+                    int,
+                    float,
+                ),
+            )
+        ):
+            raise TypeError(
+                "ExecutionTiming.duration_seconds "
+                "must be a real number"
+            )
+
+        value = float(
+            self.duration_seconds
+        )
+
+        if (
+            not math.isfinite(
+                value
+            )
+            or value < 0.0
+        ):
+            raise ValueError(
+                "ExecutionTiming.duration_seconds "
+                "must be finite and non-negative"
+            )
+
+        object.__setattr__(
+            self,
+            "duration_seconds",
+            value,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class BackendExecutionStatus:
     backend: str
     execution_id: str
@@ -565,8 +618,21 @@ class BackendExecutionStatus:
     message: str | None = None
     details: Mapping[str, Any] = field(default_factory=dict)
     observation: ExecutionObservation | None = None
+    timing: ExecutionTiming | None = None
 
     def __post_init__(self) -> None:
+        if (
+            self.timing is not None
+            and not isinstance(
+                self.timing,
+                ExecutionTiming,
+            )
+        ):
+            raise TypeError(
+                "BackendExecutionStatus.timing must be "
+                "an ExecutionTiming or None"
+            )
+
         if (
             self.observation is not None
             and not isinstance(
@@ -969,6 +1035,7 @@ __all__ = [
     "BackendSystemLink",
     "ExecutionHealthState",
     "ExecutionObservation",
+    "ExecutionTiming",
     "BackendValidationError",
     "BackendValidationReport",
     "ExecutionBackend",

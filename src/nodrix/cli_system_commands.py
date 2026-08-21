@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from enum import StrEnum
 from pathlib import Path
-import sys
 import time
 from typing import Annotated
 
@@ -14,7 +13,12 @@ import typer
 import yaml
 
 from .cli_context import app, console
-from .local_dev import compile_local_project, reset_local_development_modules
+from .local_project_catalog import (
+    local_project_definition_catalog,
+)
+from .local_system_execution import (
+    build_local_system_orchestrator,
+)
 from .manifest import load_manifest
 from .presentation import (
     render_system_execution_status,
@@ -31,22 +35,17 @@ from .workspace import (
     find_workspace,
     resolve_project_execution_context,
 )
-from .sdk.definitions import MessageDefinition, NodeDefinition, ResourceDefinition
 from .system import (
     BackendExecutionState,
-    DefinitionCatalog,
     ExecutionEvent,
     ExecutionEventKind,
-    LocalBackend,
     SystemStartupEvent,
     SystemStartupEventKind,
-    SystemOrchestrator,
     dump_system,
     dump_system_schema,
     dumps_execution_event,
     load_system_details,
     pipeline_manifest_to_system,
-    plan_execution_scopes,
     plan_system,
     validate_system,
 )
@@ -316,52 +315,6 @@ def _render_system_resolution(details) -> None:
         console.print(provenance)
 
 
-def _catalog_for_project(path: Path) -> DefinitionCatalog:
-    """Resolve neutral SDK definitions without leaking local modules.
-
-    Typer's CliRunner executes multiple CLI invocations in one Python process
-    during tests and embedding. Implicit local projects all use module names
-    such as ``components.nodes``. Always reset the reserved local-development
-    module set before and after compilation so one project cannot poison the
-    next command.
-    """
-
-    reset_local_development_modules()
-    try:
-        project = compile_local_project(path)
-
-        nodes: dict[str, NodeDefinition] = {}
-        resources: dict[str, ResourceDefinition] = {}
-        messages: dict[str, MessageDefinition] = {}
-
-        for cls in project.compiled.provider_runtime.nodes.values():
-            definition = getattr(cls, "__plyctl_definition__", None)
-            if isinstance(definition, NodeDefinition):
-                nodes[definition.name] = definition
-
-        for cls in project.compiled.provider_runtime.resources.values():
-            definition = getattr(cls, "__plyctl_definition__", None)
-            if isinstance(definition, ResourceDefinition):
-                resources[definition.name] = definition
-
-        # Read MessageDefinitions while the compiled modules are still
-        # available; the Definition objects remain valid after cleanup.
-        for module_name in project.module_names:
-            module = sys.modules.get(module_name)
-            if module is None:
-                continue
-            for value in vars(module).values():
-                definition = getattr(value, "__plyctl_definition__", None)
-                if isinstance(definition, MessageDefinition):
-                    messages[definition.type_id] = definition
-
-        return DefinitionCatalog(
-            nodes=nodes,
-            resources=resources,
-            messages=messages,
-        )
-    finally:
-        reset_local_development_modules()
 
 
 @system_app.command("validate")
@@ -406,7 +359,7 @@ def system_validate(
             resolved_path
         ).system
         catalog = (
-            _catalog_for_project(effective_project)
+            local_project_definition_catalog(effective_project)
             if effective_project is not None
             else None
         )
@@ -551,7 +504,7 @@ def system_plan(
         )
         system = details.system
         catalog = (
-            _catalog_for_project(effective_project)
+            local_project_definition_catalog(effective_project)
             if effective_project is not None
             else None
         )
@@ -673,65 +626,8 @@ def _render_orchestration_validation(
 
     console.print(table)
 
-def _hierarchical_execution_scopes(
-    plan,
-):
-    """Return unique executable scopes used anywhere in a System plan tree."""
-
-    result = []
-    seen = set()
-
-    def visit(current) -> None:
-        for scope in plan_execution_scopes(
-            current
-        ):
-            if scope in seen:
-                continue
-
-            seen.add(scope)
-            result.append(scope)
-
-        for child in current.systems:
-            visit(child.plan)
-
-    visit(plan)
-
-    return tuple(result)
 
 
-def _local_orchestration_bindings(
-    plan,
-    *,
-    project,
-    working_directory: Path,
-    run_root: Path | None,
-    stop_timeout: float,
-):
-    """Create LocalBackend bindings for every unique local execution scope."""
-
-    bindings = {}
-
-    for scope in _hierarchical_execution_scopes(
-        plan
-    ):
-        if scope.backend != "local":
-            # Unsupported/missing backend bindings remain absent.
-            # SystemOrchestrator will report ORCH101 honestly.
-            continue
-
-        bindings[scope] = LocalBackend(
-            project=project,
-            working_directory=(
-                working_directory
-            ),
-            run_root=run_root,
-            stop_timeout_seconds=(
-                stop_timeout
-            ),
-            scope_name=scope.target,
-        )
-
-    return bindings
 
 
 class _SystemRunOutputFormat(StrEnum):
@@ -939,7 +835,7 @@ def system_run(
         event_system = system.name
 
         catalog = (
-            _catalog_for_project(
+            local_project_definition_catalog(
                 effective_project
             )
             if effective_project is not None
@@ -1059,20 +955,18 @@ def system_run(
         or resolved_path.parent
     )
 
-    bindings = (
-        _local_orchestration_bindings(
+    orchestrator = (
+        build_local_system_orchestrator(
             plan,
             project=effective_project,
             working_directory=(
                 execution_root
             ),
             run_root=run_root,
-            stop_timeout=stop_timeout,
+            stop_timeout_seconds=(
+                stop_timeout
+            ),
         )
-    )
-
-    orchestrator = SystemOrchestrator(
-        bindings
     )
 
     report = orchestrator.validate_plan(

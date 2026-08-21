@@ -7,7 +7,6 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-import nodrix.cli_system_commands as system_cli
 from nodrix.build_recipes import compile_project_build_workflow
 from nodrix.cli import app
 from nodrix.system import (
@@ -238,7 +237,13 @@ def test_nested_registered_system_executes_from_workspace_root(
 
     _FakeBackend.instances.clear()
     monkeypatch.chdir(project)
-    monkeypatch.setattr(system_cli, "LocalBackend", _FakeBackend)
+    import nodrix.local_system_execution as local_system_execution
+
+    monkeypatch.setattr(
+        local_system_execution,
+        "LocalBackend",
+        _FakeBackend,
+    )
 
     result = runner.invoke(app, ["system", "run"])
     assert result.exit_code == 0, result.output

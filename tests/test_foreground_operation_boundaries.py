@@ -49,6 +49,7 @@ CLI_SERVICES = {
         "cli_operation_commands.py"
     ): {
         "execute_benchmark_operation",
+        "execute_canonical_system_benchmark",
         "execute_optimization_operation",
     },
 }

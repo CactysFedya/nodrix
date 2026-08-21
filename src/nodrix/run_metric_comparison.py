@@ -628,6 +628,190 @@ def _summaries(
     )
 
 
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class RunMetricDescriptorSummary:
+    """One canonical descriptor summarized inside one Run."""
+
+    descriptor: MetricDescriptor
+    summary: MetricSeriesSummary
+
+    def __post_init__(
+        self,
+    ) -> None:
+        if not isinstance(
+            self.descriptor,
+            MetricDescriptor,
+        ):
+            raise TypeError(
+                "descriptor must be a MetricDescriptor"
+            )
+
+        if not isinstance(
+            self.summary,
+            MetricSeriesSummary,
+        ):
+            raise TypeError(
+                "summary must be a MetricSeriesSummary"
+            )
+
+    @property
+    def descriptor_id(
+        self,
+    ) -> str:
+        return (
+            self.descriptor.descriptor_id
+        )
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class RunMetricSnapshot:
+    """Bounded typed Metric summary for one persisted canonical Run."""
+
+    completeness: RunMetricCompleteness
+    descriptors: tuple[
+        RunMetricDescriptorSummary,
+        ...,
+    ]
+
+    def __post_init__(
+        self,
+    ) -> None:
+        if not isinstance(
+            self.completeness,
+            RunMetricCompleteness,
+        ):
+            raise TypeError(
+                "completeness must be RunMetricCompleteness"
+            )
+
+        if not isinstance(
+            self.descriptors,
+            tuple,
+        ):
+            raise TypeError(
+                "descriptors must be a tuple"
+            )
+
+        ids = []
+
+        for item in self.descriptors:
+            if not isinstance(
+                item,
+                RunMetricDescriptorSummary,
+            ):
+                raise TypeError(
+                    "descriptors must contain "
+                    "RunMetricDescriptorSummary values"
+                )
+
+            ids.append(
+                item.descriptor_id
+            )
+
+        if ids != sorted(
+            ids
+        ):
+            raise ValueError(
+                "descriptors must be sorted by descriptor_id"
+            )
+
+        if len(ids) != len(
+            set(ids)
+        ):
+            raise ValueError(
+                "descriptor identities must be unique"
+            )
+
+    def to_dict(
+        self,
+    ) -> dict[str, object]:
+        return {
+            "completeness": (
+                self.completeness.to_dict()
+            ),
+            "descriptors": [
+                {
+                    "descriptorId": (
+                        item.descriptor.descriptor_id
+                    ),
+                    "name": (
+                        item.descriptor.name
+                    ),
+                    "valueType": (
+                        item.descriptor.value_type.value
+                    ),
+                    "unit": (
+                        item.descriptor.unit
+                    ),
+                    "summary": (
+                        item.summary.to_dict()
+                    ),
+                }
+                for item
+                in self.descriptors
+            ],
+        }
+
+
+def summarize_run_metrics(
+    bundle: CanonicalRunBundle,
+) -> RunMetricSnapshot:
+    """Summarize canonical Metrics for one persisted Run exactly once."""
+
+    if not isinstance(
+        bundle,
+        CanonicalRunBundle,
+    ):
+        raise TypeError(
+            "bundle must be a CanonicalRunBundle"
+        )
+
+    (
+        _,
+        records,
+        completeness,
+    ) = _journal_state(
+        bundle
+    )
+
+    (
+        descriptors,
+        summaries,
+    ) = _summaries(
+        records
+    )
+
+    items = tuple(
+        RunMetricDescriptorSummary(
+            descriptor=(
+                descriptors[
+                    descriptor_id
+                ]
+            ),
+            summary=(
+                summaries[
+                    descriptor_id
+                ]
+            ),
+        )
+        for descriptor_id
+        in sorted(
+            summaries
+        )
+    )
+
+    return RunMetricSnapshot(
+        completeness=completeness,
+        descriptors=items,
+    )
+
+
 def compare_run_metrics(
     first: CanonicalRunBundle,
     second: CanonicalRunBundle,
@@ -777,6 +961,9 @@ __all__ = [
     "MetricDescriptorComparison",
     "MetricSeriesSummary",
     "RunMetricCompleteness",
+    "RunMetricDescriptorSummary",
+    "RunMetricSnapshot",
     "RunMetricsComparison",
     "compare_run_metrics",
+    "summarize_run_metrics",
 ]
