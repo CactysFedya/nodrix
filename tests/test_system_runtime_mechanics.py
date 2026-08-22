@@ -403,3 +403,173 @@ def test_direct_preparation_preserves_resolved_runtime_mechanics(
         .process
         is None
     )
+
+
+def test_runtime_mechanics_has_canonical_graph_memory_policy():
+    resolved = (
+        resolve_runtime_mechanics(
+            None
+        )
+    )
+
+    assert (
+        resolved.graph_memory
+        .default_domain
+        == "auto"
+    )
+
+    assert (
+        resolved.graph_memory
+        .forbid_implicit_copies
+        is False
+    )
+
+
+def test_explicit_graph_memory_mechanics_are_resolved():
+    context = SystemExecutionContext(
+        runtime={
+            "mechanics": {
+                "graph_memory": {
+                    "default_domain": "shared",
+                    "forbid_implicit_copies": True,
+                },
+            },
+        },
+    )
+
+    resolved = (
+        resolve_runtime_mechanics(
+            context
+        )
+    )
+
+    assert (
+        resolved.graph_memory
+        .default_domain
+        == "shared"
+    )
+
+    assert (
+        resolved.graph_memory
+        .forbid_implicit_copies
+        is True
+    )
+
+
+def test_partial_graph_memory_mechanics_keep_canonical_base_policy():
+    context = SystemExecutionContext(
+        runtime={
+            "mechanics": {
+                "graph_memory": {
+                    "forbid_implicit_copies": True,
+                },
+            },
+        },
+    )
+
+    resolved = (
+        resolve_runtime_mechanics(
+            context
+        )
+    )
+
+    assert (
+        resolved.graph_memory
+        .default_domain
+        == "auto"
+    )
+
+    assert (
+        resolved.graph_memory
+        .forbid_implicit_copies
+        is True
+    )
+
+
+def test_legacy_runtime_memory_does_not_drive_graph_memory_mechanics():
+    context = SystemExecutionContext(
+        runtime={
+            "memory": {
+                "default_domain": "shared",
+                "forbid_implicit_copies": True,
+            },
+        },
+    )
+
+    resolved = (
+        resolve_runtime_mechanics(
+            context
+        )
+    )
+
+    assert (
+        resolved.graph_memory
+        .default_domain
+        == "auto"
+    )
+
+    assert (
+        resolved.graph_memory
+        .forbid_implicit_copies
+        is False
+    )
+
+
+def test_graph_memory_rejects_empty_default_domain():
+    context = SystemExecutionContext(
+        runtime={
+            "mechanics": {
+                "graph_memory": {
+                    "default_domain": "",
+                },
+            },
+        },
+    )
+
+    with pytest.raises(
+        RuntimeMechanicsResolutionError,
+        match="default_domain",
+    ):
+        resolve_runtime_mechanics(
+            context
+        )
+
+
+def test_graph_memory_rejects_non_boolean_copy_policy():
+    context = SystemExecutionContext(
+        runtime={
+            "mechanics": {
+                "graph_memory": {
+                    "forbid_implicit_copies": 1,
+                },
+            },
+        },
+    )
+
+    with pytest.raises(
+        RuntimeMechanicsResolutionError,
+        match="forbid_implicit_copies",
+    ):
+        resolve_runtime_mechanics(
+            context
+        )
+
+
+def test_graph_memory_rejects_unknown_fields():
+    context = SystemExecutionContext(
+        runtime={
+            "mechanics": {
+                "graph_memory": {
+                    "mystery": True,
+                },
+            },
+        },
+    )
+
+    with pytest.raises(
+        RuntimeMechanicsResolutionError,
+        match="mystery",
+    ):
+        resolve_runtime_mechanics(
+            context
+        )

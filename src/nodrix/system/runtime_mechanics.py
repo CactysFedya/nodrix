@@ -69,8 +69,41 @@ class ResolvedProcessRuntimeMechanics:
     frozen=True,
     slots=True,
 )
+class ResolvedGraphMemoryMechanics:
+    """Global graph-memory mechanics resolved for one execution."""
+
+    default_domain: str = "auto"
+    forbid_implicit_copies: bool = False
+
+    def __post_init__(
+        self,
+    ) -> None:
+        if (
+            not isinstance(
+                self.default_domain,
+                str,
+            )
+            or not self.default_domain.strip()
+        ):
+            raise ValueError(
+                "default_domain must be a non-empty string"
+            )
+
+        if not isinstance(
+            self.forbid_implicit_copies,
+            bool,
+        ):
+            raise ValueError(
+                "forbid_implicit_copies must be a boolean"
+            )
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
 class ResolvedRuntimeMechanics:
-    """Runtime mechanics resolved without hidden defaults."""
+    """Runtime mechanics resolved without legacy defaults."""
 
     telemetry_sample_capacity: (
         int
@@ -81,6 +114,10 @@ class ResolvedRuntimeMechanics:
         ResolvedProcessRuntimeMechanics
         | None
     ) = None
+
+    graph_memory: (
+        ResolvedGraphMemoryMechanics
+    ) = ResolvedGraphMemoryMechanics()
 
 
 def _mapping(
@@ -208,6 +245,53 @@ def _resolve_pool(
     )
 
 
+def _resolve_graph_memory(
+    value: Any,
+) -> ResolvedGraphMemoryMechanics:
+    path = (
+        "runtime.mechanics.graph_memory"
+    )
+
+    mapping = _mapping(
+        value,
+        path=path,
+    )
+
+    _reject_unknown(
+        mapping,
+        allowed=frozenset(
+            {
+                "default_domain",
+                "forbid_implicit_copies",
+            }
+        ),
+        path=path,
+    )
+
+    default_domain = mapping.get(
+        "default_domain",
+        "auto",
+    )
+
+    forbid_implicit_copies = mapping.get(
+        "forbid_implicit_copies",
+        False,
+    )
+
+    try:
+        return ResolvedGraphMemoryMechanics(
+            default_domain=default_domain,
+            forbid_implicit_copies=(
+                forbid_implicit_copies
+            ),
+        )
+    except ValueError as exc:
+        raise RuntimeMechanicsResolutionError(
+            path,
+            str(exc),
+        ) from exc
+
+
 def resolve_runtime_mechanics(
     context: (
         SystemExecutionContext
@@ -237,6 +321,7 @@ def resolve_runtime_mechanics(
             {
                 "telemetry",
                 "process",
+                "graph_memory",
             }
         ),
         path="runtime.mechanics",
@@ -275,6 +360,19 @@ def resolve_runtime_mechanics(
                     minimum=1,
                 )
             )
+
+    graph_memory = (
+        ResolvedGraphMemoryMechanics()
+    )
+
+    if "graph_memory" in mechanics:
+        graph_memory = (
+            _resolve_graph_memory(
+                mechanics[
+                    "graph_memory"
+                ]
+            )
+        )
 
     process = None
 
@@ -345,10 +443,12 @@ def resolve_runtime_mechanics(
             telemetry_sample_capacity
         ),
         process=process,
+        graph_memory=graph_memory,
     )
 
 
 __all__ = [
+    "ResolvedGraphMemoryMechanics",
     "ResolvedProcessRuntimeMechanics",
     "ResolvedRuntimeMechanics",
     "ResolvedRuntimePoolMechanics",
