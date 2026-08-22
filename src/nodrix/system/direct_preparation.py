@@ -128,7 +128,7 @@ def prepare_direct_execution(
         | None
     ) = None,
 ) -> PreparedExecution:
-    """Prepare providers and in-process nodes directly from BackendContext."""
+    """Prepare providers and nodes directly from BackendContext."""
 
     materialization = materialize_direct_context(
         context
@@ -192,6 +192,7 @@ def prepare_direct_execution(
             ] = materialize_direct_node(
                 planned,
                 environment=environment,
+                mechanics=mechanics,
             )
 
     payload = DirectPreparedRuntime(

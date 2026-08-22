@@ -317,8 +317,6 @@ def test_direct_node_preparation_has_no_graph_or_lifecycle_materialization():
         ".configure(",
         ".start(",
         ".stop(",
-        "NodeStats(",
-        "RuntimeProcessIsolationSettings",
         "ProcessNodeProxy",
         "ProcessSourceProxy",
     }
@@ -407,11 +405,13 @@ def test_direct_preparation_materializes_nodes_by_canonical_id(
         value,
         *,
         environment,
+        mechanics,
     ):
         calls.append(
             (
                 value,
                 environment,
+                mechanics,
             )
         )
 
@@ -447,6 +447,7 @@ def test_direct_preparation_materializes_nodes_by_canonical_id(
         (
             planned,
             environment,
+            prepared.payload.mechanics,
         ),
     ]
 
@@ -500,3 +501,283 @@ def test_direct_prepared_nodes_mapping_is_immutable(
         payload.nodes[
             "other"
         ] = object()
+
+
+def _mechanics(
+    *,
+    telemetry=None,
+    input_threshold=1024,
+    output_threshold=1024,
+):
+    from nodrix.system.runtime_mechanics import (
+        ResolvedProcessRuntimeMechanics,
+        ResolvedRuntimeMechanics,
+        ResolvedRuntimePoolMechanics,
+    )
+
+    return ResolvedRuntimeMechanics(
+        telemetry_sample_capacity=telemetry,
+        process=(
+            ResolvedProcessRuntimeMechanics(
+                input_pool=(
+                    ResolvedRuntimePoolMechanics(
+                        block_size=4 * 1024 * 1024,
+                        capacity=11,
+                        threshold=input_threshold,
+                    )
+                ),
+                output_pool=(
+                    ResolvedRuntimePoolMechanics(
+                        block_size=2 * 1024 * 1024,
+                        capacity=17,
+                        threshold=output_threshold,
+                    )
+                ),
+            )
+        ),
+    )
+
+
+def test_direct_process_node_uses_resolved_runtime_mechanics(
+    monkeypatch,
+    tmp_path,
+):
+    planned = _planned(
+        isolation="process",
+    )
+
+    primary = _Processor(
+        {
+            "workers": 2,
+        }
+    )
+
+    isolated = _Processor(
+        {
+            "isolated": True,
+        }
+    )
+
+    calls = {}
+
+    monkeypatch.setattr(
+        direct_node_preparation,
+        "validate_runtime_node_parameters",
+        lambda binding: None,
+    )
+
+    monkeypatch.setattr(
+        direct_node_preparation,
+        "load_runtime_node",
+        lambda uses, parameters, *, base_dir: primary,
+    )
+
+    monkeypatch.setattr(
+        direct_node_preparation,
+        "validate_runtime_node_materialization",
+        lambda **kwargs: None,
+    )
+
+    def isolate(
+        *,
+        name,
+        node,
+        binding,
+        settings,
+    ):
+        calls["name"] = name
+        calls["node"] = node
+        calls["binding"] = binding
+        calls["settings"] = settings
+
+        return isolated
+
+    monkeypatch.setattr(
+        direct_node_preparation,
+        "materialize_runtime_node_isolation",
+        isolate,
+    )
+
+    environment = (
+        DirectExecutionEnvironment(
+            base_dir=tmp_path,
+        )
+    )
+
+    loaded = materialize_direct_node(
+        planned,
+        environment=environment,
+        mechanics=_mechanics(),
+    )
+
+    settings = calls["settings"]
+
+    assert calls["name"] == planned.id
+    assert calls["node"] is primary
+    assert calls["binding"] is loaded.binding
+
+    assert (
+        settings.base_dir
+        == tmp_path.resolve()
+    )
+
+    assert (
+        settings.input_block_size
+        == 4 * 1024 * 1024
+    )
+
+    assert settings.input_capacity == 11
+
+    assert (
+        settings.output_block_size
+        == 2 * 1024 * 1024
+    )
+
+    assert settings.output_capacity == 17
+
+    assert settings.threshold == 1024
+
+    assert loaded.node is isolated
+    assert loaded.stats is None
+
+
+def test_direct_process_node_requires_canonical_process_mechanics(
+    monkeypatch,
+    tmp_path,
+):
+    from nodrix.system.runtime_mechanics import (
+        ResolvedRuntimeMechanics,
+    )
+
+    planned = _planned(
+        isolation="process",
+    )
+
+    monkeypatch.setattr(
+        direct_node_preparation,
+        "load_runtime_node",
+        lambda *args, **kwargs: (
+            pytest.fail(
+                "node implementation must not load "
+                "without process mechanics"
+            )
+        ),
+    )
+
+    with pytest.raises(
+        DirectNodePreparationError,
+        match="canonical process-memory settings",
+    ):
+        materialize_direct_node(
+            planned,
+            environment=(
+                DirectExecutionEnvironment(
+                    base_dir=tmp_path,
+                )
+            ),
+            mechanics=(
+                ResolvedRuntimeMechanics()
+            ),
+        )
+
+
+def test_direct_process_node_rejects_unrepresentable_pool_thresholds(
+    monkeypatch,
+    tmp_path,
+):
+    planned = _planned(
+        isolation="process",
+    )
+
+    monkeypatch.setattr(
+        direct_node_preparation,
+        "load_runtime_node",
+        lambda *args, **kwargs: (
+            pytest.fail(
+                "node implementation must not load "
+                "for unsupported process mechanics"
+            )
+        ),
+    )
+
+    with pytest.raises(
+        DirectNodePreparationError,
+        match="matching input_pool.threshold",
+    ):
+        materialize_direct_node(
+            planned,
+            environment=(
+                DirectExecutionEnvironment(
+                    base_dir=tmp_path,
+                )
+            ),
+            mechanics=_mechanics(
+                input_threshold=1024,
+                output_threshold=2048,
+            ),
+        )
+
+
+def test_direct_node_stats_use_only_explicit_canonical_capacity(
+    monkeypatch,
+    tmp_path,
+):
+    planned = _planned()
+
+    monkeypatch.setattr(
+        direct_node_preparation,
+        "validate_runtime_node_parameters",
+        lambda binding: None,
+    )
+
+    monkeypatch.setattr(
+        direct_node_preparation,
+        "load_runtime_node",
+        lambda uses, parameters, *, base_dir: (
+            _Processor(
+                parameters
+            )
+        ),
+    )
+
+    loaded = materialize_direct_node(
+        planned,
+        environment=(
+            DirectExecutionEnvironment(
+                base_dir=tmp_path,
+            )
+        ),
+        mechanics=_mechanics(
+            telemetry=37,
+        ),
+    )
+
+    assert loaded.stats is not None
+    assert loaded.stats.sample_capacity == 37
+
+
+def test_direct_node_preparation_uses_shared_process_materializer_only():
+    path = (
+        Path(__file__).parents[1]
+        / "src"
+        / "nodrix"
+        / "system"
+        / "direct_node_preparation.py"
+    )
+
+    source = path.read_text(
+        encoding="utf-8",
+    )
+
+    assert (
+        "materialize_runtime_node_isolation("
+        in source
+    )
+
+    assert (
+        "RuntimeProcessIsolationSettings("
+        in source
+    )
+
+    assert "ProcessNodeProxy(" not in source
+    assert "ProcessSourceProxy(" not in source
