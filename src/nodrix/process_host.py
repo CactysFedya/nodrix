@@ -763,7 +763,14 @@ class ProcessNodeProxy(Node):
 
     def _restart(self, force: bool = False) -> bool:
         with self._restart_lock:
-            if (not force and self.failure_policy != "restart") or self.restarts >= self.max_restarts:
+            if (
+                not force
+                and self.failure_policy
+                not in {
+                    "restart",
+                    "restart_node",
+                }
+            ) or self.restarts >= self.max_restarts:
                 return False
             self._terminate()
             self.restarts += 1
