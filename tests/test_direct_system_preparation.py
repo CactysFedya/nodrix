@@ -35,6 +35,7 @@ def _context():
             application_a,
         ),
         nodes=(),
+        execution_context=None,
     )
 
 

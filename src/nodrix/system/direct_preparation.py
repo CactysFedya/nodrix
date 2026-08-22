@@ -37,6 +37,10 @@ from .direct_materialization import (
     DirectRuntimeMaterialization,
     materialize_direct_context,
 )
+from .runtime_mechanics import (
+    ResolvedRuntimeMechanics,
+    resolve_runtime_mechanics,
+)
 from .direct_provider_materialization import (
     materialize_direct_application,
     materialize_direct_resource,
@@ -72,6 +76,12 @@ class DirectPreparedRuntime:
         LoadedNode,
     ] = field(
         default_factory=dict
+    )
+
+    mechanics: (
+        ResolvedRuntimeMechanics
+    ) = field(
+        default_factory=ResolvedRuntimeMechanics
     )
 
     def __post_init__(self) -> None:
@@ -122,6 +132,10 @@ def prepare_direct_execution(
 
     materialization = materialize_direct_context(
         context
+    )
+
+    mechanics = resolve_runtime_mechanics(
+        context.execution_context
     )
 
     planned_nodes = tuple(
@@ -186,6 +200,7 @@ def prepare_direct_execution(
         applications=applications,
         environment=environment,
         nodes=nodes,
+        mechanics=mechanics,
     )
 
     return PreparedExecution(

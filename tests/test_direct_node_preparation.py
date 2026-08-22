@@ -345,6 +345,7 @@ def test_direct_preparation_requires_environment_when_nodes_exist(
         nodes=(
             planned,
         ),
+        execution_context=None,
     )
 
     monkeypatch.setattr(
@@ -385,6 +386,7 @@ def test_direct_preparation_materializes_nodes_by_canonical_id(
         nodes=(
             planned,
         ),
+        execution_context=None,
     )
 
     monkeypatch.setattr(
@@ -464,6 +466,7 @@ def test_direct_prepared_nodes_mapping_is_immutable(
         resources=(),
         applications=(),
         nodes=(),
+        execution_context=None,
     )
 
     materialization = (
