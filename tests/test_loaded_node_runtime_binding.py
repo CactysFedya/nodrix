@@ -59,14 +59,38 @@ def test_pipeline_builder_materializes_loaded_node_binding():
         encoding="utf-8",
     )
 
-    assert (
-        "runtime_node_binding_from_config"
-        in source
+    binding_index = source.index(
+        "runtime_node_binding_from_config("
+    )
+
+    parameter_validation_index = source.index(
+        "validate_runtime_node_parameters("
+    )
+
+    loading_index = source.index(
+        "node = self._load_node("
+    )
+
+    contract_validation_index = source.index(
+        "validate_runtime_node_materialization("
+    )
+
+    loaded_node_index = source.index(
+        "self.nodes[name] = LoadedNode("
+    )
+
+    loaded_binding_index = source.index(
+        "binding=binding",
+        loaded_node_index,
     )
 
     assert (
-        "binding=runtime_node_binding_from_config("
-        in source
+        binding_index
+        < parameter_validation_index
+        < loading_index
+        < contract_validation_index
+        < loaded_node_index
+        < loaded_binding_index
     )
 
 

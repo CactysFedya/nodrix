@@ -17,6 +17,9 @@ except Exception:  # pragma: no cover
 
 
 from .runtime_components import LoadedNode
+from .runtime_node_materialization import (
+    load_runtime_fallback_node,
+)
 from .runtime_primitives import (
     Received,
     RuntimeAsyncBridge,
@@ -136,19 +139,13 @@ class RuntimeWorkerMixin:
                 f"Node {loaded.name!r} failed before a fallback could be configured"
             )
         bridge.resolve(old_node.stop())
-        fallback = self._load_node(
-            fallback_uses,
-            dict(
-                loaded.binding.parameters
-            ),
+        fallback = load_runtime_fallback_node(
+            name=loaded.name,
+            primary=old_node,
+            binding=loaded.binding,
+            base_dir=self.base_dir,
         )
-        if (
-            dict(fallback.input_types) != dict(old_node.input_types)
-            or dict(fallback.output_types) != dict(old_node.output_types)
-        ):
-            raise RuntimeGraphError(
-                f"Node {loaded.name!r} fallback contracts changed after validation"
-            )
+
         bridge.resolve(fallback.configure(context))
         fallback._lifecycle.transition(LifecycleState.READY)
         fallback._lifecycle.transition(LifecycleState.STARTING)

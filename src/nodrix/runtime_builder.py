@@ -11,9 +11,12 @@ from .manifest import (
 )
 from .native_plugin import NativePluginNode
 from .node import Node, SourceNode
-from .node_docs import validate_parameters
 from .process_host import ProcessNodeProxy, ProcessSourceProxy
 from .runtime_node_loading import load_runtime_node
+from .runtime_node_materialization import (
+    validate_runtime_node_materialization,
+    validate_runtime_node_parameters,
+)
 from .providers import (
     load_provider_session,
     provider_for_session,
@@ -157,39 +160,44 @@ class RuntimeBuildMixin:
             )
         sample_capacity = self.manifest.runtime.telemetry_samples
         for name, config in self.manifest.nodes.items():
-            validate_parameters(config.uses, config.parameters)
-            node = self._load_node(config.uses, config.parameters)
-            if config.failure.policy == "fallback_node":
-                if config.execution.isolation != "in_process":
-                    raise RuntimeGraphError(
-                        f"Node {name!r}: fallback_node currently requires in_process isolation"
-                    )
-                assert config.failure.fallback_uses is not None
-                validate_parameters(
-                    config.failure.fallback_uses,
-                    config.parameters,
+            binding = (
+                runtime_node_binding_from_config(
+                    config
                 )
-                fallback = self._load_node(
-                    config.failure.fallback_uses,
-                    config.parameters,
-                )
-                if (
-                    dict(fallback.input_types) != dict(node.input_types)
-                    or dict(fallback.output_types) != dict(node.output_types)
-                ):
-                    raise RuntimeGraphError(
-                        f"Node {name!r}: fallback node ports must exactly match the primary node"
-                    )
-            if config.execution.isolation == "process":
+            )
+
+            validate_runtime_node_parameters(
+                binding
+            )
+
+            node = self._load_node(
+                binding.uses,
+                dict(
+                    binding.parameters
+                ),
+            )
+
+            validate_runtime_node_materialization(
+                name=name,
+                node=node,
+                binding=binding,
+                declared_inputs=config.inputs,
+                declared_outputs=config.outputs,
+                base_dir=self.base_dir,
+            )
+
+            if binding.isolation == "process":
                 original_is_source = isinstance(node, SourceNode)
                 shared = self.manifest.runtime.memory.shared_pool
                 output_shared = self.manifest.runtime.memory.process_output_pool
                 proxy_cls = ProcessSourceProxy if original_is_source else ProcessNodeProxy
                 node = proxy_cls(
                     name=name,
-                    uses=config.uses,
+                    uses=binding.uses,
                     base_dir=self.base_dir,
-                    parameters=config.parameters,
+                    parameters=dict(
+                        binding.parameters
+                    ),
                     input_types=dict(node.input_types),
                     output_types=dict(node.output_types),
                     input_memory=dict(getattr(node, "input_memory", {})),
@@ -200,50 +208,21 @@ class RuntimeBuildMixin:
                     output_block_size=output_shared.block_size,
                     output_capacity=output_shared.capacity,
                     threshold=shared.threshold,
-                    failure_policy=config.failure.policy,
-                    max_restarts=config.failure.max_restarts,
-                    backoff_ms=config.failure.backoff_ms,
-                    cpu_affinity=config.execution.cpu_affinity,
-                    device=config.execution.device,
-                    max_message_bytes=config.resources.max_message_bytes,
-                    memory_limit_mb=config.resources.memory_limit_mb,
-                    cpu_limit=config.resources.cpu_limit,
-                )
-            if config.inputs and dict(config.inputs) != dict(node.input_types):
-                raise RuntimeGraphError(
-                    f"Node {name!r} declared inputs {config.inputs}, but {config.uses!r} provides {node.input_types}"
-                )
-            if config.outputs and dict(config.outputs) != dict(node.output_types):
-                raise RuntimeGraphError(
-                    f"Node {name!r} declared outputs {config.outputs}, but {config.uses!r} provides {node.output_types}"
-                )
-            if config.synchronization.trigger_port and config.synchronization.trigger_port not in node.input_types:
-                raise RuntimeGraphError(
-                    f"Node {name!r} synchronization trigger_port {config.synchronization.trigger_port!r} is not an input"
-                )
-            implementation_optional = set(getattr(node, "optional_inputs", ()))
-            configured_optional = set(config.synchronization.optional_inputs)
-            unknown_optional = sorted(implementation_optional - set(node.input_types))
-            if unknown_optional:
-                raise RuntimeGraphError(
-                    f"Node {name!r} declares unknown optional inputs: {unknown_optional}"
-                )
-            unknown_configured = sorted(configured_optional - set(node.input_types))
-            if unknown_configured:
-                raise RuntimeGraphError(
-                    f"Node {name!r} configures unknown optional inputs: {unknown_configured}"
-                )
-            unsupported_optional = sorted(configured_optional - implementation_optional)
-            if unsupported_optional:
-                raise RuntimeGraphError(
-                    f"Node {name!r} cannot make required inputs optional: {unsupported_optional}"
+                    failure_policy=binding.failure_policy,
+                    max_restarts=binding.failure_max_restarts,
+                    backoff_ms=binding.failure_backoff_ms,
+                    cpu_affinity=list(
+                        binding.cpu_affinity
+                    ),
+                    device=binding.device,
+                    max_message_bytes=binding.max_message_bytes,
+                    memory_limit_mb=binding.memory_limit_mb,
+                    cpu_limit=binding.cpu_limit,
                 )
             self.nodes[name] = LoadedNode(
                 name=name,
                 node=node,
-                binding=runtime_node_binding_from_config(
-                    config
-                ),
+                binding=binding,
                 stats=NodeStats(sample_capacity),
             )
 
