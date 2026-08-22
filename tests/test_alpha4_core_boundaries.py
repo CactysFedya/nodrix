@@ -248,7 +248,7 @@ def test_runtime_supervises_application_and_resource_without_nodes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from nodrix import runtime_builder
+    import nodrix.runtime_provider_materialization as runtime_provider_materialization
 
     _LIFECYCLE_EVENTS.clear()
     resource_descriptor = ResourceDescriptor(
@@ -261,22 +261,22 @@ def test_runtime_supervises_application_and_resource_without_nodes(
         bindings={"bus": "demo.bus"},
     )
     monkeypatch.setattr(
-        runtime_builder,
+        runtime_provider_materialization,
         "provider_for_resource",
         lambda *args, **kwargs: (object(), resource_descriptor),
     )
     monkeypatch.setattr(
-        runtime_builder,
+        runtime_provider_materialization,
         "load_provider_resource",
         lambda *args, **kwargs: _RuntimeResource,
     )
     monkeypatch.setattr(
-        runtime_builder,
+        runtime_provider_materialization,
         "provider_for_application",
         lambda *args, **kwargs: (object(), application_descriptor),
     )
     monkeypatch.setattr(
-        runtime_builder,
+        runtime_provider_materialization,
         "load_provider_application",
         lambda *args, **kwargs: _RuntimeApplication,
     )

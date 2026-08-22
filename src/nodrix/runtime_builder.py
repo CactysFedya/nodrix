@@ -15,11 +15,7 @@ from .node_docs import validate_parameters
 from .process_host import ProcessNodeProxy, ProcessSourceProxy
 from .registry import load_node_class
 from .providers import (
-    load_provider_application,
-    load_provider_resource,
     load_provider_session,
-    provider_for_application,
-    provider_for_resource,
     provider_for_session,
     provider_for_transport,
 )
@@ -41,11 +37,13 @@ from .runtime_components import (
 )
 from .runtime_components import (
     EdgeQueue,
-    LoadedApplication,
     LoadedNode,
-    LoadedResource,
     LoadedSession,
     NodeStats,
+)
+from .runtime_provider_materialization import (
+    materialize_runtime_application,
+    materialize_runtime_resource,
 )
 
 
@@ -118,74 +116,20 @@ class RuntimeBuildMixin:
                 instance=instance,
             )
         for name, config in self.manifest.resources.items():
-            resolved_resource = provider_for_resource(
-                config.uses,
-                include_legacy=False,
+            binding = runtime_resource_binding_from_config(
+                config
             )
-            if resolved_resource is None:
-                raise RuntimeGraphError(
-                    f"Unknown provider resource {config.uses!r}"
-                )
-            _candidate, resource_descriptor = resolved_resource
-            validate_provider_parameters(
-                resource_descriptor.parameters_schema,
-                config.parameters,
-                location=f"resources.{name}.parameters",
-            )
-            resource_class = load_provider_resource(config.uses)
-            if resource_class is None:
-                raise RuntimeGraphError(
-                    f"Unknown provider resource {config.uses!r}"
-                )
-            try:
-                instance = resource_class(config.parameters)
-            except TypeError:
-                instance = resource_class(parameters=config.parameters)
-            self.resources[name] = LoadedResource(
-                name=name,
-                uses=config.uses,
-                instance=instance,
-                binding=runtime_resource_binding_from_config(
-                    config
-                ),
+            self.resources[name] = materialize_runtime_resource(
+                name,
+                binding,
             )
         for name, config in self.manifest.applications.items():
-            resolved_application = provider_for_application(
-                config.uses,
-                include_legacy=False,
+            binding = runtime_application_binding_from_config(
+                config
             )
-            if resolved_application is None:
-                raise RuntimeGraphError(
-                    f"Unknown provider application {config.uses!r}"
-                )
-            _candidate, application_descriptor = resolved_application
-            validate_provider_parameters(
-                application_descriptor.parameters_schema,
-                config.parameters,
-                location=f"applications.{name}.parameters",
-            )
-            application_class = load_provider_application(config.uses)
-            if application_class is None:
-                raise RuntimeGraphError(
-                    f"Unknown provider application {config.uses!r}"
-                )
-            try:
-                instance = application_class(config.parameters)
-            except TypeError:
-                instance = application_class(parameters=config.parameters)
-            for method_name in ("configure", "start", "stop", "health"):
-                if not callable(getattr(instance, method_name, None)):
-                    raise RuntimeGraphError(
-                        f"Provider application {config.uses!r} has no "
-                        f"callable {method_name}()"
-                    )
-            self.applications[name] = LoadedApplication(
-                name=name,
-                uses=config.uses,
-                instance=instance,
-                binding=runtime_application_binding_from_config(
-                    config
-                ),
+            self.applications[name] = materialize_runtime_application(
+                name,
+                binding,
             )
         for index, link in enumerate(self.manifest.links):
             resolved_link = provider_for_transport(
