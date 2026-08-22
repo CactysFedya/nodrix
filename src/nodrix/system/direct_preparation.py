@@ -25,6 +25,9 @@ from .backend import (
     BackendContext,
     PreparedExecution,
 )
+from .direct_environment import (
+    DirectExecutionEnvironment,
+)
 from .direct_materialization import (
     DirectRuntimeMaterialization,
     materialize_direct_context,
@@ -54,6 +57,11 @@ class DirectPreparedRuntime:
         LoadedApplication,
     ]
 
+    environment: (
+        DirectExecutionEnvironment
+        | None
+    ) = None
+
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
@@ -82,6 +90,11 @@ class DirectPreparedRuntime:
 
 def prepare_direct_execution(
     context: BackendContext,
+    *,
+    environment: (
+        DirectExecutionEnvironment
+        | None
+    ) = None,
 ) -> PreparedExecution:
     """Prepare resources and applications directly from BackendContext."""
 
@@ -117,6 +130,7 @@ def prepare_direct_execution(
         materialization=materialization,
         resources=resources,
         applications=applications,
+        environment=environment,
     )
 
     return PreparedExecution(
