@@ -250,10 +250,10 @@ class HybridPipelineRuntime(
                 runtime_mode=self.manifest.runtime.mode,
                 engine="unified",
                 environment=self.execution_environment,
-                device=loaded.config.execution.device,
+                device=loaded.binding.device,
                 bindings={
                     binding: self._resource_instance(resource_name)
-                    for binding, resource_name in loaded.config.bindings.items()
+                    for binding, resource_name in loaded.binding.resource_bindings.items()
                 },
                 external_links=tuple(
                     link
@@ -277,7 +277,7 @@ class HybridPipelineRuntime(
             self._emit_event(
                 "node_ready",
                 node=loaded.name,
-                uses=loaded.config.uses,
+                uses=loaded.binding.uses,
                 lifecycle=loaded.node.lifecycle_state,
                 runtime_info=self._safe_runtime_info(loaded),
             )
@@ -298,11 +298,11 @@ class HybridPipelineRuntime(
                     async_flush=inspect.iscoroutinefunction(loaded.node.flush),
                 )
         except BaseException as exc:
-            self._emit_event("node_failed", node=loaded.name, uses=loaded.config.uses, error=f"{type(exc).__name__}: {exc}")
+            self._emit_event("node_failed", node=loaded.name, uses=loaded.binding.uses, error=f"{type(exc).__name__}: {exc}")
             loaded.stats.errors += 1  # type: ignore[union-attr]
             loaded.node._lifecycle.error(exc)
             loaded.node._lifecycle.transition(LifecycleState.FAILED, status=HealthStatus.UNHEALTHY)
-            if loaded.config.failure.policy in {"disable_branch", "isolate_branch"}:
+            if loaded.binding.failure_policy in {"disable_branch", "isolate_branch"}:
                 self._publish_eos(loaded)
             else:
                 self._record_error(loaded.name, exc)
@@ -319,7 +319,7 @@ class HybridPipelineRuntime(
             was_failed = loaded.node.lifecycle_state == LifecycleState.FAILED.value
             try:
                 bridge.resolve(loaded.node.stop())
-                self._emit_event("node_stopped", node=loaded.name, uses=loaded.config.uses)
+                self._emit_event("node_stopped", node=loaded.name, uses=loaded.binding.uses)
                 if was_failed:
                     loaded.node._lifecycle.transition(LifecycleState.FAILED, status=HealthStatus.UNHEALTHY)
             except BaseException as exc:

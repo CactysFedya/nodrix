@@ -144,7 +144,7 @@ def runtime_node_binding_from_config(
 class LoadedNode:
     name: str
     node: Node
-    config: NodeConfig
+    binding: RuntimeNodeBinding
     inputs: dict[
         str,
         EdgeQueue,

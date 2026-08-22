@@ -55,8 +55,8 @@ class RuntimeExecutionMixin:
             if loaded.fallback_active:
                 info.update(
                     {
-                        "fallback": loaded.config.failure.fallback_uses,
-                        "primary": loaded.config.uses,
+                        "fallback": loaded.binding.fallback_uses,
+                        "primary": loaded.binding.uses,
                     }
                 )
             return info

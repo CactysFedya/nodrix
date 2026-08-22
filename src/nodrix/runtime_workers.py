@@ -84,7 +84,7 @@ class RuntimeWorkerMixin:
                 result = bridge.resolve(process(process_inputs)) if async_process else process(process_inputs)
             except BaseException as exc:
                 if (
-                    loaded.config.failure.policy == "fallback_node"
+                    loaded.binding.failure_policy == "fallback_node"
                     and not loaded.fallback_active
                 ):
                     self._activate_fallback(loaded, bridge, exc)
@@ -96,12 +96,12 @@ class RuntimeWorkerMixin:
                         else process(process_inputs)
                     )
                     loaded.stats.errors += 1  # type: ignore[union-attr]
-                elif loaded.config.failure.policy == "skip_message":
+                elif loaded.binding.failure_policy == "skip_message":
                     loaded.stats.errors += 1  # type: ignore[union-attr]
                     loaded.node._lifecycle.error(exc)
                     loaded.node._lifecycle.transition(LifecycleState.RUNNING, status=HealthStatus.DEGRADED)
                     continue
-                elif loaded.config.failure.policy in {"disable_branch", "isolate_branch"}:
+                elif loaded.binding.failure_policy in {"disable_branch", "isolate_branch"}:
                     loaded.stats.errors += 1  # type: ignore[union-attr]
                     loaded.node._lifecycle.error(exc)
                     loaded.node._lifecycle.transition(LifecycleState.FAILED, status=HealthStatus.UNHEALTHY)
@@ -124,7 +124,7 @@ class RuntimeWorkerMixin:
         bridge: RuntimeAsyncBridge,
         primary_error: BaseException,
     ) -> None:
-        fallback_uses = loaded.config.failure.fallback_uses
+        fallback_uses = loaded.binding.fallback_uses
         if not fallback_uses:
             raise RuntimeGraphError(
                 f"Node {loaded.name!r} has no configured fallback"
@@ -136,7 +136,12 @@ class RuntimeWorkerMixin:
                 f"Node {loaded.name!r} failed before a fallback could be configured"
             )
         bridge.resolve(old_node.stop())
-        fallback = self._load_node(fallback_uses, loaded.config.parameters)
+        fallback = self._load_node(
+            fallback_uses,
+            dict(
+                loaded.binding.parameters
+            ),
+        )
         if (
             dict(fallback.input_types) != dict(old_node.input_types)
             or dict(fallback.output_types) != dict(old_node.output_types)
@@ -173,7 +178,7 @@ class RuntimeWorkerMixin:
             item = self._blocking_received(loaded.inputs[input_ports[0]])
             return None if item is None else {input_ports[0]: item}
 
-        policy = loaded.config.synchronization.policy
+        policy = loaded.binding.synchronization_policy
         if policy == "zip":
             result: dict[str, Received] = {}
             for port in input_ports:
@@ -187,7 +192,7 @@ class RuntimeWorkerMixin:
         return self._receive_matching(loaded, input_ports, approximate=(policy == "approximate_timestamp"))
 
     def _receive_latest(self, loaded: LoadedNode, input_ports: tuple[str, ...]) -> dict[str, Received] | None:
-        trigger = loaded.config.synchronization.trigger_port or input_ports[0]
+        trigger = loaded.binding.synchronization_trigger_port or input_ports[0]
         item = self._blocking_received(loaded.inputs[trigger])
         if item is None:
             return None
@@ -214,7 +219,9 @@ class RuntimeWorkerMixin:
         self, loaded: LoadedNode, input_ports: tuple[str, ...], *, approximate: bool
     ) -> dict[str, Received] | None:
         current: dict[str, Received] = {}
-        tolerance_ns = int(loaded.config.synchronization.tolerance_ms * 1e6)
+        tolerance_ns = (
+            loaded.binding.synchronization_tolerance_ns
+        )
         while not self._stop.is_set():
             for port in input_ports:
                 if port not in current:
@@ -262,10 +269,10 @@ class RuntimeWorkerMixin:
             if normalized is not message.payload:
                 message = message.with_updates(payload=normalized)
             payload_size = _estimate_message_bytes(message)
-            if payload_size > loaded.config.resources.max_message_bytes:
+            if payload_size > loaded.binding.max_message_bytes:
                 raise RuntimeGraphError(
                     f"Node {loaded.name!r} emitted {payload_size} bytes, exceeding resources.max_message_bytes="
-                    f"{loaded.config.resources.max_message_bytes}"
+                    f"{loaded.binding.max_message_bytes}"
                 )
             if len(json.dumps(message.metadata, default=str).encode("utf-8")) > 1024 * 1024:
                 raise RuntimeGraphError(f"Node {loaded.name!r} emitted metadata larger than 1 MiB")
@@ -307,21 +314,21 @@ class RuntimeWorkerMixin:
         while not self._stop.wait(0.1):
             now = time.monotonic_ns()
             for loaded in self.nodes.values():
-                config = loaded.config.health
-                if config.timeout_ms <= 0:
+                binding = loaded.binding
+                if binding.health_timeout_ns <= 0:
                     continue
                 health = loaded.node._lifecycle.snapshot()
                 last = health.last_message_ns or health.last_completion_ns
                 if not health.ready or last is None:
                     continue
-                if now - last <= int(config.timeout_ms * 1e6) or loaded.watchdog_triggered:
+                if now - last <= binding.health_timeout_ns or loaded.watchdog_triggered:
                     continue
                 loaded.watchdog_triggered = True
-                loaded.node._lifecycle.error(f"health timeout after {config.timeout_ms} ms")
-                if config.on_timeout == "stop_pipeline":
+                loaded.node._lifecycle.error(f"health timeout after {binding.health_timeout_ns // 1_000_000} ms")
+                if binding.health_on_timeout == "stop_pipeline":
                     self._record_error(loaded.name, TimeoutError(f"node health timeout: {loaded.name}"))
                     return
-                if config.on_timeout == "restart" and isinstance(loaded.node, ProcessNodeProxy):
+                if binding.health_on_timeout == "restart" and isinstance(loaded.node, ProcessNodeProxy):
                     loaded.node._lifecycle.mark_restart()
                     loaded.node.interrupt()
                     # The blocked worker observes EOF and performs the serialized restart.

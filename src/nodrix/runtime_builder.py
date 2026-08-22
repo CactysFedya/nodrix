@@ -34,6 +34,7 @@ except Exception:  # pragma: no cover
     _NativeBoundedQueue = None
 
 
+from .runtime_components import runtime_node_binding_from_config
 from .runtime_components import (
     EdgeQueue,
     LoadedApplication,
@@ -296,7 +297,9 @@ class RuntimeBuildMixin:
             self.nodes[name] = LoadedNode(
                 name=name,
                 node=node,
-                config=config,
+                binding=runtime_node_binding_from_config(
+                    config
+                ),
                 stats=NodeStats(sample_capacity),
             )
 
@@ -321,13 +324,13 @@ class RuntimeBuildMixin:
                 )
             if dst_port in self.nodes[dst_name].inputs:
                 raise RuntimeGraphError(f"Input port already connected: {edge_config.target}")
-            source_memory_map = {**dict(getattr(source, "output_memory", {})), **dict(self.nodes[src_name].config.memory.outputs)}
-            target_memory_map = {**dict(getattr(target, "input_memory", {})), **dict(self.nodes[dst_name].config.memory.inputs)}
+            source_memory_map = {**dict(getattr(source, "output_memory", {})), **dict(self.nodes[src_name].binding.memory_outputs)}
+            target_memory_map = {**dict(getattr(target, "input_memory", {})), **dict(self.nodes[dst_name].binding.memory_inputs)}
             source_requirement = requirement_for_port(source_memory_map, src_port)
             target_requirement = requirement_for_port(target_memory_map, dst_port)
-            if self.nodes[src_name].config.execution.isolation == "process":
+            if self.nodes[src_name].binding.isolation == "process":
                 source_requirement = MemoryRequirement(("shared",), preferred="shared")
-            if self.nodes[dst_name].config.execution.isolation == "process":
+            if self.nodes[dst_name].binding.isolation == "process":
                 target_requirement = MemoryRequirement(("shared",), preferred="shared")
             allow_copy = edge_config.memory.allow_copy and not self.manifest.runtime.memory.forbid_implicit_copies
             forced_memory = edge_config.memory.domain
@@ -338,7 +341,7 @@ class RuntimeBuildMixin:
             )
             if (
                 memory_plan.adapter == "host_copy_to_shared"
-                and self.nodes[dst_name].config.execution.isolation != "process"
+                and self.nodes[dst_name].binding.isolation != "process"
             ):
                 memory_plan = replace(
                     memory_plan,
@@ -442,18 +445,45 @@ class RuntimeBuildMixin:
                         "process" if isinstance(loaded.node, ProcessNodeProxy)
                         else "native" if isinstance(loaded.node, NativePluginNode) else "python"
                     ),
-                    "isolation": loaded.config.execution.isolation,
-                    "failure": loaded.config.failure.model_dump(),
-                    "health": loaded.config.health.model_dump(),
-                    "resources": loaded.config.resources.model_dump(),
+                    "isolation": loaded.binding.isolation,
+                    "failure": {
+                        "policy": loaded.binding.failure_policy,
+                        "max_restarts": loaded.binding.failure_max_restarts,
+                        "backoff_ms": loaded.binding.failure_backoff_ms,
+                        "fallback_uses": loaded.binding.fallback_uses,
+                    },
+                    "health": {
+                        "timeout_ms": (
+                            loaded.binding.health_timeout_ns
+                            // 1_000_000
+                        ),
+                        "on_timeout": loaded.binding.health_on_timeout,
+                    },
+                    "resources": {
+                        "memory_limit_mb": loaded.binding.memory_limit_mb,
+                        "cpu_limit": loaded.binding.cpu_limit,
+                        "max_message_bytes": loaded.binding.max_message_bytes,
+                    },
                     "lifecycle": loaded.node.lifecycle_state,
                     "inputs": loaded.node.input_types,
                     "optional_inputs": sorted(getattr(loaded.node, "optional_inputs", ())),
                     "outputs": loaded.node.output_types,
-                    "input_memory": {**dict(getattr(loaded.node, "input_memory", {})), **dict(loaded.config.memory.inputs)},
-                    "output_memory": {**dict(getattr(loaded.node, "output_memory", {})), **dict(loaded.config.memory.outputs)},
-                    "device": loaded.config.execution.device,
-                    "synchronization": loaded.config.synchronization.model_dump(),
+                    "input_memory": {**dict(getattr(loaded.node, "input_memory", {})), **dict(loaded.binding.memory_inputs)},
+                    "output_memory": {**dict(getattr(loaded.node, "output_memory", {})), **dict(loaded.binding.memory_outputs)},
+                    "device": loaded.binding.device,
+                    "synchronization": {
+                        "policy": loaded.binding.synchronization_policy,
+                        "tolerance_ms": (
+                            loaded.binding.synchronization_tolerance_ns
+                            / 1_000_000.0
+                        ),
+                        "trigger_port": (
+                            loaded.binding.synchronization_trigger_port
+                        ),
+                        "optional_inputs": list(
+                            loaded.binding.synchronization_optional_inputs
+                        ),
+                    },
                     "async_process": inspect.iscoroutinefunction(loaded.node.process),
                 }
                 for name, loaded in self.nodes.items()
