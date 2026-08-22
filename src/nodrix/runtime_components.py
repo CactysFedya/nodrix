@@ -34,6 +34,7 @@ from .runtime_primitives import (
     Received,
     RuntimeAsyncBridge as _AsyncBridge,
     RuntimeEdgeQueue,
+    RuntimeNodeBinding,
     RuntimeQueueBinding,
 )
 
@@ -64,6 +65,80 @@ class EdgeQueue(
             memory_plan,
         )
 
+
+
+def runtime_node_binding_from_config(
+    config: NodeConfig,
+) -> RuntimeNodeBinding:
+    """Adapt validated Pipeline 2.x node configuration to runtime mechanics.
+
+    This is an explicit compatibility boundary.  Runtime consumers downstream
+    of this function must not need Pipeline NodeConfig semantics.
+    """
+
+    return RuntimeNodeBinding(
+        uses=config.uses,
+        parameters=config.parameters,
+        resource_bindings=config.bindings,
+        synchronization_policy=(
+            config.synchronization.policy
+        ),
+        synchronization_tolerance_ns=int(
+            config.synchronization.tolerance_ms
+            * 1_000_000
+        ),
+        synchronization_trigger_port=(
+            config.synchronization.trigger_port
+        ),
+        synchronization_optional_inputs=tuple(
+            config.synchronization.optional_inputs
+        ),
+        failure_policy=(
+            config.failure.policy
+        ),
+        fallback_uses=(
+            config.failure.fallback_uses
+        ),
+        failure_max_restarts=(
+            config.failure.max_restarts
+        ),
+        failure_backoff_ms=(
+            config.failure.backoff_ms
+        ),
+        health_timeout_ns=(
+            int(
+                config.health.timeout_ms
+            )
+            * 1_000_000
+        ),
+        health_on_timeout=(
+            config.health.on_timeout
+        ),
+        max_message_bytes=(
+            config.resources.max_message_bytes
+        ),
+        memory_limit_mb=(
+            config.resources.memory_limit_mb
+        ),
+        cpu_limit=(
+            config.resources.cpu_limit
+        ),
+        isolation=(
+            config.execution.isolation
+        ),
+        cpu_affinity=tuple(
+            config.execution.cpu_affinity
+        ),
+        device=(
+            config.execution.device
+        ),
+        memory_inputs=(
+            config.memory.inputs
+        ),
+        memory_outputs=(
+            config.memory.outputs
+        ),
+    )
 
 @dataclass(slots=True)
 class LoadedNode:

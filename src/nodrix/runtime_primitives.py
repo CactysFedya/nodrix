@@ -25,10 +25,12 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import inspect
 import json
 import time
+from types import MappingProxyType
 from typing import Any
 
 from .cv_types import (
@@ -547,6 +549,247 @@ class RuntimeEdgeQueue:
         }
 
 
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class RuntimeNodeBinding:
+    """Resolved mechanical state required to execute one node.
+
+    This object is deliberately not a System Definition, execution plan, or
+    compatibility model.  It contains only values already resolved before the
+    runtime starts executing the node.
+
+    All fields are required.  The runtime must not invent missing execution
+    policy through implicit defaults.
+
+    Mapping fields are snapshotted into immutable top-level mappings during
+    control-plane materialization.  Message payloads and buffers are not
+    copied.
+    """
+
+    uses: str
+    parameters: Mapping[str, Any]
+    resource_bindings: Mapping[str, str]
+
+    synchronization_policy: str
+    synchronization_tolerance_ns: int
+    synchronization_trigger_port: str | None
+    synchronization_optional_inputs: tuple[str, ...]
+
+    failure_policy: str
+    fallback_uses: str | None
+    failure_max_restarts: int
+    failure_backoff_ms: int
+
+    health_timeout_ns: int
+    health_on_timeout: str
+
+    max_message_bytes: int
+    memory_limit_mb: int | None
+    cpu_limit: float | None
+
+    isolation: str
+    cpu_affinity: tuple[int, ...]
+    device: str
+
+    memory_inputs: Mapping[str, Any]
+    memory_outputs: Mapping[str, Any]
+
+    def __post_init__(
+        self,
+    ) -> None:
+        for field_name, value in (
+            ("uses", self.uses),
+            (
+                "synchronization_policy",
+                self.synchronization_policy,
+            ),
+            (
+                "failure_policy",
+                self.failure_policy,
+            ),
+            (
+                "health_on_timeout",
+                self.health_on_timeout,
+            ),
+            (
+                "isolation",
+                self.isolation,
+            ),
+            (
+                "device",
+                self.device,
+            ),
+        ):
+            if (
+                not isinstance(value, str)
+                or not value.strip()
+            ):
+                raise ValueError(
+                    f"{field_name} must be a non-empty string"
+                )
+
+        for field_name, value in (
+            (
+                "synchronization_tolerance_ns",
+                self.synchronization_tolerance_ns,
+            ),
+            (
+                "failure_max_restarts",
+                self.failure_max_restarts,
+            ),
+            (
+                "failure_backoff_ms",
+                self.failure_backoff_ms,
+            ),
+            (
+                "health_timeout_ns",
+                self.health_timeout_ns,
+            ),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value < 0
+            ):
+                raise ValueError(
+                    f"{field_name} must be a non-negative integer"
+                )
+
+        if (
+            isinstance(
+                self.max_message_bytes,
+                bool,
+            )
+            or not isinstance(
+                self.max_message_bytes,
+                int,
+            )
+            or self.max_message_bytes < 1
+        ):
+            raise ValueError(
+                "max_message_bytes must be a positive integer"
+            )
+
+        if (
+            self.memory_limit_mb is not None
+            and (
+                isinstance(
+                    self.memory_limit_mb,
+                    bool,
+                )
+                or not isinstance(
+                    self.memory_limit_mb,
+                    int,
+                )
+                or self.memory_limit_mb < 1
+            )
+        ):
+            raise ValueError(
+                "memory_limit_mb must be a positive integer or None"
+            )
+
+        if (
+            self.cpu_limit is not None
+            and (
+                isinstance(
+                    self.cpu_limit,
+                    bool,
+                )
+                or not isinstance(
+                    self.cpu_limit,
+                    (int, float),
+                )
+                or self.cpu_limit <= 0
+            )
+        ):
+            raise ValueError(
+                "cpu_limit must be positive or None"
+            )
+
+        if any(
+            (
+                isinstance(cpu, bool)
+                or not isinstance(cpu, int)
+                or cpu < 0
+            )
+            for cpu in self.cpu_affinity
+        ):
+            raise ValueError(
+                "cpu_affinity entries must be non-negative integers"
+            )
+
+        bindings = dict(
+            self.resource_bindings
+        )
+
+        for name, target in bindings.items():
+            if (
+                not isinstance(name, str)
+                or not name
+                or not isinstance(target, str)
+                or not target
+            ):
+                raise ValueError(
+                    "resource bindings require non-empty string names"
+                )
+
+        object.__setattr__(
+            self,
+            "parameters",
+            MappingProxyType(
+                dict(
+                    self.parameters
+                )
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "resource_bindings",
+            MappingProxyType(
+                bindings
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "synchronization_optional_inputs",
+            tuple(
+                self.synchronization_optional_inputs
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "cpu_affinity",
+            tuple(
+                self.cpu_affinity
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "memory_inputs",
+            MappingProxyType(
+                dict(
+                    self.memory_inputs
+                )
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "memory_outputs",
+            MappingProxyType(
+                dict(
+                    self.memory_outputs
+                )
+            ),
+        )
+
+
 class RuntimeAsyncBridge:
     """Resolve optional awaitables without coupling to an execution model."""
 
@@ -592,5 +835,6 @@ __all__ = [
     "Received",
     "RuntimeAsyncBridge",
     "RuntimeEdgeQueue",
+    "RuntimeNodeBinding",
     "RuntimeQueueBinding",
 ]
