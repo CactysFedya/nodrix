@@ -69,6 +69,17 @@ class HybridPipelineRuntime(
         self.manifest = manifest
         self.manifest_path = manifest_path.resolve()
         self.base_dir = self.manifest_path.parent
+
+        # Materialize the minimal mechanical values consumed by worker hot
+        # paths. Workers must not reach back into PipelineManifest while
+        # processing messages. The direct System executor will provide the
+        # same runtime-level values without constructing a PipelineManifest.
+        self._runtime_type_validation = (
+            self.manifest.runtime.type_validation
+        )
+        self._message_scope_id = (
+            self.manifest.metadata.name
+        )
         self.run_root = (
             run_root
             or StorageLayout(

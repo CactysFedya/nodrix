@@ -16,18 +16,28 @@ except Exception:  # pragma: no cover
     _NativeBoundedQueue = None
 
 
-from .runtime_components import (
-    EdgeQueue,
-    LoadedNode,
+from .runtime_components import LoadedNode
+from .runtime_primitives import (
     Received,
-    _AsyncBridge,
+    RuntimeAsyncBridge,
+    RuntimeEdgeQueue,
     _EOS,
     _estimate_message_bytes,
 )
 
 
 class RuntimeWorkerMixin:
-    def _run_source(self, loaded: LoadedNode, bridge: _AsyncBridge) -> None:
+    """Execution workers over already-materialized runtime mechanics.
+
+    The worker hot path deliberately does not read PipelineManifest.
+    Its host supplies the small runtime-level values required for message
+    processing, while queue routing uses backend-neutral RuntimeEdgeQueue
+    bindings.
+    """
+
+    _runtime_type_validation: str
+    _message_scope_id: str
+    def _run_source(self, loaded: LoadedNode, bridge: RuntimeAsyncBridge) -> None:
         produced = loaded.node.produce()
         if hasattr(produced, "__aiter__"):
             async_iter = produced.__aiter__()
@@ -55,7 +65,7 @@ class RuntimeWorkerMixin:
     def _run_processor(
         self,
         loaded: LoadedNode,
-        bridge: _AsyncBridge,
+        bridge: RuntimeAsyncBridge,
         *,
         async_process: bool,
         async_flush: bool,
@@ -111,7 +121,7 @@ class RuntimeWorkerMixin:
     def _activate_fallback(
         self,
         loaded: LoadedNode,
-        bridge: _AsyncBridge,
+        bridge: RuntimeAsyncBridge,
         primary_error: BaseException,
     ) -> None:
         fallback_uses = loaded.config.failure.fallback_uses
@@ -152,7 +162,7 @@ class RuntimeWorkerMixin:
             primary_error=f"{type(primary_error).__name__}: {primary_error}",
         )
 
-    def _blocking_received(self, edge: EdgeQueue) -> Received | None:
+    def _blocking_received(self, edge: RuntimeEdgeQueue) -> Received | None:
         item = edge.get()
         if item is None or item is _EOS:
             return None
@@ -229,7 +239,7 @@ class RuntimeWorkerMixin:
         return None
 
     def _validate_payload(self, loaded: LoadedNode, port: str, message: Message) -> None:
-        mode = self.manifest.runtime.type_validation
+        mode = self._runtime_type_validation
         if mode == "off":
             return
         key = (loaded.name, port)
@@ -264,7 +274,7 @@ class RuntimeWorkerMixin:
             outgoing = message.with_updates(
                 stream_id=source_name,
                 source_id=message.source_id or source_name,
-                pipeline_id=message.pipeline_id or self.manifest.metadata.name,
+                pipeline_id=message.pipeline_id or self._message_scope_id,
                 run_id=message.run_id or self._run_id,
             )
             if (
@@ -276,12 +286,13 @@ class RuntimeWorkerMixin:
             ):
                 self._recording_writer.write(outgoing)
             for edge in loaded.outputs.get(port, ()):
-                target_node, target_port = edge.edge.target.split(".", 1)
+                target_endpoint = edge.binding.target
+                target_node, target_port = target_endpoint.split(".", 1)
                 target_type = self.nodes[target_node].node.input_types[target_port]
                 if target_type != "core.any" and outgoing.type != target_type:
                     raise RuntimeGraphError(
                         f"Message {outgoing.type!r} from {source_name!r} cannot enter "
-                        f"{edge.edge.target!r}; expected {target_type!r}"
+                        f"{target_endpoint!r}; expected {target_type!r}"
                     )
                 edge.put(outgoing.fork())
             if self._stream_publisher is not None:
