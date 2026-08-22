@@ -553,6 +553,115 @@ class RuntimeEdgeQueue:
     frozen=True,
     slots=True,
 )
+class RuntimeResourceBinding:
+    """Resolved mechanics required to instantiate one runtime resource."""
+
+    uses: str
+    parameters: Mapping[str, Any]
+    bindings: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.uses, str)
+            or not self.uses.strip()
+        ):
+            raise ValueError(
+                "uses must be a non-empty string"
+            )
+
+        bindings = dict(
+            self.bindings
+        )
+
+        for name, target in bindings.items():
+            if (
+                not isinstance(name, str)
+                or not name
+                or not isinstance(target, str)
+                or not target
+            ):
+                raise ValueError(
+                    "resource bindings require non-empty string names"
+                )
+
+        object.__setattr__(
+            self,
+            "parameters",
+            MappingProxyType(
+                dict(
+                    self.parameters
+                )
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "bindings",
+            MappingProxyType(
+                bindings
+            ),
+        )
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
+class RuntimeApplicationBinding:
+    """Resolved mechanics required to instantiate one managed application."""
+
+    uses: str
+    parameters: Mapping[str, Any]
+    resource_bindings: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.uses, str)
+            or not self.uses.strip()
+        ):
+            raise ValueError(
+                "uses must be a non-empty string"
+            )
+
+        bindings = dict(
+            self.resource_bindings
+        )
+
+        for name, target in bindings.items():
+            if (
+                not isinstance(name, str)
+                or not name
+                or not isinstance(target, str)
+                or not target
+            ):
+                raise ValueError(
+                    "application resource bindings require "
+                    "non-empty string names"
+                )
+
+        object.__setattr__(
+            self,
+            "parameters",
+            MappingProxyType(
+                dict(
+                    self.parameters
+                )
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "resource_bindings",
+            MappingProxyType(
+                bindings
+            ),
+        )
+
+
+@dataclass(
+    frozen=True,
+    slots=True,
+)
 class RuntimeNodeBinding:
     """Resolved mechanical state required to execute one node.
 
@@ -834,7 +943,9 @@ __all__ = [
     "NodeStats",
     "Received",
     "RuntimeAsyncBridge",
+    "RuntimeApplicationBinding",
     "RuntimeEdgeQueue",
     "RuntimeNodeBinding",
     "RuntimeQueueBinding",
+    "RuntimeResourceBinding",
 ]

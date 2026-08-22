@@ -19,6 +19,8 @@ from nodrix.runtime_components import (
     LoadedApplication,
     LoadedResource,
     LoadedSession,
+    runtime_application_binding_from_config,
+    runtime_resource_binding_from_config,
 )
 
 
@@ -306,9 +308,9 @@ def test_integration_contexts_receive_runtime_snapshot(
             name="resource",
             uses="demo.resource",
             instance=resource,
-            config=manifest.resources[
-                "resource"
-            ],
+            binding=runtime_resource_binding_from_config(
+                manifest.resources["resource"]
+            ),
         ),
     }
 
@@ -317,9 +319,9 @@ def test_integration_contexts_receive_runtime_snapshot(
             name="application",
             uses="demo.application",
             instance=application,
-            config=manifest.applications[
-                "application"
-            ],
+            binding=runtime_application_binding_from_config(
+                manifest.applications["application"]
+            ),
         ),
     }
 

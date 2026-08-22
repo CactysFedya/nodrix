@@ -34,7 +34,11 @@ except Exception:  # pragma: no cover
     _NativeBoundedQueue = None
 
 
-from .runtime_components import runtime_node_binding_from_config
+from .runtime_components import (
+    runtime_application_binding_from_config,
+    runtime_node_binding_from_config,
+    runtime_resource_binding_from_config,
+)
 from .runtime_components import (
     EdgeQueue,
     LoadedApplication,
@@ -141,7 +145,9 @@ class RuntimeBuildMixin:
                 name=name,
                 uses=config.uses,
                 instance=instance,
-                config=config,
+                binding=runtime_resource_binding_from_config(
+                    config
+                ),
             )
         for name, config in self.manifest.applications.items():
             resolved_application = provider_for_application(
@@ -177,7 +183,9 @@ class RuntimeBuildMixin:
                 name=name,
                 uses=config.uses,
                 instance=instance,
-                config=config,
+                binding=runtime_application_binding_from_config(
+                    config
+                ),
             )
         for index, link in enumerate(self.manifest.links):
             resolved_link = provider_for_transport(

@@ -89,7 +89,7 @@ class IntegrationRuntimeMixin:
                                 environment=self.execution_environment,
                                 bindings={
                                     binding: self.sessions[session_name].instance
-                                    for binding, session_name in loaded.config.bindings.items()
+                                    for binding, session_name in loaded.binding.bindings.items()
                                 },
                             )
                         )
@@ -153,7 +153,7 @@ class IntegrationRuntimeMixin:
                     environment=self.execution_environment,
                     bindings={
                         binding: self._resource_instance(resource_name)
-                        for binding, resource_name in loaded.config.bindings.items()
+                        for binding, resource_name in loaded.binding.resource_bindings.items()
                     },
                     external_links=tuple(
                         link

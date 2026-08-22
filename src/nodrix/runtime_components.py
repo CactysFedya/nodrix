@@ -33,9 +33,11 @@ from .runtime_primitives import (
     NodeStats,
     Received,
     RuntimeAsyncBridge as _AsyncBridge,
+    RuntimeApplicationBinding,
     RuntimeEdgeQueue,
     RuntimeNodeBinding,
     RuntimeQueueBinding,
+    RuntimeResourceBinding,
 )
 
 
@@ -65,6 +67,30 @@ class EdgeQueue(
             memory_plan,
         )
 
+
+
+def runtime_resource_binding_from_config(
+    config: ProviderResourceConfig,
+) -> RuntimeResourceBinding:
+    """Adapt one Pipeline provider-resource config to runtime mechanics."""
+
+    return RuntimeResourceBinding(
+        uses=config.uses,
+        parameters=config.parameters,
+        bindings=config.bindings,
+    )
+
+
+def runtime_application_binding_from_config(
+    config: ApplicationConfig,
+) -> RuntimeApplicationBinding:
+    """Adapt one Pipeline application config to runtime mechanics."""
+
+    return RuntimeApplicationBinding(
+        uses=config.uses,
+        parameters=config.parameters,
+        resource_bindings=config.bindings,
+    )
 
 
 def runtime_node_binding_from_config(
@@ -190,7 +216,7 @@ class LoadedResource:
     name: str
     uses: str
     instance: Any
-    config: ProviderResourceConfig
+    binding: RuntimeResourceBinding
     opened: bool = False
 
 
@@ -199,7 +225,7 @@ class LoadedApplication:
     name: str
     uses: str
     instance: Any
-    config: ApplicationConfig
+    binding: RuntimeApplicationBinding
     configured: bool = False
     started: bool = False
     completed: bool = False
