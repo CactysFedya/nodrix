@@ -11,8 +11,12 @@ from .manifest import (
 )
 from .native_plugin import NativePluginNode
 from .node import Node, SourceNode
-from .process_host import ProcessNodeProxy, ProcessSourceProxy
+from .process_host import ProcessNodeProxy
 from .runtime_node_loading import load_runtime_node
+from .runtime_node_isolation import (
+    RuntimeProcessIsolationSettings,
+    materialize_runtime_node_isolation,
+)
 from .runtime_node_materialization import (
     validate_runtime_node_materialization,
     validate_runtime_node_parameters,
@@ -159,6 +163,38 @@ class RuntimeBuildMixin:
                 location=f"edges[{index}].transport.parameters",
             )
         sample_capacity = self.manifest.runtime.telemetry_samples
+
+        shared_pool = (
+            self.manifest.runtime.memory
+            .shared_pool
+        )
+
+        process_output_pool = (
+            self.manifest.runtime.memory
+            .process_output_pool
+        )
+
+        process_isolation_settings = (
+            RuntimeProcessIsolationSettings(
+                base_dir=self.base_dir,
+                input_block_size=(
+                    shared_pool.block_size
+                ),
+                input_capacity=(
+                    shared_pool.capacity
+                ),
+                output_block_size=(
+                    process_output_pool.block_size
+                ),
+                output_capacity=(
+                    process_output_pool.capacity
+                ),
+                threshold=(
+                    shared_pool.threshold
+                ),
+            )
+        )
+
         for name, config in self.manifest.nodes.items():
             binding = (
                 runtime_node_binding_from_config(
@@ -186,39 +222,17 @@ class RuntimeBuildMixin:
                 base_dir=self.base_dir,
             )
 
-            if binding.isolation == "process":
-                original_is_source = isinstance(node, SourceNode)
-                shared = self.manifest.runtime.memory.shared_pool
-                output_shared = self.manifest.runtime.memory.process_output_pool
-                proxy_cls = ProcessSourceProxy if original_is_source else ProcessNodeProxy
-                node = proxy_cls(
+            node = (
+                materialize_runtime_node_isolation(
                     name=name,
-                    uses=binding.uses,
-                    base_dir=self.base_dir,
-                    parameters=dict(
-                        binding.parameters
+                    node=node,
+                    binding=binding,
+                    settings=(
+                        process_isolation_settings
                     ),
-                    input_types=dict(node.input_types),
-                    output_types=dict(node.output_types),
-                    input_memory=dict(getattr(node, "input_memory", {})),
-                    output_memory=dict(getattr(node, "output_memory", {})),
-                    optional_inputs=set(getattr(node, "optional_inputs", frozenset())),
-                    block_size=shared.block_size,
-                    capacity=shared.capacity,
-                    output_block_size=output_shared.block_size,
-                    output_capacity=output_shared.capacity,
-                    threshold=shared.threshold,
-                    failure_policy=binding.failure_policy,
-                    max_restarts=binding.failure_max_restarts,
-                    backoff_ms=binding.failure_backoff_ms,
-                    cpu_affinity=list(
-                        binding.cpu_affinity
-                    ),
-                    device=binding.device,
-                    max_message_bytes=binding.max_message_bytes,
-                    memory_limit_mb=binding.memory_limit_mb,
-                    cpu_limit=binding.cpu_limit,
                 )
+            )
+
             self.nodes[name] = LoadedNode(
                 name=name,
                 node=node,
