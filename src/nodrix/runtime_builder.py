@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import inspect
 from pathlib import Path
 from typing import Any
@@ -13,6 +12,14 @@ from .native_plugin import NativePluginNode
 from .node import Node, SourceNode
 from .process_host import ProcessNodeProxy
 from .runtime_node_loading import load_runtime_node
+from .runtime_edge_materialization import (
+    RuntimeEdgeBinding,
+    RuntimeGraphMemorySettings,
+    materialize_runtime_edge,
+)
+from .runtime_primitives import (
+    RuntimeQueueBinding,
+)
 from .runtime_node_isolation import (
     RuntimeProcessIsolationSettings,
     materialize_runtime_node_isolation,
@@ -27,7 +34,6 @@ from .providers import (
     provider_for_transport,
 )
 from .provider_validation import validate_provider_parameters
-from .memory import MemoryRequirement, plan_memory, requirement_for_port
 from .validation import configured_security_issues
 
 try:
@@ -240,61 +246,68 @@ class RuntimeBuildMixin:
                 stats=NodeStats(sample_capacity),
             )
 
+        graph_memory_settings = (
+            RuntimeGraphMemorySettings(
+                default_domain=(
+                    self.manifest.runtime.memory
+                    .default_domain
+                ),
+                forbid_implicit_copies=(
+                    self.manifest.runtime.memory
+                    .forbid_implicit_copies
+                ),
+            )
+        )
+
         for edge_config in self.manifest.edges:
             if edge_config.transport is not None:
                 continue
-            src_name, src_port = edge_config.source.split(".", 1)
-            dst_name, dst_port = edge_config.target.split(".", 1)
-            if src_name not in self.nodes or dst_name not in self.nodes:
-                raise RuntimeGraphError(f"Edge references unknown node: {edge_config.source} -> {edge_config.target}")
-            source = self.nodes[src_name].node
-            target = self.nodes[dst_name].node
-            if src_port not in source.output_types:
-                raise RuntimeGraphError(f"Unknown output port: {edge_config.source}")
-            if dst_port not in target.input_types:
-                raise RuntimeGraphError(f"Unknown input port: {edge_config.target}")
-            source_type = source.output_types[src_port]
-            target_type = target.input_types[dst_port]
-            if not self._types_compatible(source_type, target_type):
-                raise RuntimeGraphError(
-                    f"Type mismatch {edge_config.source} ({source_type}) -> {edge_config.target} ({target_type})"
-                )
-            if dst_port in self.nodes[dst_name].inputs:
-                raise RuntimeGraphError(f"Input port already connected: {edge_config.target}")
-            source_memory_map = {**dict(getattr(source, "output_memory", {})), **dict(self.nodes[src_name].binding.memory_outputs)}
-            target_memory_map = {**dict(getattr(target, "input_memory", {})), **dict(self.nodes[dst_name].binding.memory_inputs)}
-            source_requirement = requirement_for_port(source_memory_map, src_port)
-            target_requirement = requirement_for_port(target_memory_map, dst_port)
-            if self.nodes[src_name].binding.isolation == "process":
-                source_requirement = MemoryRequirement(("shared",), preferred="shared")
-            if self.nodes[dst_name].binding.isolation == "process":
-                target_requirement = MemoryRequirement(("shared",), preferred="shared")
-            allow_copy = edge_config.memory.allow_copy and not self.manifest.runtime.memory.forbid_implicit_copies
-            forced_memory = edge_config.memory.domain
-            if forced_memory == "auto" and self.manifest.runtime.memory.default_domain != "auto":
-                forced_memory = self.manifest.runtime.memory.default_domain
-            memory_plan = plan_memory(
-                source_requirement, target_requirement, forced=forced_memory, allow_copy=allow_copy
+
+            edge_binding = RuntimeEdgeBinding(
+                queue=RuntimeQueueBinding(
+                    source=edge_config.source,
+                    target=edge_config.target,
+                    capacity=(
+                        edge_config.queue.capacity
+                    ),
+                    policy=(
+                        edge_config.queue.policy
+                    ),
+                ),
+                memory_domain=(
+                    edge_config.memory.domain
+                ),
+                allow_copy=(
+                    edge_config.memory.allow_copy
+                ),
             )
-            if (
-                memory_plan.adapter == "host_copy_to_shared"
-                and self.nodes[dst_name].binding.isolation != "process"
-            ):
-                memory_plan = replace(
-                    memory_plan,
-                    runtime_supported=False,
-                    reason="in-process CPU-to-shared conversion needs an explicit adapter node",
+
+            materialized_edge = (
+                materialize_runtime_edge(
+                    self.nodes,
+                    edge_binding,
+                    graph_memory_settings,
+                    queue_factory=(
+                        lambda _queue_binding, memory_plan, edge_config=edge_config: EdgeQueue(
+                            edge_config,
+                            memory_plan,
+                        )
+                    ),
                 )
-            if not memory_plan.runtime_supported and (not allow_copy or memory_plan.copies):
-                raise RuntimeGraphError(
-                    f"Unsupported memory path {edge_config.source} -> {edge_config.target}: "
-                    f"{memory_plan.reason} ({memory_plan.source} -> {memory_plan.target})"
+            )
+
+            self._memory_plans[
+                (
+                    edge_config.source,
+                    edge_config.target,
                 )
-            self._memory_plans[(edge_config.source, edge_config.target)] = memory_plan
-            edge = EdgeQueue(edge_config, memory_plan)
-            self.edges.append(edge)
-            self.nodes[src_name].outputs[src_port].append(edge)
-            self.nodes[dst_name].inputs[dst_port] = edge
+            ] = (
+                materialized_edge.memory_plan
+            )
+
+            self.edges.append(
+                materialized_edge.edge
+            )
 
         for export in self.manifest.streams.exports:
             src_name, src_port = export.source.split(".", 1)
@@ -335,10 +348,6 @@ class RuntimeBuildMixin:
         ):
             raise RuntimeGraphError("Unified pipeline requires at least one Python SourceNode")
         self._built = True
-
-    @staticmethod
-    def _types_compatible(source: str, target: str) -> bool:
-        return source == target or source == "core.any" or target == "core.any"
 
     def describe(self) -> dict[str, Any]:
         if not self._built:

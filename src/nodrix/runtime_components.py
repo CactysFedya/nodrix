@@ -173,13 +173,13 @@ class LoadedNode:
     binding: RuntimeNodeBinding
     inputs: dict[
         str,
-        EdgeQueue,
+        RuntimeEdgeQueue,
     ] = field(
         default_factory=dict
     )
     outputs: dict[
         str,
-        list[EdgeQueue],
+        list[RuntimeEdgeQueue],
     ] = field(
         default_factory=(
             lambda: defaultdict(
