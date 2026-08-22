@@ -13,7 +13,7 @@ from .native_plugin import NativePluginNode
 from .node import Node, SourceNode
 from .node_docs import validate_parameters
 from .process_host import ProcessNodeProxy, ProcessSourceProxy
-from .registry import load_node_class
+from .runtime_node_loading import load_runtime_node
 from .providers import (
     load_provider_session,
     provider_for_session,
@@ -21,7 +21,6 @@ from .providers import (
 )
 from .provider_validation import validate_provider_parameters
 from .memory import MemoryRequirement, plan_memory, requirement_for_port
-from .packages import resolve_package_node
 from .validation import configured_security_issues
 
 try:
@@ -48,25 +47,18 @@ from .runtime_provider_materialization import (
 
 
 class RuntimeBuildMixin:
-    def _load_node(self, uses: str, parameters: dict[str, Any]) -> Node:
-        uses = resolve_package_node(uses)
-        if uses.startswith("native:"):
-            body = uses.removeprefix("native:")
-            if "#" not in body:
-                raise RuntimeGraphError("Native plugin must use native:/path/library#node-type")
-            library, node_type = body.rsplit("#", 1)
-            path = Path(library).expanduser()
-            if not path.is_absolute():
-                path = (self.base_dir / path).resolve()
-            if not path.exists():
-                raise RuntimeGraphError(f"Native plugin library does not exist: {path}")
-            return NativePluginNode(path, node_type, parameters)
-        if uses.startswith("native."):
-            raise RuntimeGraphError(
-                "Built-in native.* nodes run in engine: native. Use a native:/path/plugin#type reference inside a unified Python/C++ graph."
-            )
-        cls = load_node_class(uses, base_dir=self.base_dir)
-        return cls(parameters)
+    def _load_node(
+        self,
+        uses: str,
+        parameters: dict[str, Any],
+    ) -> Node:
+        """Compatibility wrapper around backend-neutral node loading."""
+
+        return load_runtime_node(
+            uses,
+            parameters,
+            base_dir=self.base_dir,
+        )
 
     def build(self) -> None:
         self._lock_execution_environment()
