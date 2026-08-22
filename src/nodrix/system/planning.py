@@ -36,6 +36,11 @@ from .execution_context import (
     child_system_execution_context,
     system_execution_context_digest,
 )
+from .connection_execution import (
+    ConnectionExecutionResolutionError,
+    ResolvedConnectionExecutionPolicy,
+    resolve_connection_execution_defaults,
+)
 from .node_execution import (
     NodeExecutionResolutionError,
     ResolvedNodeExecutionPolicy,
@@ -246,6 +251,9 @@ class PlannedConnection(SystemBaseModel):
     type_id: str | None = None
     placement_target: str
     backend: str
+    execution: ResolvedConnectionExecutionPolicy = Field(
+        default_factory=ResolvedConnectionExecutionPolicy
+    )
     metadata: Mapping[str, Any] = Field(default_factory=dict)
     extensions: Mapping[str, Any] = Field(default_factory=dict)
 
@@ -1179,6 +1187,27 @@ def plan_system(
 
         planned_connections: list[PlannedConnection] = []
         topo_edges: list[tuple[str, str]] = []
+
+        try:
+            connection_execution = (
+                resolve_connection_execution_defaults(
+                    (
+                        execution_context.edge_defaults
+                        if execution_context is not None
+                        else None
+                    )
+                )
+            )
+        except ConnectionExecutionResolutionError as exc:
+            raise SystemPlanningError(
+                "PLAN415",
+                "execution_context.edge_defaults",
+                (
+                    "invalid canonical Connection "
+                    f"execution defaults: {exc}"
+                ),
+            ) from exc
+
         for connection_index, connection in enumerate(graph.connections):
             source_name, source_port = split_local_endpoint(connection.source)
             target_name, target_port = split_local_endpoint(connection.target)
@@ -1211,6 +1240,7 @@ def plan_system(
                     type_id=type_id,
                     placement_target=source_node.target,
                     backend=source_node.backend,
+                    execution=connection_execution,
                     metadata=dict(connection.metadata),
                     extensions=dict(connection.extensions),
                 )

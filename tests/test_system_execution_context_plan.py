@@ -249,3 +249,113 @@ def test_no_context_preserves_legacy_plan_digest_shape() -> None:
         system_plan_digest(plan)
         == legacy_digest
     )
+
+
+
+def _connected_system_for_edge_policy():
+    from nodrix.system import (
+        Connection,
+        Graph,
+        NodeInstance,
+        SystemModel,
+    )
+
+    return SystemModel(
+        name="edge-policy-plan",
+        graphs=(
+            Graph(
+                name="main",
+                nodes=(
+                    NodeInstance(
+                        name="source",
+                        uses="demo.source",
+                    ),
+                    NodeInstance(
+                        name="sink",
+                        uses="demo.sink",
+                    ),
+                ),
+                connections=(
+                    Connection(
+                        **{
+                            "from": "source.output",
+                            "to": "sink.input",
+                        }
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def test_edge_defaults_are_resolved_into_planned_connections() -> None:
+    plan = plan_system(
+        _connected_system_for_edge_policy(),
+        execution_context=_context(
+            config_file="mid360s.yaml",
+        ),
+    )
+
+    connection = (
+        plan.graphs[0]
+        .connections[0]
+    )
+
+    assert (
+        connection.execution
+        .queue.capacity
+        == 1
+    )
+
+    assert (
+        connection.execution
+        .queue.policy
+        == "latest"
+    )
+
+    assert (
+        connection.execution
+        .memory.domain
+        == "auto"
+    )
+
+    assert (
+        connection.execution
+        .memory.allow_copy
+        is True
+    )
+
+
+def test_missing_execution_context_uses_canonical_connection_policy() -> None:
+    plan = plan_system(
+        _connected_system_for_edge_policy()
+    )
+
+    connection = (
+        plan.graphs[0]
+        .connections[0]
+    )
+
+    assert (
+        connection.execution
+        .queue.capacity
+        == 8
+    )
+
+    assert (
+        connection.execution
+        .queue.policy
+        == "block"
+    )
+
+    assert (
+        connection.execution
+        .memory.domain
+        == "auto"
+    )
+
+    assert (
+        connection.execution
+        .memory.allow_copy
+        is True
+    )
