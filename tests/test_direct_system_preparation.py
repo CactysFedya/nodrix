@@ -34,6 +34,7 @@ def _context():
         applications=(
             application_a,
         ),
+        nodes=(),
     )
 
 

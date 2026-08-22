@@ -13,12 +13,13 @@ No resource/application lifecycle method is invoked here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
 from ..runtime_components import (
     LoadedApplication,
+    LoadedNode,
     LoadedResource,
 )
 from .backend import (
@@ -27,6 +28,10 @@ from .backend import (
 )
 from .direct_environment import (
     DirectExecutionEnvironment,
+)
+from .direct_node_preparation import (
+    DirectNodePreparationError,
+    materialize_direct_node,
 )
 from .direct_materialization import (
     DirectRuntimeMaterialization,
@@ -62,6 +67,13 @@ class DirectPreparedRuntime:
         | None
     ) = None
 
+    nodes: Mapping[
+        str,
+        LoadedNode,
+    ] = field(
+        default_factory=dict
+    )
+
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
@@ -83,6 +95,16 @@ class DirectPreparedRuntime:
             ),
         )
 
+        object.__setattr__(
+            self,
+            "nodes",
+            MappingProxyType(
+                dict(
+                    self.nodes
+                )
+            ),
+        )
+
     @property
     def context(self) -> BackendContext:
         return self.materialization.context
@@ -96,11 +118,29 @@ def prepare_direct_execution(
         | None
     ) = None,
 ) -> PreparedExecution:
-    """Prepare resources and applications directly from BackendContext."""
+    """Prepare providers and in-process nodes directly from BackendContext."""
 
     materialization = materialize_direct_context(
         context
     )
+
+    planned_nodes = tuple(
+        context.nodes
+    )
+
+    if (
+        planned_nodes
+        and environment is None
+    ):
+        raise DirectNodePreparationError(
+            planned_nodes[0].id,
+            (
+                "direct node preparation requires "
+                "a backend-owned "
+                "DirectExecutionEnvironment"
+            ),
+        )
+
 
     resources: dict[
         str,
@@ -126,11 +166,26 @@ def prepare_direct_execution(
             planned
         )
 
+    nodes: dict[
+        str,
+        LoadedNode,
+    ] = {}
+
+    if environment is not None:
+        for planned in planned_nodes:
+            nodes[
+                planned.id
+            ] = materialize_direct_node(
+                planned,
+                environment=environment,
+            )
+
     payload = DirectPreparedRuntime(
         materialization=materialization,
         resources=resources,
         applications=applications,
         environment=environment,
+        nodes=nodes,
     )
 
     return PreparedExecution(

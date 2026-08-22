@@ -160,6 +160,7 @@ def test_direct_preparation_preserves_backend_environment(
         backend="local",
         resources=(),
         applications=(),
+        nodes=(),
     )
 
     materialization = SimpleNamespace(
@@ -213,6 +214,7 @@ def test_provider_only_direct_preparation_does_not_invent_environment(
         backend="local",
         resources=(),
         applications=(),
+        nodes=(),
     )
 
     materialization = SimpleNamespace(
