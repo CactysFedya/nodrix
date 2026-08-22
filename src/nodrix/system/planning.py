@@ -36,6 +36,12 @@ from .execution_context import (
     child_system_execution_context,
     system_execution_context_digest,
 )
+from .node_execution import (
+    NodeExecutionResolutionError,
+    ResolvedNodeExecutionPolicy,
+    merge_node_parameters,
+    resolve_node_execution_defaults,
+)
 
 
 SYSTEM_EXECUTION_PLAN_SCHEMA = "nodrix.system-execution-plan/v1"
@@ -225,6 +231,9 @@ class PlannedNode(SystemBaseModel):
     inputs: Mapping[str, str] = Field(default_factory=dict)
     outputs: Mapping[str, str] = Field(default_factory=dict)
     optional_inputs: tuple[str, ...] = ()
+    execution: ResolvedNodeExecutionPolicy = Field(
+        default_factory=ResolvedNodeExecutionPolicy
+    )
     metadata: Mapping[str, Any] = Field(default_factory=dict)
     extensions: Mapping[str, Any] = Field(default_factory=dict)
 
@@ -1097,6 +1106,43 @@ def plan_system(
                 node.uses,
                 catalog=catalog,
             )
+
+            raw_node_defaults = (
+                execution_context
+                .node_defaults
+                .get(node.uses)
+                if execution_context is not None
+                else None
+            )
+
+            try:
+                (
+                    default_parameters,
+                    execution_policy,
+                ) = resolve_node_execution_defaults(
+                    raw_node_defaults
+                )
+            except NodeExecutionResolutionError as exc:
+                default_path = (
+                    "execution_context."
+                    f"node_defaults[{node.uses!r}]"
+                )
+                path = (
+                    f"{default_path}.{exc.path}"
+                    if exc.path
+                    else default_path
+                )
+                raise SystemPlanningError(
+                    "PLAN414",
+                    path,
+                    exc.message,
+                ) from exc
+
+            node_parameters = merge_node_parameters(
+                default_parameters,
+                node.parameters,
+            )
+
             planned = PlannedNode(
                 ordinal=node_index,
                 id=f"{graph.name}/{node.name}",
@@ -1108,13 +1154,14 @@ def plan_system(
                 parameters=resolved_parameters(
                     SystemParameterTargetKind.NODE,
                     node.name,
-                    node.parameters,
+                    node_parameters,
                     scope=graph.name,
                 ),
                 resources=dict(node.resources),
                 inputs=inputs,
                 outputs=outputs,
                 optional_inputs=optional_inputs,
+                execution=execution_policy,
                 metadata=dict(node.metadata),
                 extensions=dict(node.extensions),
             )
