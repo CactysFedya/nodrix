@@ -17,6 +17,9 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
+from ..runtime_graph_validation import (
+    validate_runtime_graph,
+)
 from ..runtime_primitives import (
     RuntimeEdgeQueue,
 )
@@ -218,6 +221,10 @@ def prepare_direct_execution(
         materialization,
         nodes,
         mechanics,
+    )
+
+    validate_runtime_graph(
+        nodes
     )
 
     payload = DirectPreparedRuntime(

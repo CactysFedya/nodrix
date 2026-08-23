@@ -12,6 +12,9 @@ from .native_plugin import NativePluginNode
 from .node import Node, SourceNode
 from .process_host import ProcessNodeProxy
 from .runtime_node_loading import load_runtime_node
+from .runtime_graph_validation import (
+    validate_runtime_graph,
+)
 from .runtime_edge_materialization import (
     RuntimeEdgeBinding,
     RuntimeGraphMemorySettings,
@@ -338,11 +341,9 @@ class RuntimeBuildMixin:
                     f"Recording references unknown output: {reference!r}"
                 )
 
-        for name, loaded in self.nodes.items():
-            optional = set(getattr(loaded.node, "optional_inputs", ()))
-            missing = sorted(set(loaded.node.input_types) - optional - set(loaded.inputs))
-            if missing:
-                raise RuntimeGraphError(f"Node {name!r} has unconnected inputs: {missing}")
+        validate_runtime_graph(
+            self.nodes
+        )
         if self.nodes and not any(
             isinstance(item.node, SourceNode) for item in self.nodes.values()
         ):

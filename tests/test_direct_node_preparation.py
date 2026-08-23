@@ -401,7 +401,13 @@ def test_direct_preparation_materializes_nodes_by_canonical_id(
         ),
     )
 
-    sentinel = object()
+    sentinel = SimpleNamespace(
+        node=SimpleNamespace(
+            input_types={},
+            optional_inputs=(),
+        ),
+        inputs={},
+    )
 
     calls = []
 
