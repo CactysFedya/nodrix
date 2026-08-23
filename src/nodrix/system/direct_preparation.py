@@ -17,6 +17,9 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
+from ..runtime_primitives import (
+    RuntimeEdgeQueue,
+)
 from ..runtime_components import (
     LoadedApplication,
     LoadedNode,
@@ -32,6 +35,9 @@ from .direct_environment import (
 from .direct_node_preparation import (
     DirectNodePreparationError,
     materialize_direct_node,
+)
+from .direct_graph_preparation import (
+    materialize_direct_edges,
 )
 from .direct_materialization import (
     DirectRuntimeMaterialization,
@@ -84,6 +90,11 @@ class DirectPreparedRuntime:
         default_factory=ResolvedRuntimeMechanics
     )
 
+    edges: tuple[
+        RuntimeEdgeQueue,
+        ...,
+    ] = ()
+
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
@@ -112,6 +123,14 @@ class DirectPreparedRuntime:
                 dict(
                     self.nodes
                 )
+            ),
+        )
+
+        object.__setattr__(
+            self,
+            "edges",
+            tuple(
+                self.edges
             ),
         )
 
@@ -195,6 +214,12 @@ def prepare_direct_execution(
                 mechanics=mechanics,
             )
 
+    edges = materialize_direct_edges(
+        materialization,
+        nodes,
+        mechanics,
+    )
+
     payload = DirectPreparedRuntime(
         materialization=materialization,
         resources=resources,
@@ -202,6 +227,7 @@ def prepare_direct_execution(
         environment=environment,
         nodes=nodes,
         mechanics=mechanics,
+        edges=edges,
     )
 
     return PreparedExecution(

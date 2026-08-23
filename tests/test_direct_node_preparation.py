@@ -352,6 +352,8 @@ def test_direct_preparation_requires_environment_when_nodes_exist(
         lambda value: (
             SimpleNamespace(
                 context=value,
+                nodes_by_graph={},
+                connections_by_graph={},
             )
         ),
     )
@@ -393,6 +395,8 @@ def test_direct_preparation_materializes_nodes_by_canonical_id(
         lambda value: (
             SimpleNamespace(
                 context=value,
+                nodes_by_graph={},
+                connections_by_graph={},
             )
         ),
     )
@@ -473,6 +477,8 @@ def test_direct_prepared_nodes_mapping_is_immutable(
     materialization = (
         SimpleNamespace(
             context=context,
+            nodes_by_graph={},
+            connections_by_graph={},
         )
     )
 

@@ -374,6 +374,8 @@ def test_direct_preparation_preserves_resolved_runtime_mechanics(
         lambda value: (
             SimpleNamespace(
                 context=value,
+                nodes_by_graph={},
+                connections_by_graph={},
             )
         ),
     )

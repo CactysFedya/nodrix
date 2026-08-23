@@ -46,6 +46,8 @@ def test_prepare_direct_execution_materializes_provider_state(
 
     direct_materialization = SimpleNamespace(
         context=context,
+        nodes_by_graph={},
+        connections_by_graph={},
     )
 
     calls = []
@@ -189,6 +191,8 @@ def test_direct_prepared_runtime_indexes_are_immutable():
 
     materialization = SimpleNamespace(
         context=context,
+        nodes_by_graph={},
+        connections_by_graph={},
     )
 
     payload = preparation.DirectPreparedRuntime(
@@ -223,6 +227,8 @@ def test_direct_preparation_does_not_run_provider_lifecycle(
 
     materialization = SimpleNamespace(
         context=context,
+        nodes_by_graph={},
+        connections_by_graph={},
     )
 
     class ProviderProbe:

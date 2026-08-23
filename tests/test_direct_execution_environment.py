@@ -166,6 +166,8 @@ def test_direct_preparation_preserves_backend_environment(
 
     materialization = SimpleNamespace(
         context=context,
+        nodes_by_graph={},
+        connections_by_graph={},
     )
 
     monkeypatch.setattr(
@@ -221,6 +223,8 @@ def test_provider_only_direct_preparation_does_not_invent_environment(
 
     materialization = SimpleNamespace(
         context=context,
+        nodes_by_graph={},
+        connections_by_graph={},
     )
 
     monkeypatch.setattr(
