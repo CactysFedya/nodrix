@@ -1,153 +1,134 @@
-# Plyctl 2.3.0 beta 1
+# Nodrix / Plyctl
 
-[![PyPI](https://img.shields.io/pypi/v/plyctl.svg)](https://pypi.org/project/plyctl/)
-[![Python](https://img.shields.io/pypi/pyversions/plyctl.svg)](https://pypi.org/project/plyctl/)
-[![CI](https://github.com/CactysFedya/nodrix/actions/workflows/ci.yml/badge.svg)](https://github.com/CactysFedya/nodrix/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+<p align="center">
+  <strong>English</strong> · <a href="docs/README.ru.md">Русский</a>
+</p>
 
-<!-- plyctl-2.3.0b1-stabilization -->
-> **Beta status.** `2.3.0b1` stabilizes workspace/operations behavior,
-> local Python node loading, release metadata, and bilingual documentation.
-> The FAST-LIVO2 semantic-mapping vertical slice is hardware-tested but remains
-> experimental until non-empty semantic output and map-file persistence are
-> qualified. See [the current release notes](docs/releases/2.3.0b1.md) and
-> [the product principles](docs/PRINCIPLES.md).
+<p align="center">
+  <a href="https://pypi.org/project/plyctl/"><img alt="PyPI" src="https://img.shields.io/pypi/v/plyctl.svg"></a>
+  <a href="https://www.python.org/"><img alt="Python" src="https://img.shields.io/pypi/pyversions/plyctl.svg"></a>
+  <a href="https://github.com/CactysFedya/nodrix/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/CactysFedya/nodrix/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+</p>
 
+**Nodrix** is an experimental execution platform for describing and running heterogeneous real-time systems as one explicit, reproducible system model.
 
-Plyctl is the Pipeline OS for real-time systems. It composes Python, C++, ROS 2,
-processes, devices, and transports in one typed YAML graph, preserves zero-copy
-paths where the memory domain permits, and makes every copy, drop, restart,
-queue, and network export observable.
+The public Python distribution and primary CLI are currently named **Plyctl**. The repository keeps the `nodrix` import/CLI and compatibility contracts throughout the 2.x line.
 
+The project is aimed at systems where Python, C++, ROS 2, native processes, devices, transports, and edge hardware need to work together without hiding execution decisions behind application-specific glue code.
 
-## Plyctl 2.3 beta stabilization highlights
+## At a glance
 
-This release introduces the `plyctl` product, Python package, CLI, manifest API,
-and independently installable integration packages. The previous `nodrix`
-Python import, CLI, provider entry point, and `nodrix.dev/v1`/`v2` YAML values
-remain supported throughout 2.x. Native ABI symbols, `.ndrx` recordings,
-`nodrix://` stream URIs, and on-disk compatibility names are intentionally
-unchanged.
+- **Current release:** `2.8.0`.
+- **Languages:** Python 3.11+ and C++20.
+- **Model:** typed YAML graph with nodes, resources, applications and transported edges.
+- **Runtime:** local/native execution, process isolation, bounded queues and explicit lifecycle/health.
+- **Integrations:** modular ROS 2 and spatial/mapping packages rather than ROS-specific core logic.
+- **Observability:** runs, metrics, logs, errors, artifacts and execution diagnostics.
+- **Platforms:** Linux x86-64/ARM64, macOS Apple Silicon and Windows x86-64 release targets.
+- **Edge validation:** Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy hardware smoke is part of the release evidence.
+
+## Why this project exists
+
+A real robotics or computer-vision application is rarely just one algorithm:
+
+```text
+sensor driver -> preprocessing -> inference -> tracking -> mapping -> output
+       |              |              |            |          |
+      ROS 2          C++          Python        native      network
+```
+
+Traditional projects often encode this topology in launch scripts, shell scripts, implicit process rules and framework-specific configuration.
+
+Nodrix/Plyctl moves those decisions into an explicit executable system description:
+
+```text
+System description
+       |
+       v
+ validation + resolution
+       |
+       v
+ execution plan
+       |
+       v
+ runtime / backend
+       |
+       +--> Python nodes
+       +--> C++ / native plugins
+       +--> managed applications
+       +--> ROS 2 integrations
+       +--> local / network transports
+       |
+       v
+ run state + metrics + logs + artifacts
+```
+
+The goal is not to replace ROS 2, inference frameworks or algorithms. The goal is to provide one execution model around them.
+
+## Core ideas
+
+### One explicit system model
+
+The YAML description captures what runs, how components are connected and which resources or transports they require.
 
 ```yaml
 applications:
-  driver:
+  lidar_driver:
     uses: ros2.launch
     bindings: {session: ros}
     package: example_driver
     launch_file: driver.launch.py
-nodes: {}
+
+nodes:
+  mapping:
+    uses: ./nodes/mapping.py:MappingNode
+
 edges:
-  - from: driver.points
+  - from: lidar_driver.points
     to: mapping.points
     transport:
       uses: ros2.topic
-      parameters: {topic: /points, message_type: sensor_msgs/msg/PointCloud2}
+      parameters:
+        topic: /points
+        message_type: sensor_msgs/msg/PointCloud2
 ```
 
-Compact provider parameters stay available as shown above. Canonical resolved
-YAML nests them under `parameters`. Old `use` and top-level `links` remain
-readable in 2.x and can be rewritten with `plyctl migrate`.
+### Runtime decisions stay visible
 
-## ROS 2 as packages, not a fork
+The runtime is designed around explicit contracts for:
 
-```bash
-pip install plyctl plyctl-spatial plyctl-ros2 plyctl-spatial-ros2
-plyctl init my-robot --template ros2
-plyctl validate my-robot/pipeline.yaml
-plyctl run my-robot/pipeline.yaml
-```
+- queue capacity and backpressure;
+- copies and memory domains;
+- process isolation;
+- lifecycle and health;
+- retries/restarts and failure handling;
+- local versus exported network paths;
+- run artifacts and diagnostics.
 
-The YAML structure is the same as for every other Plyctl pipeline. ROS 2 adds
-provider-owned sessions, applications, nodes, and transports; it does not
-replace the core manifest or require a separate runtime. Existing ROS 2 YAML
-with `apiVersion: nodrix.dev/v2` continues to load unchanged.
+### Integrations stay modular
 
-## Provider security
+ROS 2, mapping and spatial functionality are packaged as integrations around the core model. This keeps the execution model usable for non-ROS systems as well.
 
-Plyctl 2.1 adds Provider API 1: independently installed providers are
-discovered from signed metadata, checked for API/version/features and trust,
-then imported lazily only when selected. Existing Core, Media, Vision,
-Recording and ROS 2 Node ids continue through a compatibility adapter.
+## Main capabilities
 
-```bash
-plyctl provider list
-plyctl provider verify example.echo
-plyctl doctor --provider ros2
-plyctl doctor --deep --json
-```
-
-Production pipelines verify provider signatures and explicit allowlist
-membership before executing provider import-time code.
-
-The official Vision provider adds a native NCNN production block:
-
-```yaml
-uses: vision.ncnn_detector_native
-model: models/yolo26n_ncnn_model
-imgsz: 320
-threads: 4
-```
-
-Preprocessing, NCNN inference, YOLO decoding, filtering, and NMS execute in
-C++ through Plugin C ABI 2. The previous `vision.ncnn_detector` remains the
-Python reference backend.
-
-Plyctl 2.0 establishes stable Manifest v2, Python SDK and Plugin C ABI 2
-contracts while keeping existing Manifest v1 pipelines readable. It adds
-reusable Fragments, signed offline plugins, production validation, automatic
-recording, OpenTelemetry lifecycle traces, optional ROS 2 adapters, a packaged
-standalone C++ runner, and direct external C ABI plugin execution in
-`engine: native`.
-
-```bash
-plyctl migrate pipeline.yaml --to v2
-plyctl validate pipeline.v2.yaml --production
-plyctl run pipeline.v2.yaml --production
-```
-
-Multi-rate detection and tracking remain available without duplicating stale
-work:
-
-```text
-source 30 FPS ─┬─ latest frame → detector ~10 FPS ─┐
-               └─ every frame → realtime tracker ──┤
-                                                   └─ tracks at source rate
-```
-
-```bash
-plyctl init camera_app --template vision
-cd camera_app
-plyctl inspect
-plyctl run
-plyctl top
-```
-
-`vision.realtime_bytetrack` predicts on every source frame, applies each
-detection once, and replays delayed measurements through bounded state history.
-Native C++20 IoU association is used by the production block. Encoder and NCNN
-selection are hardware-first and always expose the selected backend and any
-fallback.
-
-## Core model
-
-```text
-Pipeline manifest
-       ↓ validate / lock
-Executable typed graph
-       ↓
-Node → Port → Edge → Node
-       ├─ in-process zero-copy
-       ├─ shared-memory process isolation
-       ├─ device-memory contracts
-       └─ named LAN streams
-```
-
-No detector, tracker, camera, or fixed stage is mandatory. A graph can be `Capture → Inference → Output`, `Source → Sink`, a branched media graph, LiDAR processing, audio, or custom typed data.
+- Python SDK and CLI;
+- native C++20 runner and Plugin C ABI 2;
+- typed node/port/edge graph execution;
+- bounded queues and reusable buffer pools;
+- shared-memory process isolation;
+- CPU/device-memory contracts and DLPack interoperability;
+- named local/LAN streams with explicit export;
+- recording and reproducible run artifacts;
+- lifecycle, health and resource telemetry;
+- provider discovery and verification;
+- ROS 2 adapters and managed applications;
+- planner/diagnose/explain tooling;
+- benchmark and run comparison workflows.
 
 ## Install
 
-Install the core runtime and CLI from PyPI:
+For the CLI:
 
 ```bash
 python3 -m venv .venv
@@ -156,66 +137,43 @@ pip install plyctl
 plyctl --version
 ```
 
-Optional media and viewer dependencies:
+The compatibility command remains available in the 2.x line:
 
 ```bash
-pip install "plyctl[viewer]"
-pip install "plyctl[media]"
-pip install "plyctl[vision,media,viewer]"
+nodrix --version
 ```
 
-Use `plyctl[vision-ncnn]` only when the Python NCNN reference backend is also
-required. Official wheels already contain the native NCNN provider.
-
-### Raspberry Pi and offline source installation
-
-Plyctl 2.1.0 can be built without PyPI build isolation when the runtime dependencies are already present:
+Optional integrations are installed separately, for example:
 
 ```bash
-python3 -m pip install . --no-build-isolation --no-deps
+pip install plyctl-spatial plyctl-ros2 plyctl-spatial-ros2
 ```
 
-Use `scripts/install_offline.sh` for a dependency preflight. See [docs/OFFLINE_INSTALL_RU.md](docs/OFFLINE_INSTALL_RU.md).
-
-For an isolated CLI installation:
-
-```bash
-pipx install plyctl
-```
-
-Release wheels cover Linux x86-64, Linux ARM64, macOS Apple Silicon, and
-Windows x86-64. Each wheel contains the native extensions and
-`nodrix/bin/nodrix-native-runner` plus the native NCNN provider; production
-execution does not compile code on first use. When no compatible wheel exists,
-building the included source distribution requires CMake, a C++20 compiler,
-and Python development headers. Native NCNN source builds are opt-in as
-documented in [the 2.1 release notes](docs/RELEASE_2.1.0.md).
-
-## Empty project and templates
+## Minimal workflow
 
 ```bash
 plyctl init my_project
-```
-
-This creates an intentionally empty project skeleton. Runnable examples are explicit:
-
-```bash
-plyctl init camera_app --template vision
-plyctl init media_app --template media
-plyctl init device_app --template device
-plyctl init package_app --template package
-```
-
-## Run and reproduce
-
-```bash
 cd my_project
+
 plyctl validate --strict
 plyctl lock
 plyctl run --locked
+
+plyctl status
+plyctl health
 ```
 
-Every run receives its own artifact directory:
+For inspection and diagnostics:
+
+```bash
+plyctl plan pipeline.yaml
+plyctl diagnose runs/RUN-ID
+plyctl explain edge source.output:sink.input --pipeline pipeline.yaml
+```
+
+## Reproducible runs
+
+Each run owns an artifact directory rather than relying only on console output:
 
 ```text
 .nodrix/runs/<run-id>/
@@ -232,206 +190,29 @@ Every run receives its own artifact directory:
 └── summary.json
 ```
 
-## Stable Python API
+This makes execution state, parameters and results easier to inspect and compare after the process has finished.
 
-```python
-from plyctl import Message, Node
+## ROS 2 and edge use
 
-class Multiply(Node):
-    input_types = {"input": "core.object"}
-    output_types = {"output": "core.object"}
+Nodrix/Plyctl does not fork or replace ROS 2. ROS 2 remains the middleware/data plane where appropriate, while the system model describes how ROS applications and non-ROS components belong to the same executable system.
 
-    def process(self, inputs):
-        message = inputs["input"]
-        return {
-            "output": message.with_updates(
-                payload={"value": message.payload["value"] * 2}
-            )
-        }
-```
+The current release metadata includes Raspberry Pi 5 / Ubuntu 24.04 / ROS 2 Jazzy hardware smoke. Semantic mapping remains explicitly experimental rather than being presented as production-ready.
 
-Plyctl 2.x preserves the public `Node`, `SourceNode`, `SinkNode`, `Message`,
-`NodeContext`, manifest models, buffer, memory, error, and lifecycle contracts.
-Existing nodes that override `open`, `flush`, and `close` continue to work
-through lifecycle adapters.
+## Project status
 
-## Lifecycle and health
+`2.8.0` is alpha software. The repository contains production-oriented contracts and qualification tooling, but not every declared hardware memory path is implemented by the core itself.
 
-Lifecycle states:
+Important limitations are documented rather than hidden behind automatic fallback. Hardware-specific acceleration, zero-copy paths and ROS 2 message behavior depend on the selected integration/backend and platform.
 
-```text
-created → configuring → ready → starting → running → stopping → stopped
-                                      ├→ degraded / restarting
-                                      └→ failed
-```
+## Documentation
 
-```bash
-plyctl status
-plyctl health
-plyctl health --watch
-```
+- [Documentation site](https://cactysfedya.github.io/nodrix/)
+- [Changelog](CHANGELOG.md)
+- [Platform capabilities](docs/PLATFORM_CAPABILITIES.md)
+- [Benchmarking](docs/BENCHMARKING.md)
+- [Provider API](docs/PROVIDER_API.md)
+- [Contributing](CONTRIBUTING.md)
 
-Process-isolated nodes can use watchdog recovery:
+## License
 
-```yaml
-nodes:
-  detector:
-    uses: ./nodes/detector.py:Detector
-    execution:
-      isolation: process
-    failure:
-      policy: restart_node
-      max_restarts: 5
-    health:
-      timeout_ms: 2000
-      on_timeout: restart
-```
-
-## Local packages
-
-```bash
-plyctl init my_nodes --template package
-cd my_nodes
-plyctl package build .
-plyctl package install dist/my-nodes-1.0.0.ndpkg
-```
-
-Use an installed node by stable package reference:
-
-```yaml
-nodes:
-  processor:
-    uses: my-nodes/passthrough
-```
-
-`.ndpkg` installation verifies the complete member set and SHA-256 checksums
-before extraction, rejects traversal/symlinks/platform filename collisions and
-decompression bombs, and atomically installs immutable versions. Packages may
-be signed and verified with an Ed25519 key. The local registry is offline by
-design; Plyctl does not silently download or execute marketplace code.
-
-## Secure named streams
-
-Only explicitly exported ports become network streams. Local edges remain direct and do not pay network or serialization overhead.
-
-```yaml
-streams:
-  bind_host: 0.0.0.0
-  max_message_bytes: 67108864
-  tls:
-    enabled: true
-    certificate: secrets/server.crt
-    private_key: secrets/server.key
-  exports:
-    - name: /camera/front/h264
-      from: encoder.encoded
-      queue:
-        capacity: 1
-        policy: latest
-      access:
-        mode: token
-        token_env: NODRIX_CAMERA_TOKEN
-        allow_ips: ["192.168.1.0/24"]
-```
-
-```bash
-export NODRIX_STREAM_TOKEN=...
-plyctl stream echo /camera/front/h264 --ca secrets/ca.crt
-plyctl-viewer /camera/front/h264
-```
-
-TLS endpoints are advertised as `nodrix+tls://`. Certificate verification is
-mandatory; mutual TLS is available with `client_ca` and
-`require_client_certificate`.
-
-## Production validation
-
-```bash
-plyctl validate --strict
-plyctl run --production
-plyctl inspect --memory
-plyctl plan pipeline.yaml
-plyctl diagnose runs/RUN-ID
-plyctl explain edge source.output:sink.input --pipeline pipeline.yaml
-```
-
-The validator checks graph cycles, port/type compatibility, memory transfers, unsupported copies, open LAN streams, stream backpressure, watchdog/isolation conflicts, resource configuration, and native plugin loading.
-
-The production gate additionally requires Manifest v2 and explicit health
-timeouts, rejects fallback-permitting acceleration, relative model paths,
-unverified required plugins, unencrypted/open LAN exports, and planned payload
-copies. Direct native libraries additionally require an absolute path inside
-`security.native_plugin_allowlist` and cannot be world-writable.
-
-`plyctl optimize` writes separate benchmark variants and a decision report. It
-never edits or applies the production pipeline.
-
-## Metrics, resources and runs
-
-```bash
-# runtime.metrics.listen can be stored in pipeline.yaml
-plyctl run
-plyctl top
-plyctl metrics --format prometheus
-plyctl runs list
-plyctl runs show <run-id>
-plyctl runs compare <run-a> <run-b>
-```
-
-## Plugin C ABI 2.0
-
-```bash
-plyctl native inspect ./libdetector.so
-```
-
-Plugin C ABI 2.0 uses numeric ABI `131072`, opaque handles and function
-tables. C++ standard-library objects and exceptions never cross the shared
-library boundary. Correlation strings and host/device memory ownership have
-explicit lifetime rules. Incompatible plugins are rejected before node
-creation. External source, processor, and sink plugins can execute entirely in
-the standalone runner:
-
-```yaml
-runtime:
-  engine: native
-nodes:
-  detector:
-    uses: native:/opt/nodrix/plugins/libdetector.so#vision.detector
-```
-
-## Main capabilities carried into 1.0
-
-- Python/C++ unified graph executor;
-- native bounded queues and reusable buffer pools;
-- shared-memory process isolation with zero-copy input/output paths;
-- stable CPU, shared, DMA-BUF, CUDA, ROCm, Vulkan, OpenCL, Metal, NPU,
-  DLPack, and external-memory contracts;
-- DLPack interoperability;
-- `.ndrx` universal record/play;
-- FFmpeg Media Pack and H.264/H.265 named streams;
-- low-latency `plyctl-viewer`;
-- typed custom-message generation for Python and C++;
-- local/LAN stream discovery without a mandatory agent.
-
-## Honest limitations
-
-Memory-domain contracts and planning are stable, but a declared domain is not
-a built-in hardware backend. Validated paths are listed in
-[docs/PLATFORM_CAPABILITIES.md](docs/PLATFORM_CAPABILITIES.md). The reference
-FFmpeg source and overlay still use host BGR frames; complete V4L2 DMA-BUF
-capture and CUDA IPC operators remain hardware-specific plugins. ROS 2
-adapters are generic Python adapters, not a claim of loaned-message image or
-PointCloud2 zero-copy. `placement` is a deployment contract, not a central
-scheduler.
-
-See [docs/BLOCKS.md](docs/BLOCKS.md),
-[docs/COMPACT_MANIFEST.md](docs/COMPACT_MANIFEST.md),
-[docs/PROFILES.md](docs/PROFILES.md),
-[docs/RESOURCE_TELEMETRY.md](docs/RESOURCE_TELEMETRY.md),
-[docs/BENCHMARKING.md](docs/BENCHMARKING.md),
-[docs/MULTI_RATE_VISION.md](docs/MULTI_RATE_VISION.md),
-[docs/PROVIDER_API.md](docs/PROVIDER_API.md),
-[docs/RELEASE_2.1.0.md](docs/RELEASE_2.1.0.md),
-[docs/RELEASE_2.0.0.md](docs/RELEASE_2.0.0.md),
-[CONTRIBUTING.md](CONTRIBUTING.md), and
-[PUBLISHING_RU.md](PUBLISHING_RU.md).
+Apache License 2.0. See [LICENSE](LICENSE).
